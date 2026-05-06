@@ -282,8 +282,8 @@ end
 
 local function ShortVersion(version)
     version = tostring(version or "")
-    local major, minor, patch = version:match("^(%d+)%.(%d+)%.(%d+)")
-    if major and minor and patch == "0" then
+    local major, minor, patch, suffix = version:match("^(%d+)%.(%d+)%.(%d+)(.*)$")
+    if major and minor and patch == "0" and suffix == "" then
         return major .. "." .. minor
     end
     return version
