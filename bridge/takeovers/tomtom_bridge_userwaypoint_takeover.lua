@@ -53,6 +53,30 @@ local function IsWoWProUserWaypointStack()
     return stack:find(WOWPRO_STACK_MATCH, 1, true) ~= nil
 end
 
+local function ResolveExternalWaypointSourceFromStack()
+    if type(debugstack) ~= "function" or type(NS.NormalizeExternalWaypointSource) ~= "function" then
+        return nil
+    end
+
+    local ok, stack = pcall(debugstack, 4, 18, 18)
+    if not ok or type(stack) ~= "string" or stack == "" then
+        return nil
+    end
+    return NS.NormalizeExternalWaypointSource(stack)
+end
+
+local function IsRareScannerMouseDownPublish(sourceAddon)
+    return sourceAddon == "rarescanner"
+        and type(NS.IsRareScannerClickPhaseDown) == "function"
+        and NS.IsRareScannerClickPhaseDown()
+end
+
+local function IsRecentExternalTomTomDuplicate(sourceAddon, mapID, x, y)
+    return type(sourceAddon) == "string"
+        and type(NS.IsRecentExternalTomTomWaypointAdoption) == "function"
+        and NS.IsRecentExternalTomTomWaypointAdoption(sourceAddon, mapID, x, y)
+end
+
 local function ArmUserWaypointSupertrackClearSuppression(mapID, x, y)
     local takeoverState = state.bridgeTakeover or {}
     state.bridgeTakeover = takeoverState
@@ -171,7 +195,7 @@ local function ClearBlizzardUserWaypointBackedManual(clearReason)
     return ClearActiveManualDestination(visibilityState, clearReason or "system")
 end
 
-local function HandleExplicitBlizzardUserWaypointSet(mapID, x, y)
+local function HandleExplicitBlizzardUserWaypointSet(mapID, x, y, sourceAddon)
     if IsWoWProUserWaypointStack() then
         if type(NS.IsRoutingEnabled) == "function" and not NS.IsRoutingEnabled() then
             return false
@@ -192,6 +216,10 @@ local function HandleExplicitBlizzardUserWaypointSet(mapID, x, y)
         or (type(NS.GetGenericAddonBlizzardTakeoverContext) == "function"
             and NS.GetGenericAddonBlizzardTakeoverContext("user_waypoint"))
         or nil
+    if type(sourceAddon) == "string" then
+        context = type(context) == "table" and context or {}
+        context.sourceAddon = sourceAddon
+    end
     local title = type(context) == "table" and context.title or nil
     title = title or ResolveMapTitle(mapID, x, y)
     local meta = BuildBlizzardUserWaypointMeta(mapID, x, y, context)
@@ -255,7 +283,11 @@ function NS.InstallUserWaypointHooks()
             if type(NS.IsInternalUserWaypointMutation) == "function" and NS.IsInternalUserWaypointMutation() then
                 return originalSetUserWaypoint(uiMapPoint, ...)
             end
-            if not NS.IsExplicitBlizzardUserWaypointCall() then
+            local sourceAddon = ResolveExternalWaypointSourceFromStack()
+            if IsRareScannerMouseDownPublish(sourceAddon) then
+                return originalSetUserWaypoint(uiMapPoint, ...)
+            end
+            if not sourceAddon and not NS.IsExplicitBlizzardUserWaypointCall() then
                 return originalSetUserWaypoint(uiMapPoint, ...)
             end
 
@@ -264,7 +296,12 @@ function NS.InstallUserWaypointHooks()
                 return originalSetUserWaypoint(uiMapPoint, ...)
             end
 
-            local adopted = NS.SafeCall(HandleExplicitBlizzardUserWaypointSet, mapID, x, y)
+            if IsRecentExternalTomTomDuplicate(sourceAddon, mapID, x, y) then
+                NS.Log("External Blizzard waypoint duplicate ignored", tostring(sourceAddon), tostring(Signature(mapID, x, y)))
+                return originalSetUserWaypoint(uiMapPoint, ...)
+            end
+
+            local adopted = NS.SafeCall(HandleExplicitBlizzardUserWaypointSet, mapID, x, y, sourceAddon)
             if adopted then
                 if IsManualClickAskMode() then
                     ArmUserWaypointSupertrackClearSuppression(mapID, x, y)

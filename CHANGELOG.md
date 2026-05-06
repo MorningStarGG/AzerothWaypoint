@@ -1,5 +1,15 @@
 # Changelog
 
+## 4.0.0c
+- **Routing fixes**
+  - Restricted third-party POIButton supertrack calls to the addon adoption controls instead of treating them as native Blizzard POI clicks.
+  - Fixed task-zone and world-quest-style supertracked POIs being cleared as missing when they are valid map tasks but not normal quest-log entries.
+  - Added task-zone and world-quest-style cleanup for explicit completion, full progress, and expiry signals.
+  - Fixed RareScanner popup waypoint clicks being adopted more than once from a single click by treating the mouse-down publish as a transient duplicate while preserving normal clear and removal behavior.
+  - Fixed registered external waypoint sources that publish both TomTom and Blizzard user-waypoint signals in one action, such as SilverDragon, from creating duplicate AWP route adoptions.
+  - Preserved named TomTom waypoint titles when a matching nameless Blizzard user-waypoint signal follows in the same external-addon publish burst.
+  - Fixed arrival auto-clear for transient external TomTom waypoint routes by validating active transient queues as well as persistent manual queues.
+
 ## 4.0.0b
 - **Routing and combat visibility**
   - Added Hide During Combat with options for Disabled, TomTom + Travel Button, World Overlay, and Both.

@@ -2,6 +2,20 @@ local NS = _G.AzerothWaypointNS
 
 NS.CHANGELOG_DATA = {
     {
+        version = "4.0.0c",
+        sections = {
+            { title = "Routing fixes", entries = {
+                { text = "Restricted third-party POIButton supertrack calls to the addon adoption controls instead of treating them as native Blizzard POI clicks.", level = 1 },
+                { text = "Fixed task-zone and world-quest-style supertracked POIs being cleared as missing when they are valid map tasks but not normal quest-log entries.", level = 1 },
+                { text = "Added task-zone and world-quest-style cleanup for explicit completion, full progress, and expiry signals.", level = 1 },
+                { text = "Fixed RareScanner popup waypoint clicks being adopted more than once from a single click by treating the mouse-down publish as a transient duplicate while preserving normal clear and removal behavior.", level = 1 },
+                { text = "Fixed registered external waypoint sources that publish both TomTom and Blizzard user-waypoint signals in one action, such as SilverDragon, from creating duplicate AWP route adoptions.", level = 1 },
+                { text = "Preserved named TomTom waypoint titles when a matching nameless Blizzard user-waypoint signal follows in the same external-addon publish burst.", level = 1 },
+                { text = "Fixed arrival auto-clear for transient external TomTom waypoint routes by validating active transient queues as well as persistent manual queues.", level = 1 },
+            }},
+        },
+    },
+    {
         version = "4.0.0b",
         sections = {
             { title = "Routing and combat visibility", entries = {

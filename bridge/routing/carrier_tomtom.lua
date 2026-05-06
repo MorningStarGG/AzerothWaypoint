@@ -19,6 +19,11 @@ local pendingRemovedTomTomFlush = false
 
 local EXTERNAL_SOURCE_STACK_START = 3
 local EXTERNAL_SOURCE_STACK_COUNT = 12
+local EXTERNAL_DUAL_PUBLISH_DEDUPE_SECONDS = 0.5
+
+local function GetTimeSafe()
+    return type(GetTime) == "function" and GetTime() or 0
+end
 
 local function GetTomTomAddon()
     return rawget(_G, "TomTom")
@@ -107,6 +112,49 @@ local function ResolveExternalTomTomSourceAddon(opts, uid, allowDebugStack)
         or NormalizeSourceAddonCandidate(type(opts) == "table" and opts.awpSourceAddon or nil)
         or ResolveExplicitTomTomSourceAddon(opts, uid)
         or (allowDebugStack and ResolveDebugStackTomTomSourceAddon() or nil)
+end
+
+local function BuildExternalPublishKey(sourceAddon, mapID, x, y)
+    sourceAddon = NormalizeSourceAddonCandidate(sourceAddon)
+    if not sourceAddon
+        or type(mapID) ~= "number"
+        or type(x) ~= "number"
+        or type(y) ~= "number"
+        or type(Signature) ~= "function"
+    then
+        return nil
+    end
+    return sourceAddon .. "\031" .. Signature(mapID, x, y), sourceAddon
+end
+
+function NS.NoteExternalTomTomWaypointAdoption(sourceAddon, mapID, x, y, title)
+    local key, normalizedSource = BuildExternalPublishKey(sourceAddon, mapID, x, y)
+    if not key then
+        return false
+    end
+
+    state.routing.recentExternalTomTomAdoption = {
+        key = key,
+        sourceAddon = normalizedSource,
+        title = title,
+        expiresAt = GetTimeSafe() + EXTERNAL_DUAL_PUBLISH_DEDUPE_SECONDS,
+    }
+    return true
+end
+
+function NS.IsRecentExternalTomTomWaypointAdoption(sourceAddon, mapID, x, y)
+    local recent = type(state.routing) == "table" and state.routing.recentExternalTomTomAdoption or nil
+    if type(recent) ~= "table" then
+        return false
+    end
+
+    if GetTimeSafe() > (tonumber(recent.expiresAt) or 0) then
+        state.routing.recentExternalTomTomAdoption = nil
+        return false
+    end
+
+    local key = BuildExternalPublishKey(sourceAddon, mapID, x, y)
+    return key ~= nil and recent.key == key
 end
 
 local function GetLocalizedMapNameForWaypoint(mapID)
@@ -781,7 +829,24 @@ local function RouteExternalTomTomWaypoint(mapID, x, y, title, uid)
     if sourceType ~= "transient_source" and type(NS.ClearManualQueues) == "function" then
         NS.ClearManualQueues()
     end
-    return NS.AdoptExternalWaypoint(mapID, x, y, title, meta)
+    local adopted = NS.AdoptExternalWaypoint(mapID, x, y, title, meta)
+    if adopted then
+        NS.NoteExternalTomTomWaypointAdoption(
+            type(uid) == "table" and uid.awpSourceAddon or nil,
+            mapID,
+            x,
+            y,
+            title
+        )
+    end
+    return adopted
+end
+
+local function IsRareScannerMouseDownPublish(sourceAddon)
+    sourceAddon = NormalizeSourceAddonCandidate(sourceAddon)
+    return sourceAddon == "rarescanner"
+        and type(NS.IsRareScannerClickPhaseDown) == "function"
+        and NS.IsRareScannerClickPhaseDown()
 end
 
 local function ReassertCarrierArrow()
@@ -843,6 +908,11 @@ function NS.InstallExternalTomTomHooks()
             or nil
 
         if divert then
+            local sourceAddon = type(uid) == "table" and uid.awpSourceAddon
+                or ResolveExternalTomTomSourceAddon(effectiveOpts, uid, false)
+            if IsRareScannerMouseDownPublish(sourceAddon) then
+                return uid
+            end
             if type(opts) == "table" and opts.from == "TomTom/way" then
                 QueueSlashWaypointBatch(mapID, x, y, effectiveTitle)
             else

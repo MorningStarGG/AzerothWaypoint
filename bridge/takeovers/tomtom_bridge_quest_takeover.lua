@@ -28,6 +28,10 @@ local QUEST_TAKEOVER_SOURCE_SUPERTRACK = "supertrack"
 local QUEST_TAKEOVER_SOURCE_WATCH = "watch"
 local QUEST_TAKEOVER_SOURCE_QUEST_OFFER = "quest_offer"
 local BLIZZARD_VIGNETTE_KIND = "vignette"
+local TASK_QUEST_RESOLUTION_SOURCES = {
+    preferred_task_map = true,
+    task_zone = true,
+}
 
 -- ============================================================
 -- Forward declarations
@@ -98,7 +102,8 @@ local function FindQuestDestinationOnMap(mapID, questID, listProvider)
     if type(mapID) ~= "number" or mapID <= 0 or type(listProvider) ~= "function" then
         return nil
     end
-    local entries = listProvider(mapID)
+    local ok, entries = pcall(listProvider, mapID)
+    if not ok then return nil end
     if type(entries) ~= "table" then return nil end
     for _, info in ipairs(entries) do
         if type(info) == "table" and info.questID == questID then
@@ -109,6 +114,23 @@ local function FindQuestDestinationOnMap(mapID, questID, listProvider)
         end
     end
     return nil
+end
+
+local function FindTaskQuestDestinationOnMap(mapID, questID)
+    if type(mapID) ~= "number" or mapID <= 0 or type(C_TaskQuest) ~= "table" then
+        return nil
+    end
+
+    if type(C_TaskQuest.GetQuestLocation) == "function" then
+        local ok, x, y = pcall(C_TaskQuest.GetQuestLocation, questID, mapID)
+        if ok and type(x) == "number" and type(y) == "number" then
+            return mapID, x, y
+        end
+    end
+
+    if type(C_TaskQuest.GetQuestsOnMap) == "function" then
+        return FindQuestDestinationOnMap(mapID, questID, C_TaskQuest.GetQuestsOnMap)
+    end
 end
 
 local function ResolveQuestLineOfferTitle(info)
@@ -195,7 +217,7 @@ ResolveQuestDestination = function(questID, preferredMapID)
             if type(rMapID) == "number" then return rMapID, rX, rY, "preferred_quest_map" end
         end
         if type(C_TaskQuest) == "table" then
-            rMapID, rX, rY = FindQuestDestinationOnMap(preferredMapID, questID, C_TaskQuest.GetQuestsOnMap)
+            rMapID, rX, rY = FindTaskQuestDestinationOnMap(preferredMapID, questID)
             if type(rMapID) == "number" then return rMapID, rX, rY, "preferred_task_map" end
         end
     end
@@ -211,8 +233,9 @@ ResolveQuestDestination = function(questID, preferredMapID)
     end
 
     if type(C_TaskQuest) == "table" and type(C_TaskQuest.GetQuestZoneID) == "function" then
-        local taskMapID = C_TaskQuest.GetQuestZoneID(questID)
-        local rMapID, rX, rY = FindQuestDestinationOnMap(taskMapID, questID, C_TaskQuest.GetQuestsOnMap)
+        local ok, taskMapID = pcall(C_TaskQuest.GetQuestZoneID, questID)
+        taskMapID = ok and taskMapID or nil
+        local rMapID, rX, rY = FindTaskQuestDestinationOnMap(taskMapID, questID)
         if type(rMapID) == "number" then return rMapID, rX, rY, "task_zone" end
     end
 
@@ -283,6 +306,18 @@ local function GetQuestBackedManualSourceAddon(destination)
     if sourceAddon and sourceAddon ~= "" then return sourceAddon end
 end
 
+local function GetQuestBackedManualResolutionSource(destination)
+    if type(destination) ~= "table" then return nil end
+    local identity = type(destination.identity) == "table" and destination.identity or nil
+    local resolutionSource = type(identity) == "table" and identity.questResolutionSource or nil
+    if type(resolutionSource) == "string" and resolutionSource ~= "" then return resolutionSource end
+
+    local meta = type(destination.meta) == "table" and destination.meta or nil
+    local metaIdentity = type(meta) == "table" and type(meta.identity) == "table" and meta.identity or nil
+    resolutionSource = type(metaIdentity) == "table" and metaIdentity.questResolutionSource or nil
+    if type(resolutionSource) == "string" and resolutionSource ~= "" then return resolutionSource end
+end
+
 local function GetQuestBackedManualPreferredMapID(destination)
     if type(destination) ~= "table" then return nil end
     local identity = type(destination.identity) == "table" and destination.identity or nil
@@ -338,6 +373,56 @@ local function IsQuestStillActive(questID)
         if ok and type(logIndex) == "number" then return logIndex > 0 end
     end
     return false
+end
+
+local function IsTaskQuestResolutionSource(resolutionSource)
+    return type(resolutionSource) == "string"
+        and TASK_QUEST_RESOLUTION_SOURCES[resolutionSource] == true
+        or false
+end
+
+local function IsQuestFlaggedCompleted(questID)
+    if type(C_QuestLog) ~= "table" or type(C_QuestLog.IsQuestFlaggedCompleted) ~= "function" then
+        return false
+    end
+    local ok, completed = pcall(C_QuestLog.IsQuestFlaggedCompleted, questID)
+    return ok and completed == true or false
+end
+
+local function GetTaskQuestProgress(questID)
+    if type(C_TaskQuest) ~= "table" or type(C_TaskQuest.GetQuestProgressBarInfo) ~= "function" then
+        return nil
+    end
+    local ok, progress = pcall(C_TaskQuest.GetQuestProgressBarInfo, questID)
+    if ok and type(progress) == "number" then
+        return progress
+    end
+end
+
+local function GetTaskQuestTimeLeftSeconds(questID)
+    if type(C_TaskQuest) ~= "table" or type(C_TaskQuest.GetQuestTimeLeftSeconds) ~= "function" then
+        return nil
+    end
+    local ok, seconds = pcall(C_TaskQuest.GetQuestTimeLeftSeconds, questID)
+    if ok and type(seconds) == "number" then
+        return seconds
+    end
+end
+
+local function GetTaskQuestTerminalClearReason(questID)
+    if IsQuestFlaggedCompleted(questID) then
+        return "task_completed"
+    end
+
+    local progress = GetTaskQuestProgress(questID)
+    if type(progress) == "number" and progress >= 100 then
+        return "task_completed"
+    end
+
+    local seconds = GetTaskQuestTimeLeftSeconds(questID)
+    if type(seconds) == "number" and seconds <= 0 then
+        return "task_expired"
+    end
 end
 
 local function IsSuperTrackedQuestAutoClearEnabled()
@@ -404,10 +489,11 @@ end
 -- Metadata builder
 -- ============================================================
 
-local function BuildQuestTakeoverMeta(questID, destMapID, destX, destY, takeoverSource, sourceAddon)
+local function BuildQuestTakeoverMeta(questID, destMapID, destX, destY, takeoverSource, sourceAddon, resolutionSource)
     local normalizedSource = NormalizeQuestTakeoverSource(takeoverSource)
     return NS.BuildRouteMeta(NS.BuildQuestIdentity(questID, destMapID, destX, destY, {
         questSource = normalizedSource,
+        questResolutionSource = type(resolutionSource) == "string" and resolutionSource or nil,
         sig = type(Signature) == "function" and Signature(destMapID, destX, destY) or nil,
     }), {
         manualQuestID = questID,
@@ -455,7 +541,7 @@ AdoptQuestAsManual = function(questID, takeoverSource, explicit, preferredMapID,
 
     NS.RequestManualRoute(
         destMapID, destX, destY, title,
-        BuildQuestTakeoverMeta(desiredQuestID, destMapID, destX, destY, desiredSource, sourceAddon),
+        BuildQuestTakeoverMeta(desiredQuestID, destMapID, destX, destY, desiredSource, sourceAddon, resolutionSource),
         isExplicit and { clickContext = { source = desiredSource, explicit = true } } or nil
     )
     NS.Log(
@@ -730,36 +816,51 @@ local function RefreshActiveQuestBackedManual(eventName, eventQuestID)
     local sourceAddon = GetQuestBackedManualSourceAddon(destination)
     local isExternalQuestPin = sourceAddon ~= nil
     local isActiveQuest = IsQuestStillActive(activeQuestID)
+    local storedResolutionSource = GetQuestBackedManualResolutionSource(destination)
+    local destMapID, destX, destY, resolutionSource = ResolveQuestDestination(activeQuestID, preferredMapID)
+    local hasResolvedDestination = type(destMapID) == "number"
+        and type(destX) == "number"
+        and type(destY) == "number"
+    local isTaskQuestDestination = hasResolvedDestination and IsTaskQuestResolutionSource(resolutionSource)
+    local isTaskQuestBackedManual = isTaskQuestDestination or IsTaskQuestResolutionSource(storedResolutionSource)
 
     if activeSource ~= QUEST_TAKEOVER_SOURCE_QUEST_OFFER and eventName == "QUEST_TURNED_IN" then
         return ClearQuestBackedManualForReason("quest_turned_in")
     end
 
+    if isTaskQuestBackedManual then
+        local terminalClearReason = GetTaskQuestTerminalClearReason(activeQuestID)
+        if terminalClearReason then
+            return ClearQuestBackedManualForReason(terminalClearReason)
+        end
+    end
+
     if activeSource ~= QUEST_TAKEOVER_SOURCE_QUEST_OFFER
         and eventName == "QUEST_REMOVED"
         and not isExternalQuestPin
+        and not isTaskQuestBackedManual
     then
         return ClearQuestBackedManualForReason("quest_removed")
     end
 
-    if activeSource == QUEST_TAKEOVER_SOURCE_WATCH and not isActiveQuest then
+    if activeSource == QUEST_TAKEOVER_SOURCE_WATCH and not isActiveQuest and not isTaskQuestBackedManual then
         return ClearQuestBackedManualForReason("quest_missing")
     end
 
     if activeSource ~= QUEST_TAKEOVER_SOURCE_QUEST_OFFER
         and not isExternalQuestPin
         and not isActiveQuest
+        and not isTaskQuestBackedManual
     then
         return ClearQuestBackedManualForReason("quest_missing")
     end
 
-    local destMapID, destX, destY = ResolveQuestDestination(activeQuestID, preferredMapID)
-    if not (type(destMapID) == "number" and type(destX) == "number" and type(destY) == "number") then
+    if not hasResolvedDestination then
         if activeSource ~= QUEST_TAKEOVER_SOURCE_QUEST_OFFER then
-            if eventName == "QUEST_REMOVED" then
+            if eventName == "QUEST_REMOVED" and not isTaskQuestBackedManual then
                 return ClearQuestBackedManualForReason("quest_removed")
             end
-            if not isExternalQuestPin then
+            if not isExternalQuestPin and not isTaskQuestBackedManual then
                 return ClearQuestBackedManualForReason("quest_unresolved")
             end
         end

@@ -32,7 +32,6 @@ local BLIZZARD_USER_WAYPOINT_STACK_MATCHES = {
 }
 local EXPLICIT_USER_SUPERTRACK_STACK_MATCHES = {
     "blizzard_poibutton\\poibutton.lua",
-    "\\poibutton\\poibutton.lua",
     "blizzard_sharedmapdataproviders\\sharedmappoitemplates.lua",
     "blizzard_sharedmapdataproviders\\worldquestdataprovider.lua",
     "worldquesttab\\templates.lua",

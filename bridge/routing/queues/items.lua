@@ -393,7 +393,7 @@ function NS.IsActiveManualQueueItem(record)
     if type(record) ~= "table" or type(record.queueID) ~= "string" then
         return false
     end
-    local queue = Queue.GetManualQueueByID(record.queueID)
+    local queue = Queue.GetQueueByID(record.queueID)
     if type(queue) ~= "table" or type(queue.items) ~= "table" then
         return false
     end

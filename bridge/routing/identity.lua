@@ -158,6 +158,7 @@ function NS.BuildQuestIdentity(questID, mapID, x, y, opts)
     local identity = BaseIdentity("quest", "blizzard", mapID, x, y, opts)
     identity.questID = questID
     identity.questSource = TrimString(opts.questSource)
+    identity.questResolutionSource = TrimString(opts.questResolutionSource)
     return identity
 end
 
