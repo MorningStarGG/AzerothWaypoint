@@ -94,6 +94,39 @@ local function IsCombatLockdownActive()
     return type(InCombatLockdown) == "function" and InCombatLockdown() == true
 end
 
+local function IsProtectedFrame(frame)
+    return type(frame) == "table"
+        and type(frame.IsProtected) == "function"
+        and frame:IsProtected() == true
+end
+
+local function ApplyTomTomRootSize(button, width, height)
+    if not button then return false end
+    width = tonumber(width)
+    height = tonumber(height)
+    if not width or not height then return false end
+
+    local currentWidth = type(button.GetWidth) == "function" and button:GetWidth() or nil
+    local currentHeight = type(button.GetHeight) == "function" and button:GetHeight() or nil
+    local widthChanged = type(currentWidth) ~= "number" or math.abs(currentWidth - width) > 0.01
+    local heightChanged = type(currentHeight) ~= "number" or math.abs(currentHeight - height) > 0.01
+    if not widthChanged and not heightChanged then
+        return true
+    end
+
+    if IsCombatLockdownActive() and IsProtectedFrame(button) then
+        return false
+    end
+
+    if widthChanged and type(button.SetWidth) == "function" then
+        button:SetWidth(width)
+    end
+    if heightChanged and type(button.SetHeight) == "function" then
+        button:SetHeight(height)
+    end
+    return true
+end
+
 local function NormalizeKey(key)
     if type(key) ~= "string" then return nil end
     key = key:lower():gsub("%s+", "_")
@@ -588,8 +621,7 @@ local function ApplyNavigationLayout(theme, button)
     local scale = GetThemeScale() * ((def and def.baseScale) or 1)
     EnsureThemeTextures(theme, button)
 
-    button:SetWidth((def.navWidth or 56) * scale)
-    button:SetHeight((def.navHeight or 42) * scale)
+    ApplyTomTomRootSize(button, (def.navWidth or 56) * scale, (def.navHeight or 42) * scale)
 
     local arrow = theme.arrowTexture
     arrow:ClearAllPoints()
@@ -654,8 +686,7 @@ local function ApplyArrivalLayout(theme, button)
     local scale = GetThemeScale() * ((def and (def.arrivalBaseScale or def.baseScale)) or 1)
     EnsureThemeTextures(theme, button)
 
-    button:SetWidth((def.navWidth or 56) * scale)
-    button:SetHeight((def.navHeight or 42) * scale)
+    ApplyTomTomRootSize(button, (def.navWidth or 56) * scale, (def.navHeight or 42) * scale)
 
     local arrow = theme.arrowTexture
     local aw = (def.arrivalWidth or def.navWidth or 48) * scale

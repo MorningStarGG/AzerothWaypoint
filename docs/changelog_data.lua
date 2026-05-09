@@ -2,6 +2,26 @@ local NS = _G.AzerothWaypointNS
 
 NS.CHANGELOG_DATA = {
     {
+        version = "4.0.0d",
+        sections = {
+            { title = "TomTom combat visibility", entries = {
+                { text = "Replaced the secure-parent host approach with a root-frame alpha cloak so TomTom's full crazy arrow stack (textures and text) hides together without calling protected hide/show paths.", level = 1 },
+                { text = "Disabled mouse input on the cloaked arrow, skipping the call when the arrow is protected during combat lockdown to avoid blocked-action errors.", level = 1 },
+                { text = "Restored the arrow through TomTom's own `ShowHideCrazyArrow()` path after combat ends.", level = 1 },
+                { text = "Kept `[combat] hide; show` secure visibility scoped to the special travel button only.", level = 1 },
+                { text = "Fixed Hide During Combat's disabled state so it no longer creates or briefly reparents TomTom's arrow into the secure combat visibility host.", level = 1 },
+            }},
+            { title = "TomTom arrow-skin protected-call safety", entries = {
+                { text = "Only resizes TomTom's root arrow frame when dimensions actually change.", level = 1 },
+                { text = "Skips root-size writes only when in combat lockdown AND the arrow frame is protected, so out-of-combat resizes always proceed.", level = 1 },
+            }},
+            { title = "External waypoint adoption", entries = {
+                { text = "Deferred SilverDragon TomTom waypoint adoption to the next frame.", level = 1 },
+                { text = "Deduped matching Blizzard user-waypoint publishes from the same secure click.", level = 1 },
+            }},
+        },
+    },
+    {
         version = "4.0.0c",
         sections = {
             { title = "Routing fixes", entries = {

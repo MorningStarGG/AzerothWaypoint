@@ -4,13 +4,11 @@ local state = NS.State
 
 state.combatVisibility = state.combatVisibility or {
     combatEventActive = false,
-    tomTomVisibilityHost = nil,
-    tomTomVisibilityDriver = false,
-    tomTomOriginalParent = nil,
+    tomTomCloaked = false,
+    tomTomRefreshHooked = false,
 }
 
 local guard = state.combatVisibility
-local TOMTOM_SUPPRESSION_REASON = "combat"
 
 local function IsInCombat()
     if guard.combatEventActive == true then
@@ -20,14 +18,6 @@ local function IsInCombat()
         return true
     end
     return type(UnitAffectingCombat) == "function" and UnitAffectingCombat("player") == true
-end
-
-local function IsCombatLockdownActive()
-    return type(InCombatLockdown) == "function" and InCombatLockdown() == true
-end
-
-local function ShouldAvoidProtectedVisibilityCalls()
-    return guard.combatEventActive == true or IsCombatLockdownActive()
 end
 
 local function ShouldHideTomTomNow()
@@ -57,95 +47,81 @@ local function GetTomTomArrow()
     return tomtom and tomtom.wayframe or nil
 end
 
-local function RestoreTomTomArrowParent()
-    if ShouldAvoidProtectedVisibilityCalls() then
-        return
-    end
-
-    local arrow = GetTomTomArrow()
-    local host = guard.tomTomVisibilityHost
-    if type(arrow) ~= "table" or type(host) ~= "table" then
-        return
-    end
-    if type(arrow.GetParent) ~= "function" or type(arrow.SetParent) ~= "function" then
-        return
-    end
-    if arrow:GetParent() ~= host then
-        guard.tomTomOriginalParent = nil
-        return
-    end
-
-    arrow:SetParent(guard.tomTomOriginalParent or UIParent)
-    guard.tomTomOriginalParent = nil
-end
-
-local function EnsureTomTomVisibilityHost()
+local function CloakTomTomArrow()
     local arrow = GetTomTomArrow()
     if type(arrow) ~= "table" then
-        return nil
+        return
     end
-    if ShouldAvoidProtectedVisibilityCalls() then
-        return guard.tomTomVisibilityHost
+    if type(arrow.SetAlpha) == "function" then
+        arrow:SetAlpha(0)
     end
-    if type(CreateFrame) ~= "function" or type(UIParent) ~= "table" then
-        return nil
-    end
-
-    local host = guard.tomTomVisibilityHost
-    if type(host) ~= "table" then
-        host = CreateFrame("Frame", "AWP_TomTomCombatVisibilityHost", UIParent, "SecureHandlerStateTemplate")
-        host:SetAllPoints(UIParent)
-        host:Show()
-        guard.tomTomVisibilityHost = host
-    end
-
-    if type(arrow.GetParent) == "function"
-        and type(arrow.SetParent) == "function"
-        and arrow:GetParent() ~= host
+    if type(arrow.EnableMouse) == "function"
+        and (not InCombatLockdown()
+            or not (type(arrow.IsProtected) == "function" and arrow:IsProtected()))
     then
-        guard.tomTomOriginalParent = guard.tomTomOriginalParent or arrow:GetParent()
-        arrow:SetParent(host)
+        arrow:EnableMouse(false)
     end
-
-    return host
+    guard.tomTomCloaked = true
 end
 
-local function ApplyTomTomCombatStateDriver()
-    if ShouldAvoidProtectedVisibilityCalls() then
+local function RestoreTomTomArrow()
+    if not guard.tomTomCloaked then
+        return
+    end
+    if IsInCombat() then
         return
     end
 
-    local host = EnsureTomTomVisibilityHost()
-    if type(host) ~= "table"
-        or type(RegisterStateDriver) ~= "function"
-        or type(UnregisterStateDriver) ~= "function"
-    then
+    guard.tomTomCloaked = false
+
+    local tomtom = GetTomTom()
+    if tomtom and type(tomtom.ShowHideCrazyArrow) == "function" then
+        tomtom:ShowHideCrazyArrow()
         return
     end
 
-    local wanted = type(NS.ShouldHideTomTomInCombat) == "function"
-        and NS.ShouldHideTomTomInCombat() == true
-
-    if wanted and not guard.tomTomVisibilityDriver then
-        RegisterStateDriver(host, "visibility", "[combat] hide; show")
-        guard.tomTomVisibilityDriver = true
-    elseif not wanted and guard.tomTomVisibilityDriver then
-        UnregisterStateDriver(host, "visibility")
-        guard.tomTomVisibilityDriver = false
-        host:Show()
-        RestoreTomTomArrowParent()
-    elseif not wanted then
-        host:Show()
-        RestoreTomTomArrowParent()
+    local arrow = GetTomTomArrow()
+    if type(arrow) ~= "table" then
+        return
     end
+    if type(arrow.SetAlpha) == "function" then
+        arrow:SetAlpha(1)
+    end
+    if type(arrow.EnableMouse) == "function" then
+        arrow:EnableMouse(true)
+    end
+end
+
+local function ApplyTomTomCombatCloak()
+    if ShouldHideTomTomNow() then
+        CloakTomTomArrow()
+    else
+        RestoreTomTomArrow()
+    end
+end
+
+local function HookTomTomCombatCloak()
+    if guard.tomTomRefreshHooked then
+        return
+    end
+
+    local tomtom = GetTomTom()
+    if not tomtom or type(tomtom.ShowHideCrazyArrow) ~= "function" or type(hooksecurefunc) ~= "function" then
+        return
+    end
+
+    guard.tomTomRefreshHooked = true
+    hooksecurefunc(tomtom, "ShowHideCrazyArrow", function()
+        if ShouldHideTomTomNow() then
+            CloakTomTomArrow()
+        end
+    end)
 end
 
 local function ApplyTomTomGuard()
-    ApplyTomTomCombatStateDriver()
+    HookTomTomCombatCloak()
     local hidden = ShouldHideTomTomNow()
-    if type(NS.SuppressTomTomArrowDisplay) == "function" then
-        NS.SuppressTomTomArrowDisplay(hidden, TOMTOM_SUPPRESSION_REASON)
-    end
+    ApplyTomTomCombatCloak()
     if type(NS.ApplySpecialActionCombatVisibility) == "function" then
         NS.ApplySpecialActionCombatVisibility(hidden)
     end

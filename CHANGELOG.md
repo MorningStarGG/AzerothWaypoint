@@ -1,5 +1,21 @@
 # Changelog
 
+## 4.0.0d
+- **TomTom combat visibility**
+  - Replaced the secure-parent host approach with a root-frame alpha cloak so TomTom's full crazy arrow stack (textures and text) hides together without calling protected hide/show paths.
+  - Disabled mouse input on the cloaked arrow, skipping the call when the arrow is protected during combat lockdown to avoid blocked-action errors.
+  - Restored the arrow through TomTom's own `ShowHideCrazyArrow()` path after combat ends.
+  - Kept `[combat] hide; show` secure visibility scoped to the special travel button only.
+  - Fixed Hide During Combat's disabled state so it no longer creates or briefly reparents TomTom's arrow into the secure combat visibility host.
+
+- **TomTom arrow-skin protected-call safety**
+  - Only resizes TomTom's root arrow frame when dimensions actually change.
+  - Skips root-size writes only when in combat lockdown AND the arrow frame is protected, so out-of-combat resizes always proceed.
+
+- **External waypoint adoption**
+  - Deferred SilverDragon TomTom waypoint adoption to the next frame.
+  - Deduped matching Blizzard user-waypoint publishes from the same secure click.
+
 ## 4.0.0c
 - **Routing fixes**
   - Restricted third-party POIButton supertrack calls to the addon adoption controls instead of treating them as native Blizzard POI clicks.
