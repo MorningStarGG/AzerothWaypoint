@@ -12,6 +12,7 @@ local RefreshViewerChromeMode = Options.RefreshViewerChromeMode
 state.commands = state.commands or {
     registered = false,
     whoWhereFallbackHooked = false,
+    whoWhereSearchAdoptionSerial = 0,
     vendorFallbackToken = 0,
     pendingVendorFallback = nil,
 }

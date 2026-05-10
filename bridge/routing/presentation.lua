@@ -22,6 +22,7 @@ local presentationScratch = {
     carrierSig = nil,
     overlaySig = nil,
     sourceAddon = nil,
+    sourceAddonIconKey = nil,
     guideProvider = nil,
     searchKind = nil,
     manualQuestID = nil,
@@ -311,7 +312,8 @@ local function BuildFinalContentSig(snapshot)
     _finalContentSigParts[8] = tostring(snapshot.sourceAddon or "")
     _finalContentSigParts[9] = tostring(snapshot.iconHintTextureIndex or "")
     _finalContentSigParts[10] = tostring(snapshot.guideProvider or "")
-    return table.concat(_finalContentSigParts, "\031", 1, 10)
+    _finalContentSigParts[11] = tostring(snapshot.sourceAddonIconKey or "")
+    return table.concat(_finalContentSigParts, "\031", 1, 11)
 end
 
 local function ResolveSnapshotContentSig(snapshot)
@@ -330,7 +332,8 @@ local function ResolveSnapshotContentSig(snapshot)
     _contentSigParts[13] = tostring(snapshot.semanticTravelType or "")
     _contentSigParts[14] = tostring(snapshot.pinpointSubtext or snapshot.overlaySubtext or "")
     _contentSigParts[15] = tostring(snapshot.guideProvider or "")
-    return table.concat(_contentSigParts, "\031", 1, 15)
+    _contentSigParts[16] = tostring(snapshot.sourceAddonIconKey or "")
+    return table.concat(_contentSigParts, "\031", 1, 16)
 end
 
 local function FillMapPinFields(snapshot, mapPinInfo)
@@ -504,6 +507,7 @@ function NS.ResolvePresentation()
     presentationScratch.carrierSig = carrier.sig
     presentationScratch.overlaySig = nil
     presentationScratch.sourceAddon = NormalizeSourceAddon(authority.sourceAddon)
+    presentationScratch.sourceAddonIconKey = TrimString(authority.sourceAddonIconKey)
     presentationScratch.guideProvider = carrier.source == "guide" and ResolveGuideProvider(authority) or nil
     presentationScratch.searchKind = type(searchKind) == "string" and searchKind or nil
     presentationScratch.manualQuestID = type(manualQuestID) == "number" and manualQuestID > 0 and manualQuestID or nil

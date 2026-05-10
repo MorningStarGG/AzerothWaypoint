@@ -671,12 +671,26 @@ local function ResolveSourceAddonIconSpec(contentSnapshot)
         return nil
     end
 
+    local hintKey = type(contentSnapshot.sourceAddonIconKey) == "string"
+        and contentSnapshot.sourceAddonIconKey ~= ""
+        and contentSnapshot.sourceAddonIconKey
+        or nil
+    if hintKey then
+        local hintedSpec = ICON_SPECS[hintKey]
+        if type(hintedSpec) == "table" then
+            return hintedSpec
+        end
+    end
+
     local sourceAddon = type(contentSnapshot.sourceAddon) == "string" and contentSnapshot.sourceAddon or nil
     if sourceAddon == "silverdragon" then
         return ICON_SPECS.silverdragon
     end
     if sourceAddon == "rarescanner" then
         return ICON_SPECS.rarescanner
+    end
+    if sourceAddon == "handynotes" then
+        return ICON_SPECS.handynotes
     end
 
     return nil

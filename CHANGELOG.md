@@ -1,5 +1,24 @@
 # Changelog
 
+## 4.0.1
+- **HandyNotes integration**
+  - Added HandyNotes — including plugins such as MapNotes and HandyNotes_TheWarWithin — as a recognized transient external waypoint source, adopted from both `C_Map.SetUserWaypoint` and `TomTom:AddWaypoint` calls.
+  - Added a generic HandyNotes icon spec used for adopted HandyNotes waypoints.
+  - MapNotes pin clicks now reverse-map the HandyNotes plugin iterator's icon path back to one of the existing AWP icons (portal, travel, inn, dungeon, delve, profession trainer, vendor, mailbox, banker, auctioneer, barber, transmog, stable master) so the overlay reflects the kind of pin that was clicked.
+  - Snapshotted the open tooltip's first line at right-click time so the "Set map waypoint" option in HandyNotes plugins preserves the node label even though `C_Map.SetUserWaypoint` itself accepts no title. Captured text is cleaned of inline icon textures, atlas escapes, and hyperlink wrappers before use.
+  - Plugin OnClick hooks are installed at login and on every subsequent `RegisterPluginDB`, so HandyNotes plugins that load after AWP are still covered.
+  - Per-source icon resolver framework: `RegisterExternalWaypointSource` accepts an optional `resolveIconKey(mapID, x, y)` callback, and `NS.ResolveExternalWaypointIconKey` threads the result through meta, authority record (and persistence), queue items, and presentation snapshot — including both content signatures — so per-call icon overrides cache-bust correctly.
+  - `/awp waytype` now also prints `sourceAddonIconKey=` so the resolved icon hint can be inspected.
+
+- **Routing fixes**
+  - Fallback route outcomes are no longer treated as failures even for strict route records, so the fallback completes instead of rolling back the pending manual queue transaction.
+
+- **WhoWhere search adoption**
+  - Zygor WhoWhere search results are now adopted as transient manual routes via `RequestManualRoute` instead of only being tagged, so the search result's title flows through to the overlay. A per-adoption serial guards against stale results when the search changes mid-frame.
+
+- **Help frame**
+  - Replaced the static page X / N indicator with a clickable dropdown that lists every help page by name. The dropdown closes when the help frame is hidden.
+
 ## 4.0.0d
 - **TomTom combat visibility**
   - Replaced the secure-parent host approach with a root-frame alpha cloak so TomTom's full crazy arrow stack (textures and text) hides together without calling protected hide/show paths.

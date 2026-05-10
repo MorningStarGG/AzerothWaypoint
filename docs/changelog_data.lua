@@ -2,6 +2,29 @@ local NS = _G.AzerothWaypointNS
 
 NS.CHANGELOG_DATA = {
     {
+        version = "4.0.1",
+        sections = {
+            { title = "HandyNotes integration", entries = {
+                { text = "Added HandyNotes - including plugins such as MapNotes and HandyNotes_TheWarWithin - as a recognized transient external waypoint source, adopted from both `C_Map.SetUserWaypoint` and `TomTom:AddWaypoint` calls.", level = 1 },
+                { text = "Added a generic HandyNotes icon spec used for adopted HandyNotes waypoints.", level = 1 },
+                { text = "MapNotes pin clicks now reverse-map the HandyNotes plugin iterator's icon path back to one of the existing AWP icons (portal, travel, inn, dungeon, delve, profession trainer, vendor, mailbox, banker, auctioneer, barber, transmog, stable master) so the overlay reflects the kind of pin that was clicked.", level = 1 },
+                { text = "Snapshotted the open tooltip's first line at right-click time so the \"Set map waypoint\" option in HandyNotes plugins preserves the node label even though `C_Map.SetUserWaypoint` itself accepts no title. Captured text is cleaned of inline icon textures, atlas escapes, and hyperlink wrappers before use.", level = 1 },
+                { text = "Plugin OnClick hooks are installed at login and on every subsequent `RegisterPluginDB`, so HandyNotes plugins that load after AWP are still covered.", level = 1 },
+                { text = "Per-source icon resolver framework: `RegisterExternalWaypointSource` accepts an optional `resolveIconKey(mapID, x, y)` callback, and `NS.ResolveExternalWaypointIconKey` threads the result through meta, authority record (and persistence), queue items, and presentation snapshot - including both content signatures - so per-call icon overrides cache-bust correctly.", level = 1 },
+                { text = "`/awp waytype` now also prints `sourceAddonIconKey=` so the resolved icon hint can be inspected.", level = 1 },
+            }},
+            { title = "Routing fixes", entries = {
+                { text = "Fallback route outcomes are no longer treated as failures even for strict route records, so the fallback completes instead of rolling back the pending manual queue transaction.", level = 1 },
+            }},
+            { title = "WhoWhere search adoption", entries = {
+                { text = "Zygor WhoWhere search results are now adopted as transient manual routes via `RequestManualRoute` instead of only being tagged, so the search result's title flows through to the overlay. A per-adoption serial guards against stale results when the search changes mid-frame.", level = 1 },
+            }},
+            { title = "Help frame", entries = {
+                { text = "Replaced the static page X / N indicator with a clickable dropdown that lists every help page by name. The dropdown closes when the help frame is hidden.", level = 1 },
+            }},
+        },
+    },
+    {
         version = "4.0.0d",
         sections = {
             { title = "TomTom combat visibility", entries = {

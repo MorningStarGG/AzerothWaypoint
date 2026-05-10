@@ -357,7 +357,7 @@ local function ClassifyRouteOutcome(record, backendID, legs, reason)
         return "success"
     end
     if IsFallbackRouteReason(reason) then
-        return IsStrictRouteRecord(record) and "failed" or "fallback"
+        return "fallback"
     end
     if IsFailedRouteReason(reason) then
         return "failed"
@@ -459,7 +459,7 @@ local function CompletePendingManualRoute(record, outcome, reason)
         return nil
     end
 
-    if outcome ~= "success" then
+    if outcome ~= "success" and outcome ~= "fallback" then
         if type(NS.RollbackPendingManualQueueTransaction) == "function" then
             NS.RollbackPendingManualQueueTransaction(record, outcome, reason)
         end

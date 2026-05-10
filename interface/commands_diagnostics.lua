@@ -689,8 +689,9 @@ local function emitWaytypeInfo(info)
 
     if type(contentSnapshot) == "table" then
         NS.Msg(string.format(
-            "[WAYTYPE] snapshot sourceAddon=%s guideProvider=%s hint=%s hintQuestID=%s guideRoute=%s liveTravel=%s semanticKind=%s semanticQuestID=%s mirrorTitle=%s",
+            "[WAYTYPE] snapshot sourceAddon=%s sourceAddonIconKey=%s guideProvider=%s hint=%s hintQuestID=%s guideRoute=%s liveTravel=%s semanticKind=%s semanticQuestID=%s mirrorTitle=%s",
             tostring(contentSnapshot.sourceAddon or "-"),
+            tostring(contentSnapshot.sourceAddonIconKey or "-"),
             tostring(contentSnapshot.guideProvider or "-"),
             tostring(contentSnapshot.iconHintKind or "-"),
             tostring(info.hintedQuestID or "-"),

@@ -9,6 +9,9 @@ local SEARCH_PROFESSIONS = M.searchProfessions
 local SEARCH_HELP_TOPICS = M.searchHelpTopics
 local showSearchHelp = M.showSearchHelp
 
+local WHOWHERE_SEARCH_SOURCE_ADDON = "Zygor"
+local WHOWHERE_SEARCH_QUEUE_SOURCE_TYPE = "transient_source"
+
 -- ============================================================
 -- WhoWhere search hint keys
 -- ============================================================
@@ -85,6 +88,105 @@ local function TagCurrentWhoWhereWaypoint(WW)
     end
 
     currentWay.searchKind = pendingKind
+    return currentWay, pendingKind
+end
+
+local function ResolveWhoWhereWaypointTitle(waypoint, fallback)
+    if type(waypoint) ~= "table" then
+        return fallback or "Search result"
+    end
+
+    if type(waypoint.GetArrowTitle) == "function" then
+        local ok, title = pcall(waypoint.GetArrowTitle, waypoint)
+        if ok and type(title) == "string" and title ~= "" then
+            return title
+        end
+    end
+    if type(waypoint.GetTitle) == "function" then
+        local ok, title = pcall(waypoint.GetTitle, waypoint)
+        if ok and type(title) == "string" and title ~= "" then
+            return title
+        end
+    end
+    if type(waypoint.title) == "string" and waypoint.title ~= "" then
+        return waypoint.title
+    end
+
+    return fallback or "Search result"
+end
+
+local function BuildWhoWhereSearchMeta(mapID, x, y, searchKind)
+    if type(NS.BuildManualIdentity) ~= "function" or type(NS.BuildRouteMeta) ~= "function" then
+        return {
+            sourceAddon = WHOWHERE_SEARCH_SOURCE_ADDON,
+            searchKind = searchKind,
+            queueSourceType = WHOWHERE_SEARCH_QUEUE_SOURCE_TYPE,
+        }
+    end
+
+    local identity = NS.BuildManualIdentity(mapID, x, y)
+    return NS.BuildRouteMeta(identity, {
+        sourceAddon = WHOWHERE_SEARCH_SOURCE_ADDON,
+        searchKind = searchKind,
+        queueSourceType = WHOWHERE_SEARCH_QUEUE_SOURCE_TYPE,
+    })
+end
+
+local function AdoptWhoWhereSearchWaypoint(WW, waypoint, searchKind, serial)
+    if serial ~= state.commands.whoWhereSearchAdoptionSerial then
+        return false
+    end
+    if type(WW) ~= "table" then
+        return false
+    end
+
+    waypoint = type(waypoint) == "table" and waypoint or WW.CurrentWay
+    searchKind = type(searchKind) == "string" and searchKind
+        or type(waypoint) == "table" and waypoint.searchKind
+        or nil
+    if type(waypoint) ~= "table" or type(searchKind) ~= "string" or searchKind == "" then
+        return false
+    end
+
+    local mapID, x, y
+    if type(NS.ReadWaypointCoords) == "function" then
+        mapID, x, y = NS.ReadWaypointCoords(waypoint)
+    else
+        mapID, x, y = waypoint.map or waypoint.mapid or waypoint.mapID or waypoint.m, waypoint.x, waypoint.y
+    end
+    if type(mapID) ~= "number" or type(x) ~= "number" or type(y) ~= "number" then
+        return false
+    end
+
+    local title = ResolveWhoWhereWaypointTitle(waypoint, "Search result")
+    local meta = BuildWhoWhereSearchMeta(mapID, x, y, searchKind)
+    if type(NS.RequestManualRoute) == "function" then
+        return NS.RequestManualRoute(mapID, x, y, title, meta) == true
+    end
+    if type(NS.RouteViaBackend) == "function" then
+        return NS.RouteViaBackend(mapID, x, y, title, meta, { authority = "manual" }) == true
+    end
+    return false
+end
+
+local function ScheduleWhoWhereSearchAdoption(WW, waypoint, searchKind)
+    if type(WW) ~= "table" or type(waypoint) ~= "table" or type(searchKind) ~= "string" then
+        return
+    end
+
+    state.commands.whoWhereSearchAdoptionSerial = (tonumber(state.commands.whoWhereSearchAdoptionSerial) or 0) + 1
+    local serial = state.commands.whoWhereSearchAdoptionSerial
+    local function adopt()
+        AdoptWhoWhereSearchWaypoint(WW, waypoint, searchKind, serial)
+    end
+
+    if type(NS.After) == "function" then
+        NS.After(0, adopt)
+    elseif type(C_Timer) == "table" and type(C_Timer.After) == "function" then
+        C_Timer.After(0, adopt)
+    else
+        adopt()
+    end
 end
 
 local function getWhoWhere()
@@ -135,7 +237,8 @@ function NS.HookZygorWhoWhereFallbacks()
 
     WW.SetWaypoint = function(self, ...)
         local result = originalSetWaypoint(self, ...)
-        TagCurrentWhoWhereWaypoint(self)
+        local waypoint, searchKind = TagCurrentWhoWhereWaypoint(self)
+        ScheduleWhoWhereSearchAdoption(self, waypoint, searchKind)
         return result
     end
 

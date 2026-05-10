@@ -2,7 +2,7 @@
 ## Title: AzerothWaypoint
 ## Notes: A TomTom-powered navigation bridge, route planner selector, manual waypoint queue, and 3D world overlay for World of Warcraft
 ## Author: MorningStarGG
-## Version: 4.0.0d
+## Version: 4.0.1
 ## IconTexture: Interface\AddOns\AzerothWaypoint\media\icon.png
 ## SavedVariables: AzerothWaypointDB
 ## SavedVariablesPerCharacter: AzerothWaypointCharDB
@@ -19,6 +19,7 @@ core/combat_visibility.lua
 integrations/external_waypoint_sources.lua
 integrations/silverdragon.lua
 integrations/rarescanner.lua
+integrations/handynotes.lua
 integrations/guides/zygor/canonical_target.lua
 integrations/guides/zygor/source.lua
 integrations/guides/zygor/guide_resolver/facts.lua

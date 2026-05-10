@@ -66,8 +66,29 @@ function NS.RegisterExternalWaypointSource(key, spec)
         iconKey = TrimString(spec.iconKey) or key,
         stackMatches = CopyStringList(spec.stackMatches),
         aliases = CopyStringList(spec.aliases),
+        resolveIconKey = type(spec.resolveIconKey) == "function" and spec.resolveIconKey or nil,
     }
     return true
+end
+
+function NS.ResolveExternalWaypointIconKey(sourceAddon, mapID, x, y)
+    local source = NS.GetExternalWaypointSourceInfo(sourceAddon)
+    if type(source) ~= "table" then
+        return nil
+    end
+    local resolver = source.resolveIconKey
+    if type(resolver) ~= "function"
+        or type(mapID) ~= "number"
+        or type(x) ~= "number"
+        or type(y) ~= "number"
+    then
+        return nil
+    end
+    local ok, key = pcall(resolver, mapID, x, y)
+    if ok and type(key) == "string" and key ~= "" then
+        return key
+    end
+    return nil
 end
 
 function NS.NormalizeExternalWaypointSource(value)

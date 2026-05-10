@@ -13,6 +13,7 @@ function Queue.NormalizeQueueItemMeta(meta, mapID, x, y)
     if type(normalized) ~= "table" and type(meta) == "table" and type(meta.identity) == "table" then
         normalized = NS.BuildRouteMeta(meta.identity, {
             sourceAddon = meta.sourceAddon,
+            sourceAddonIconKey = meta.sourceAddonIconKey,
             searchKind = meta.searchKind,
             manualQuestID = meta.manualQuestID,
             mapPinInfo = meta.mapPinInfo,
@@ -28,6 +29,7 @@ function Queue.NormalizeQueueItemMeta(meta, mapID, x, y)
 
     return NS.BuildRouteMeta(normalized.identity, {
         sourceAddon = Queue.NormalizeSourceAddon(normalized.sourceAddon),
+        sourceAddonIconKey = Queue.TrimString(normalized.sourceAddonIconKey),
         searchKind = Queue.TrimString(normalized.searchKind),
         manualQuestID = type(normalized.manualQuestID) == "number" and normalized.manualQuestID or nil,
         mapPinInfo = Queue.DeepCopy(normalized.mapPinInfo),

@@ -112,6 +112,37 @@ local function GetPageIndex(pageRef)
     return 1
 end
 
+local function FormatPageSelectorText(pageIndex)
+    local pages = GetHelpPages()
+    local page = pages[pageIndex]
+    if type(page) ~= "table" then
+        return tostring(pageIndex or 1)
+    end
+
+    return string.format("%d. %s", pageIndex, tostring(page.title or "Help"))
+end
+
+local function CreatePageSelectorOptions()
+    local options = {}
+    local pages = GetHelpPages()
+
+    for index, page in ipairs(pages) do
+        options[#options + 1] = {
+            value = index,
+            text = string.format("%d. %s", index, tostring(page.title or "Help")),
+        }
+    end
+
+    return options
+end
+
+local function GetSharedDropdown()
+    local internal = NS.Internal
+    local interface = internal and internal.Interface
+    local canvas = interface and interface.canvas
+    return canvas and canvas.Dropdown or nil
+end
+
 local function FormatRecentChangelogText(limit)
     if type(ChangelogFormat.FormatReleaseText) == "function" then
         return ChangelogFormat.FormatReleaseText(NS.CHANGELOG_DATA, limit or 3)
@@ -686,7 +717,10 @@ local function LayoutPage(frameRef, pageIndex, resetScroll)
     end
 
     frameRef.content:SetHeight(math.abs(cursorY) + CONTENT_BOTTOM_PADDING)
-    frameRef.pageNum:SetText(string.format("%d / %d", pageIndex, #pages))
+    if frameRef.pageSelector then
+        frameRef.pageSelector:SetDisplayText(FormatPageSelectorText(pageIndex))
+        frameRef.pageSelector:SetEnabled(#pages > 1)
+    end
     frameRef.prevButton:SetEnabled(pageIndex > 1)
     frameRef.nextButton:SetEnabled(pageIndex < #pages)
 
@@ -763,9 +797,35 @@ local function GetOrCreateFrame()
         end
     end)
 
-    frame.pageNum = footerFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    frame.pageNum:SetPoint("CENTER", footerFrame, "CENTER", 0, 0)
-    frame.pageNum:SetTextColor(0.72, 0.66, 0.58, 1.0)
+    frame.pageSelector = FW.CreatePanelButton(footerFrame, {
+        height = 28,
+        labelInsetLeft = 10,
+        labelInsetRight = 30,
+        justifyH = "LEFT",
+    })
+    frame.pageSelector:SetSize(360, 28)
+    frame.pageSelector:SetPoint("CENTER", footerFrame, "CENTER", 0, 0)
+
+    frame.pageSelector.arrow = frame.pageSelector:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    frame.pageSelector.arrow:SetPoint("RIGHT", frame.pageSelector, "RIGHT", -10, 0)
+    frame.pageSelector.arrow:SetText("v")
+    frame.pageSelector.arrow:SetTextColor(0.95, 0.75, 0.35, 1)
+
+    frame.pageSelector:SetScript("OnClick", function(self)
+        local dropdown = GetSharedDropdown()
+        if not (dropdown and type(dropdown.Open) == "function") then
+            return
+        end
+
+        dropdown.Open(self, {
+            options = CreatePageSelectorOptions(),
+            currentValue = frame.currentPageIndex,
+            width = self:GetWidth(),
+            onSelect = function(value)
+                ShowPage(frame, value, true)
+            end,
+        })
+    end)
 
     -- Scroll area
     frame.scroll = CreateFrame("ScrollFrame", nil, frame, "UIPanelScrollFrameTemplate")
@@ -840,6 +900,13 @@ local function GetOrCreateFrame()
                 self.pendingPageRef = nil
             end
         end)
+    end)
+
+    frame:SetScript("OnHide", function()
+        local dropdown = GetSharedDropdown()
+        if dropdown and type(dropdown.Close) == "function" then
+            dropdown.Close()
+        end
     end)
 
     frame.scroll:SetScript("OnSizeChanged", function()

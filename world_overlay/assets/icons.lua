@@ -26,6 +26,7 @@ local NPC_VOID_TINT              = { r = 0.290, g = 0.137, b = 0.518, a = 1 }
 local NPC_MAILBOX_TINT           = { r = 0.792, g = 0.718, b = 0.624, a = 1 }
 local SILVERDRAGON_TINT          = { r = 0.753, g = 0.753, b = 0.753, a = 1 }
 local RARESCANNER_TINT           = SILVERDRAGON_TINT
+local HANDYNOTES_TINT            = { r = 1, g = 1, b = 0.6, a = 1 }
 local QUEST_DEFAULT_TINT         = { r = 1, g = 1, b = 0, a = 1 }
 local QUEST_DAILY_TINT           = QUEST_REPEATABLE_TINT
 local QUEST_WEEKLY_TINT          = QUEST_REPEATABLE_TINT
@@ -119,6 +120,7 @@ CFG.ICON_SPECS                   = {
     zygor_poi_questobjective    = { atlas = "VignetteEvent", tint = { r = 0.941, g = 0.878, b = 0.275, a = 1 }, iconSize = 32 },
     silverdragon                = { atlas = "worldquest-questmarker-dragon-silver", tint = SILVERDRAGON_TINT, iconSize = 26 },
     rarescanner                 = { texture = "Interface\\AddOns\\RareScanner\\Media\\Icons\\OriginalSkull.blp", tint = RARESCANNER_TINT, iconSize = 28 },
+    handynotes                  = { atlas = "poi-workorders", tint = HANDYNOTES_TINT, recolor = true, iconOffsetX = -1, iconSize = 24 },
     portal                      = { atlas = "MagePortalAlliance", tint = { r = 0.812, g = 0.884, b = 0.873, a = 1 }, iconOffsetY = 2, iconSize = 28 },
     travel                      = { atlas = "poi-traveldirections-arrow2", tint = { r = 1, g = 1, b = 1, a = 1 }, iconOffsetY = -1, iconSize = 28 },
     guide                       = { atlas = "LevelUp-Icon-Book", tint = DEFAULT_TINT, iconOffsetY = 1, iconSize = 24 },

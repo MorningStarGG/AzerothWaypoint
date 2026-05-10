@@ -50,7 +50,7 @@ It can route and present destinations from:
 - guide steps from Zygor Guides Viewer, Azeroth Pilot Reloaded, and WoWPro
 - Blizzard map clicks, quest pins, POIs, supertracked quests, and tracked quests
 - imported `/ttpaste` waypoint batches
-- supported external waypoint addons like SilverDragon and RareScanner
+- supported external waypoint addons like HandyNotes, SilverDragon, and RareScanner
 
 AzerothWaypoint then sends the active route to:
 
@@ -276,6 +276,7 @@ Current source-aware integrations:
 
 - **SilverDragon**
 - **RareScanner**
+- **HandyNotes**
 
 These are handled as transient manual sources, so they can briefly take over navigation without destroying persistent manual queues.
 
@@ -367,6 +368,7 @@ AzerothWaypoint works without these addons, but enables additional behavior when
 | **FarstriderLib / FarstriderLibData** | Travel-aware route planning with flights, portals, transports, items, spells, and travel nodes |
 | **Mapzeroth** | Travel-aware route planning with flights, portals, transports, items, spells, and travel nodes |
 | **WorldQuestTab** | World quest click adoption with quest metadata |
+| **HandyNotes** | Source-aware transient POI waypoint adoption |
 | **SilverDragon** | Source-aware rare waypoint adoption |
 | **RareScanner** | Source-aware rare waypoint adoption |
 

@@ -141,6 +141,7 @@ function NS.BuildManualAuthorityRecord(mapID, x, y, title, meta, backendID)
         if type(NS.ValidateRouteIdentity) == "function" and NS.ValidateRouteIdentity(identity) then
             routeMeta = NS.BuildRouteMeta(identity, {
                 sourceAddon = meta.sourceAddon,
+                sourceAddonIconKey = meta.sourceAddonIconKey,
                 searchKind = meta.searchKind,
                 manualQuestID = meta.manualQuestID,
                 mapPinInfo = meta.mapPinInfo,
@@ -172,6 +173,7 @@ function NS.BuildManualAuthorityRecord(mapID, x, y, title, meta, backendID)
     -- info for explicit-remove and queue follow-up logic.
     record.identity = routeMeta.identity
     record.sourceAddon = routeMeta.sourceAddon
+    record.sourceAddonIconKey = routeMeta.sourceAddonIconKey
     record.searchKind = routeMeta.searchKind
     record.manualQuestID = routeMeta.manualQuestID
     record.mapPinInfo = routeMeta.mapPinInfo
@@ -242,7 +244,7 @@ end
 local PERSISTED_FIELDS = {
     "mapID", "x", "y", "title", "sig",
     "meta", "backend", "createdAt",
-    "identity", "sourceAddon", "searchKind",
+    "identity", "sourceAddon", "sourceAddonIconKey", "searchKind",
     "manualQuestID", "mapPinInfo",
     "queueID", "queueKind", "queueSourceType",
     "queueItemIndex", "queueIsTransient",
@@ -257,6 +259,7 @@ local function CopyForPersistence(record)
     if type(record.meta) ~= "table" or type(NS.ValidateRouteMeta) ~= "function" or not NS.ValidateRouteMeta(record.meta) then
         record.meta = NS.BuildRouteMeta(record.identity, {
             sourceAddon = record.sourceAddon,
+            sourceAddonIconKey = record.sourceAddonIconKey,
             searchKind = record.searchKind,
             manualQuestID = record.manualQuestID,
             mapPinInfo = record.mapPinInfo,
@@ -309,6 +312,7 @@ function NS.RestoreManualAuthority()
     if type(meta) ~= "table" then
         meta = NS.BuildRouteMeta(record.identity, {
             sourceAddon = record.sourceAddon,
+            sourceAddonIconKey = record.sourceAddonIconKey,
             searchKind = record.searchKind,
             manualQuestID = record.manualQuestID,
             mapPinInfo = record.mapPinInfo,
@@ -346,8 +350,12 @@ function NS.CreateRouteMetaForExternalWaypoint(uid, mapID, x, y, title)
         externalSig = sig,
         sourceAddon = sourceAddon,
     })
+    local resolvedIconKey = type(NS.ResolveExternalWaypointIconKey) == "function"
+        and NS.ResolveExternalWaypointIconKey(sourceAddon, mapID, x, y)
+        or nil
     return NS.BuildRouteMeta(identity, {
         sourceAddon = sourceAddon,
+        sourceAddonIconKey = type(resolvedIconKey) == "string" and resolvedIconKey ~= "" and resolvedIconKey or nil,
     })
 end
 

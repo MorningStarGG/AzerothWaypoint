@@ -150,6 +150,7 @@ local function BuildBlizzardUserWaypointMeta(mapID, x, y, context)
         manualQuestID = type(context) == "table" and context.questID or nil,
         searchKind = type(context) == "table" and context.searchKind or nil,
         sourceAddon = type(context) == "table" and context.sourceAddon or nil,
+        sourceAddonIconKey = type(context) == "table" and context.sourceAddonIconKey or nil,
     })
 end
 
@@ -219,6 +220,21 @@ local function HandleExplicitBlizzardUserWaypointSet(mapID, x, y, sourceAddon)
     if type(sourceAddon) == "string" then
         context = type(context) == "table" and context or {}
         context.sourceAddon = sourceAddon
+        if type(NS.ResolveExternalWaypointIconKey) == "function" then
+            local resolvedIconKey = NS.ResolveExternalWaypointIconKey(sourceAddon, mapID, x, y)
+            if type(resolvedIconKey) == "string" and resolvedIconKey ~= "" then
+                context.sourceAddonIconKey = resolvedIconKey
+            end
+        end
+        if sourceAddon == "handynotes"
+            and not (type(context.title) == "string" and context.title ~= "")
+            and type(NS.GetHandyNotesCapturedTitle) == "function"
+        then
+            local capturedTitle = NS.GetHandyNotesCapturedTitle(mapID, x, y)
+            if type(capturedTitle) == "string" and capturedTitle ~= "" then
+                context.title = capturedTitle
+            end
+        end
     end
     local title = type(context) == "table" and context.title or nil
     title = title or ResolveMapTitle(mapID, x, y)

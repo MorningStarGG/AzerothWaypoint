@@ -211,6 +211,7 @@ function NS.BuildRouteMeta(identity, opts)
     local meta = {
         identity = CopyTable(identity),
         sourceAddon = NormalizeSourceAddon(opts.sourceAddon or identity.sourceAddon),
+        sourceAddonIconKey = TrimString(opts.sourceAddonIconKey),
         searchKind = TrimString(opts.searchKind),
         manualQuestID = PositiveNumber(opts.manualQuestID or identity.questID or identity.completionQuestID),
         mapPinInfo = CopyTable(opts.mapPinInfo),
