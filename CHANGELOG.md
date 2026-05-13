@@ -1,5 +1,14 @@
 # Changelog
 
+## 4.0.1a
+- **SilverDragon waypoint adoption taint fix**
+  - Removed the SilverDragon-specific deferred TomTom adoption path. SilverDragon waypoints now adopt synchronously through the same `RouteExternalTomTomWaypoint` path other external sources already use.
+
+- **Special travel button combat safety**
+  - Disarm requests that arrive during combat lockdown are now queued onto `PLAYER_REGEN_ENABLED` via a new `pendingSpecialActionClear` flag, mirroring the existing `pendingSpecialAction` re-apply, instead of partially clearing protected attributes mid-combat.
+  - Centralized the out-of-combat secure-button reset into `ParkSecureActionButton` — clear state driver, hide, clear points, reparent to `UIParent`, recenter — so every cleanup site takes the same safe sequence.
+  - `ShowSecureActionVisuals` now defers the whole presentation update during combat lockdown rather than running `HideSpecialActionVisuals` partway through.
+
 ## 4.0.1
 - **HandyNotes integration**
   - Added HandyNotes — including plugins such as MapNotes and HandyNotes_TheWarWithin — as a recognized transient external waypoint source, adopted from both `C_Map.SetUserWaypoint` and `TomTom:AddWaypoint` calls.

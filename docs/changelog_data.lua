@@ -2,6 +2,19 @@ local NS = _G.AzerothWaypointNS
 
 NS.CHANGELOG_DATA = {
     {
+        version = "4.0.1a",
+        sections = {
+            { title = "SilverDragon waypoint adoption taint fix", entries = {
+                { text = "Removed the SilverDragon-specific deferred TomTom adoption path. SilverDragon waypoints now adopt synchronously through the same `RouteExternalTomTomWaypoint` path other external sources already use.", level = 1 },
+            }},
+            { title = "Special travel button combat safety", entries = {
+                { text = "Disarm requests that arrive during combat lockdown are now queued onto `PLAYER_REGEN_ENABLED` via a new `pendingSpecialActionClear` flag, mirroring the existing `pendingSpecialAction` re-apply, instead of partially clearing protected attributes mid-combat.", level = 1 },
+                { text = "Centralized the out-of-combat secure-button reset into `ParkSecureActionButton` - clear state driver, hide, clear points, reparent to `UIParent`, recenter - so every cleanup site takes the same safe sequence.", level = 1 },
+                { text = "`ShowSecureActionVisuals` now defers the whole presentation update during combat lockdown rather than running `HideSpecialActionVisuals` partway through.", level = 1 },
+            }},
+        },
+    },
+    {
         version = "4.0.1",
         sections = {
             { title = "HandyNotes integration", entries = {

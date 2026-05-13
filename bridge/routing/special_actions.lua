@@ -27,6 +27,7 @@ state.routing = state.routing or {
 
     cinematicActive      = false,
     pendingSpecialAction = nil,    -- queued when in combat, applied on PLAYER_REGEN_ENABLED
+    pendingSpecialActionClear = false, -- queued when combat blocks secure-button cleanup
     specialActionCasting       = false,  -- true while a click→cast is in flight; freezes route replans
     specialActionCastSeq       = 0,      -- monotonic seq, scopes safety-timer callbacks to a single click
     specialActionCastGUID      = nil,    -- castGUID captured at UNIT_SPELLCAST_START, scopes cast-end matching
@@ -189,12 +190,16 @@ local function GetTomTomArrowFrame()
     return type(NS.GetTomTomArrow) == "function" and NS.GetTomTomArrow() or nil
 end
 
+local function IsCombatLocked()
+    return type(InCombatLockdown) == "function" and InCombatLockdown() == true
+end
+
 local function ShouldUseSpecialActionCombatDriver()
     return type(NS.ShouldHideTomTomInCombat) == "function" and NS.ShouldHideTomTomInCombat() == true
 end
 
 local function ClearSpecialActionCombatStateDriver(btn)
-    if type(btn) ~= "table" or (type(InCombatLockdown) == "function" and InCombatLockdown()) then
+    if type(btn) ~= "table" or IsCombatLocked() then
         return
     end
     if specialActionCombatStateDriver and type(UnregisterStateDriver) == "function" then
@@ -204,7 +209,7 @@ local function ClearSpecialActionCombatStateDriver(btn)
 end
 
 local function ApplySpecialActionCombatStateDriver(btn)
-    if type(btn) ~= "table" or (type(InCombatLockdown) == "function" and InCombatLockdown()) then
+    if type(btn) ~= "table" or IsCombatLocked() then
         return
     end
     if type(RegisterStateDriver) ~= "function" or type(UnregisterStateDriver) ~= "function" then
@@ -340,6 +345,26 @@ local function SetTomTomArrowStatusVisible(visible)
     ApplyTomTomArrowStatusSuppression()
 end
 
+local function ParkSecureActionButton()
+    local btn = secureButton
+    if type(btn) ~= "table" or IsCombatLocked() then
+        return
+    end
+    ClearSpecialActionCombatStateDriver(btn)
+    if type(btn.Hide) == "function" then
+        btn:Hide()
+    end
+    if type(btn.ClearAllPoints) == "function" then
+        btn:ClearAllPoints()
+    end
+    if type(btn.SetParent) == "function" and UIParent then
+        btn:SetParent(UIParent)
+    end
+    if type(btn.SetPoint) == "function" and UIParent then
+        btn:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+    end
+end
+
 local function HideSpecialActionVisuals()
     ResetSpecialActionPresentation()
     RestoreTomTomArrowVisuals()
@@ -348,15 +373,12 @@ local function HideSpecialActionVisuals()
         secureButtonLabel:SetText("")
         secureButtonLabel:Hide()
     end
-    if secureButton and not InCombatLockdown() then
-        ClearSpecialActionCombatStateDriver(secureButton)
-        secureButton:Hide()
-    end
+    ParkSecureActionButton()
 end
 
 local function ClearSecureActionAttributes()
     local btn = secureButton
-    if btn and not InCombatLockdown() then
+    if btn and not IsCombatLocked() then
         for key in pairs(activeSecureAttributeKeys) do
             btn:SetAttribute(key, nil)
             activeSecureAttributeKeys[key] = nil
@@ -567,10 +589,18 @@ local function IsActionInActivationRange(action)
 end
 
 local function ShowSecureActionVisuals(action)
-    HideSpecialActionVisuals()
     if type(action) ~= "table" then
+        if not IsCombatLocked() then
+            HideSpecialActionVisuals()
+        end
         return
     end
+    if IsCombatLocked() then
+        state.routing.pendingSpecialAction = action
+        state.routing.pendingSpecialActionClear = nil
+        return
+    end
+    HideSpecialActionVisuals()
     if specialActionCombatHidden then
         state.routing.specialActionPresented = true
         state.routing.specialActionPresentedSig = action.sig
@@ -617,7 +647,7 @@ function NS.ApplySpecialActionCombatVisibility(hidden)
                 secureButtonLabel:Hide()
             end
             if type(InCombatLockdown) ~= "function" or not InCombatLockdown() then
-                btn:Hide()
+                ParkSecureActionButton()
             end
         else
             if type(InCombatLockdown) ~= "function" or not InCombatLockdown() then
@@ -631,7 +661,7 @@ function NS.ApplySpecialActionCombatVisibility(hidden)
                         secureButtonLabel:SetText("")
                         secureButtonLabel:Hide()
                     end
-                    btn:Hide()
+                    ParkSecureActionButton()
                 end
             end
         end
@@ -647,6 +677,11 @@ end
 function NS.DisarmSpecialActionButton()
     state.routing.pendingSpecialAction = nil
     ReleaseSpecialActionCastFreeze("disarm")
+    if IsCombatLocked() then
+        state.routing.pendingSpecialActionClear = true
+        return
+    end
+    state.routing.pendingSpecialActionClear = nil
     ClearSecureActionAttributes()
     HideSpecialActionVisuals()
 end
@@ -693,14 +728,9 @@ function NS.ApplySpecialAction(action)
         return
     end
 
-    if InCombatLockdown() then
+    if IsCombatLocked() then
         state.routing.pendingSpecialAction = action
-        if state.routing.specialActionPresented == true
-            and state.routing.specialActionPresentedSig == action.sig
-        then
-            return
-        end
-        HideSpecialActionVisuals()
+        state.routing.pendingSpecialActionClear = nil
         return
     end
 
@@ -792,7 +822,11 @@ combatFrame:SetScript("OnEvent", function(_, event, unit, castGUID)
         local pending = state.routing.pendingSpecialAction
         if pending then
             state.routing.pendingSpecialAction = nil
+            state.routing.pendingSpecialActionClear = nil
             NS.ApplySpecialAction(pending)
+        elseif state.routing.pendingSpecialActionClear then
+            state.routing.pendingSpecialActionClear = nil
+            NS.DisarmSpecialActionButton()
         end
         if state.routing.pendingCarrierRecompute then
             state.routing.pendingCarrierRecompute = nil

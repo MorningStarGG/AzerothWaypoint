@@ -16,9 +16,6 @@ local Signature = NS.Signature
 local externalWaypointBuffer = {}
 local pendingRemovedTomTomUIDs = {}
 local pendingRemovedTomTomFlush = false
-local deferredExternalTomTomRoutesByKey = {}
-local deferredExternalTomTomRouteOrder = {}
-local deferredExternalTomTomFlushScheduled = false
 
 local EXTERNAL_SOURCE_STACK_START = 3
 local EXTERNAL_SOURCE_STACK_COUNT = 12
@@ -845,70 +842,6 @@ local function RouteExternalTomTomWaypoint(mapID, x, y, title, uid)
     return adopted
 end
 
-local function IsDeferredExternalTomTomSource(sourceAddon)
-    sourceAddon = NormalizeSourceAddonCandidate(sourceAddon)
-    return sourceAddon == "silverdragon"
-end
-
-local function FlushDeferredExternalTomTomRoutes()
-    deferredExternalTomTomFlushScheduled = false
-
-    local routeOrder = deferredExternalTomTomRouteOrder
-    local routesByKey = deferredExternalTomTomRoutesByKey
-    deferredExternalTomTomRouteOrder = {}
-    deferredExternalTomTomRoutesByKey = {}
-
-    for index = 1, #routeOrder do
-        local route = routesByKey[routeOrder[index]]
-        if route then
-            RouteExternalTomTomWaypoint(route.mapID, route.x, route.y, route.title, route.uid)
-        end
-    end
-end
-
-local function ScheduleDeferredExternalTomTomFlush()
-    if deferredExternalTomTomFlushScheduled then
-        return
-    end
-    deferredExternalTomTomFlushScheduled = true
-
-    if type(NS.After) == "function" then
-        NS.After(0, FlushDeferredExternalTomTomRoutes)
-    elseif type(C_Timer) == "table" and type(C_Timer.After) == "function" then
-        C_Timer.After(0, FlushDeferredExternalTomTomRoutes)
-    else
-        FlushDeferredExternalTomTomRoutes()
-    end
-end
-
-local function QueueDeferredExternalTomTomRoute(mapID, x, y, title, uid, sourceAddon)
-    local key, normalizedSource = BuildExternalPublishKey(sourceAddon, mapID, x, y)
-    if not key then
-        return RouteExternalTomTomWaypoint(mapID, x, y, title, uid)
-    end
-
-    if not deferredExternalTomTomRoutesByKey[key] then
-        deferredExternalTomTomRouteOrder[#deferredExternalTomTomRouteOrder + 1] = key
-    end
-    deferredExternalTomTomRoutesByKey[key] = {
-        mapID = mapID,
-        x = x,
-        y = y,
-        title = title,
-        uid = uid,
-        sourceAddon = normalizedSource,
-    }
-
-    -- Suppress matching Blizzard user-waypoint publishes from the same secure
-    -- click before the deferred TomTom adoption has a chance to run.
-    if type(NS.NoteExternalTomTomWaypointAdoption) == "function" then
-        NS.NoteExternalTomTomWaypointAdoption(normalizedSource, mapID, x, y, title)
-    end
-
-    ScheduleDeferredExternalTomTomFlush()
-    return true
-end
-
 local function IsRareScannerMouseDownPublish(sourceAddon)
     sourceAddon = NormalizeSourceAddonCandidate(sourceAddon)
     return sourceAddon == "rarescanner"
@@ -982,8 +915,6 @@ function NS.InstallExternalTomTomHooks()
             end
             if type(opts) == "table" and opts.from == "TomTom/way" then
                 QueueSlashWaypointBatch(mapID, x, y, effectiveTitle)
-            elseif IsDeferredExternalTomTomSource(sourceAddon) then
-                QueueDeferredExternalTomTomRoute(mapID, x, y, effectiveTitle, uid, sourceAddon)
             else
                 RouteExternalTomTomWaypoint(mapID, x, y, effectiveTitle, uid)
             end
@@ -1008,11 +939,6 @@ function NS.InstallExternalTomTomHooks()
             end
             local sourceAddon = ResolveExternalTomTomSourceAddon(nil, uid, false)
             if ScheduleGuideProviderForTomTomSource(sourceAddon, "WoWProTomTomSetCrazyArrow") then
-                return nil
-            end
-
-            if IsDeferredExternalTomTomSource(sourceAddon) then
-                QueueDeferredExternalTomTomRoute(uid[1], uid[2], uid[3], title or uid.title, uid, sourceAddon)
                 return nil
             end
 
