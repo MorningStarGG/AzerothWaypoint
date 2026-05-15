@@ -41,10 +41,18 @@ local SURROGATE_SEED_DISTANCE = 2650
 local SURROGATE_EXIT_DISTANCE = 2450
 local SURROGATE_RESEED_COOLDOWN = 0.5
 local SURROGATE_RESEED_MIN_WORLD_DELTA = 25
+local SURROGATE_NATIVE_NAV_BOUNDS_TOLERANCE = 0.1
 local INSTANCE_CAPABILITY_PROBE_COOLDOWN = 1.0
 local SPECIAL_TRAVEL_SUPPRESS_HYSTERESIS = 2.0
 local SAME_MAP_ROUTE_MATCH_TOLERANCE = 0.01
 local ROUTE_MISMATCH_BLOCK_SECONDS = 1.0
+local FRESH_HOST_ROUTE_SETTLE_SECONDS = 0.35
+
+local FRESH_HOST_SETTLE_FAILURE_REASON = {
+    same_map_missing_next_waypoint = true,
+    cross_map_missing_next_waypoint = true,
+    navigation_frame_destroyed = true,
+}
 
 local ClearNativeNavigationHost
 local IsNativeNavigationHostReady
@@ -460,6 +468,16 @@ local function RecordSurrogateRejection(targetSig, playerMapID)
     overlay.surrogateRejectedPlayerMapID = playerMapID
 end
 
+local function SkipUnavailableSurrogateHost(playerMapID)
+    if type(ClearNativeNavigationHost) == "function" then
+        ClearNativeNavigationHost()
+    else
+        ClearSeededHostTarget()
+    end
+    RecordSurrogateRejection(target.sig, playerMapID)
+    return nil, nil, nil, nil
+end
+
 local function SetSeededHostTarget(mapID, x, y, realDistance, isSurrogate, surrogateWorldX, surrogateWorldY)
     if type(mapID) ~= "number" or type(x) ~= "number" or type(y) ~= "number" then
         ClearSeededHostTarget()
@@ -470,6 +488,7 @@ local function SetSeededHostTarget(mapID, x, y, realDistance, isSurrogate, surro
     local wasSurrogate = overlay.surrogateActive == true
     local previousSeedSig = overlay.seededHostSig
     local previousTargetSig = overlay.surrogateTargetSig
+    local previousEverActiveSig = overlay.surrogateEverActiveForSig
 
     overlay.seededHostMapID = mapID
     overlay.seededHostX = x
@@ -480,6 +499,7 @@ local function SetSeededHostTarget(mapID, x, y, realDistance, isSurrogate, surro
     if isSurrogate then
         overlay.surrogateActive = true
         overlay.surrogateTargetSig = target.sig
+        overlay.surrogateEverActiveForSig = target.sig
         overlay.lastSurrogateSeedAt = GetTime()
         overlay.lastSurrogateWorldX = surrogateWorldX
         overlay.lastSurrogateWorldY = surrogateWorldY
@@ -492,6 +512,9 @@ local function SetSeededHostTarget(mapID, x, y, realDistance, isSurrogate, surro
                 target.title or "",
                 tostring(realDistance)
             )
+            if previousEverActiveSig ~= target.sig then
+                NS.Msg("[AWP] Using an intermediate navigation point because Blizzard may not reliably supertrack the requested waypoint from this distance.")
+            end
         elseif previousSeedSig ~= sig then
             NS.Log(
                 "Native overlay surrogate reseeded",
@@ -596,6 +619,156 @@ local function ShouldReevaluateNativeHost(hostReady, realDistance)
     return ShouldUseSurrogateHost(realDistance)
 end
 
+local function IsTargetWithinNativeNavReach(targetMapID)
+    -- Project the player's world position into the target's UI map. If both
+    -- coords land within [0,1] (± tolerance), Blizzard's native nav can route
+    -- the original waypoint without help — overriding with a surrogate would
+    -- yank the host closer to the starting map for no benefit. Returns
+    -- false on any API hiccup so we stay conservative and keep the surrogate.
+    if type(targetMapID) ~= "number" then
+        return false
+    end
+    if type(C_Map) ~= "table" or type(C_Map.GetMapPosFromWorldPos) ~= "function"
+        or type(CreateVector2D) ~= "function"
+    then
+        return false
+    end
+
+    local playerMapID, playerX, playerY = NS.GetPlayerMapPosition()
+    if type(playerMapID) ~= "number" or type(playerX) ~= "number" or type(playerY) ~= "number" then
+        return false
+    end
+
+    local pWMap, pWX, pWY = NS.GetWorldPositionFromMapCoords(playerMapID, playerX, playerY)
+    if type(pWMap) ~= "number" or type(pWX) ~= "number" or type(pWY) ~= "number" then
+        return false
+    end
+
+    local ok, _, pos = pcall(C_Map.GetMapPosFromWorldPos, pWMap, CreateVector2D(pWX, pWY), targetMapID)
+    if not ok or type(pos) ~= "table" or type(pos.x) ~= "number" or type(pos.y) ~= "number" then
+        return false
+    end
+
+    local low = -SURROGATE_NATIVE_NAV_BOUNDS_TOLERANCE
+    local high = 1 + SURROGATE_NATIVE_NAV_BOUNDS_TOLERANCE
+    return pos.x >= low and pos.x <= high and pos.y >= low and pos.y <= high
+end
+
+local _surrogateDiagLastSig
+local _surrogateDiagLastPlayerMap
+
+local function _SurrogateDiagSafeMapInfo(mapID)
+    if type(C_Map) ~= "table" or type(C_Map.GetMapInfo) ~= "function" or type(mapID) ~= "number" then
+        return nil
+    end
+    local ok, info = pcall(C_Map.GetMapInfo, mapID)
+    if ok then return info end
+end
+local function _SurrogateDiagSafeCall(fn, ...)
+    if type(fn) ~= "function" then return nil end
+    local ok, res = pcall(fn, ...)
+    if ok then return res end
+end
+local function _SurrogateDiagFmt(v)
+    if type(v) ~= "number" then return "-" end
+    return string.format("%.3f", v)
+end
+local function _SurrogateDiagProject(worldMapID, worldX, worldY, preferredMapID)
+    if type(C_Map) ~= "table" or type(C_Map.GetMapPosFromWorldPos) ~= "function"
+        or type(CreateVector2D) ~= "function"
+        or type(worldMapID) ~= "number"
+        or type(worldX) ~= "number" or type(worldY) ~= "number"
+    then
+        return nil, nil, nil
+    end
+    local vec = CreateVector2D(worldX, worldY)
+    local ok, id, pos
+    if type(preferredMapID) == "number" then
+        ok, id, pos = pcall(C_Map.GetMapPosFromWorldPos, worldMapID, vec, preferredMapID)
+    else
+        ok, id, pos = pcall(C_Map.GetMapPosFromWorldPos, worldMapID, vec)
+    end
+    if not ok then return nil, nil, nil end
+    local x, y
+    if pos then
+        x, y = pos.x, pos.y
+    end
+    return id, x, y
+end
+
+local function LogSurrogateDecisionDiagnostic(targetMapID, targetX, targetY, realDistance)
+    if not NS.Runtime.debug then return end
+    -- Only fire near/above the surrogate-trigger threshold so we don't burn the gate
+    -- on stale derived.distance values from a previous route step.
+    if type(realDistance) ~= "number" or realDistance <= SURROGATE_ENTER_DISTANCE then
+        return
+    end
+
+    local playerMapID = GetPlayerMapID()
+    if _surrogateDiagLastSig == target.sig and _surrogateDiagLastPlayerMap == playerMapID then
+        return
+    end
+    _surrogateDiagLastSig = target.sig
+    _surrogateDiagLastPlayerMap = playerMapID
+
+    local playerInfo = _SurrogateDiagSafeMapInfo(playerMapID)
+    local targetInfo = _SurrogateDiagSafeMapInfo(targetMapID)
+    local playerContinent = GetMapContinentAncestor(playerMapID)
+    local targetContinent = GetMapContinentAncestor(targetMapID)
+
+    local playerMapPosID, playerX, playerY = NS.GetPlayerMapPosition()
+    local pWMap, pWX, pWY
+    if type(playerMapPosID) == "number" and type(playerX) == "number" and type(playerY) == "number" then
+        pWMap, pWX, pWY = NS.GetWorldPositionFromMapCoords(playerMapPosID, playerX, playerY)
+    end
+    local tWMap, tWX, tWY = NS.GetWorldPositionFromMapCoords(targetMapID, targetX, targetY)
+
+    -- Player world pos projected into target's map (preferred=targetMapID).
+    -- If pInT_x/y land within [0,1], Blizzard sees the player as "inside" the target's map bounds.
+    local pInT_id, pInT_x, pInT_y = _SurrogateDiagProject(pWMap, pWX, pWY, targetMapID)
+    -- Target world pos projected into player's map.
+    local tInP_id, tInP_x, tInP_y = _SurrogateDiagProject(tWMap, tWX, tWY, playerMapID)
+    -- Player world pos resolved with no preferred map — which map does Blizzard naturally pick?
+    local pNat_id = _SurrogateDiagProject(pWMap, pWX, pWY, nil)
+    -- Target world pos resolved with no preferred map.
+    local tNat_id = _SurrogateDiagProject(tWMap, tWX, tWY, nil)
+
+    local canSetTarget = _SurrogateDiagSafeCall(C_Map and C_Map.CanSetUserWaypointOnMap, targetMapID)
+    local canSetPlayer = _SurrogateDiagSafeCall(C_Map and C_Map.CanSetUserWaypointOnMap, playerMapID)
+    local flyable = _SurrogateDiagSafeCall(IsFlyableArea)
+    local inInstance, instanceType = nil, nil
+    if type(IsInInstance) == "function" then
+        local ok, a, b = pcall(IsInInstance)
+        if ok then inInstance, instanceType = a, b end
+    end
+
+    NS.Log(
+        "Surrogate diag",
+        "dist=" .. string.format("%.1f", realDistance),
+        "p=" .. tostring(playerMapID),
+        "pType=" .. tostring(playerInfo and playerInfo.mapType or "-"),
+        "pParent=" .. tostring(playerInfo and playerInfo.parentMapID or "-"),
+        "pCont=" .. tostring(playerContinent or "-"),
+        "pCanSet=" .. tostring(canSetPlayer),
+        "t=" .. tostring(targetMapID),
+        "tType=" .. tostring(targetInfo and targetInfo.mapType or "-"),
+        "tParent=" .. tostring(targetInfo and targetInfo.parentMapID or "-"),
+        "tCont=" .. tostring(targetContinent or "-"),
+        "tCanSet=" .. tostring(canSetTarget),
+        "flyable=" .. tostring(flyable),
+        "inInst=" .. tostring(inInstance),
+        "instType=" .. tostring(instanceType or "-"),
+        "pWMap=" .. tostring(pWMap or "-"),
+        "pWXY=" .. _SurrogateDiagFmt(pWX) .. "/" .. _SurrogateDiagFmt(pWY),
+        "tWMap=" .. tostring(tWMap or "-"),
+        "tWXY=" .. _SurrogateDiagFmt(tWX) .. "/" .. _SurrogateDiagFmt(tWY),
+        "pNat=" .. tostring(pNat_id or "-"),
+        "tNat=" .. tostring(tNat_id or "-"),
+        "pInT=" .. tostring(pInT_id or "-") .. "@" .. _SurrogateDiagFmt(pInT_x) .. "," .. _SurrogateDiagFmt(pInT_y),
+        "tInP=" .. tostring(tInP_id or "-") .. "@" .. _SurrogateDiagFmt(tInP_x) .. "," .. _SurrogateDiagFmt(tInP_y)
+    )
+end
+
 local function GetSeededHostWaypoint(force)
     local targetMapID, targetX, targetY = RefreshResolvedHostTarget(force)
     if type(targetMapID) ~= "number" or type(targetX) ~= "number" or type(targetY) ~= "number" then
@@ -604,27 +777,54 @@ local function GetSeededHostWaypoint(force)
     end
 
     local realDistance = ResolveRealTargetDistance(targetMapID, targetX, targetY)
+    LogSurrogateDecisionDiagnostic(targetMapID, targetX, targetY, realDistance)
     if not ShouldUseSurrogateHost(realDistance) then
+        ClearSurrogateRejection()
+        return SetSeededHostTarget(targetMapID, targetX, targetY, realDistance, false)
+    end
+
+    -- Fix for cases like Shattrath→Hellfire: if
+    -- the player projects into the target's map rect, native nav handles the
+    -- original waypoint directly and the surrogate would be a downgrade. Gated
+    -- on "a surrogate has NEVER been active for this target," not the live state —
+    -- if the surrogate was needed at any point during the journey (e.g.
+    -- Bel'ameth→Valdrakken), letting the existing surrogate machinery keep
+    -- driving the host preserves turn-around continuity after the natural
+    -- distance-based release at the destination.
+    if IsTargetWithinNativeNavReach(targetMapID)
+        and overlay.surrogateEverActiveForSig ~= target.sig
+    then
         ClearSurrogateRejection()
         return SetSeededHostTarget(targetMapID, targetX, targetY, realDistance, false)
     end
 
     local playerMapID = GetPlayerMapID()
     if IsSurrogateRejectionFresh(target.sig, playerMapID) then
-        return SetSeededHostTarget(targetMapID, targetX, targetY, realDistance, false)
+        return SkipUnavailableSurrogateHost(playerMapID)
     end
 
     local targetContinent = GetMapContinentAncestor(targetMapID)
     local playerContinent = GetMapContinentAncestor(playerMapID)
     if targetContinent and playerContinent and targetContinent ~= playerContinent then
-        RecordSurrogateRejection(target.sig, playerMapID)
-        return SetSeededHostTarget(targetMapID, targetX, targetY, realDistance, false)
+        NS.Log(
+            "Native overlay surrogate projection unavailable",
+            tostring(target.mapID),
+            tostring(target.x),
+            tostring(target.y),
+            target.title or "",
+            tostring(realDistance),
+            "reason=continent_mismatch",
+            "p=" .. tostring(playerMapID) .. "/" .. tostring(playerContinent),
+            "t=" .. tostring(targetMapID) .. "/" .. tostring(targetContinent)
+        )
+        return SkipUnavailableSurrogateHost(playerMapID)
     end
 
     local surrogateSourceMapID = type(target.mapID) == "number" and target.mapID or targetMapID
     local surrogateSourceX = type(target.x) == "number" and target.x or targetX
     local surrogateSourceY = type(target.y) == "number" and target.y or targetY
-    local surrogateMapID, surrogateX, surrogateY, _, surrogateWorldX, surrogateWorldY =
+    local surrogateMapID, surrogateX, surrogateY, _, surrogateWorldX, surrogateWorldY,
+        surrogateFailureReason, surrogateFailureA, surrogateFailureB, surrogateFailureC, surrogateFailureD =
         ResolveWorldSpaceSurrogateUserWaypoint(
             surrogateSourceMapID,
             surrogateSourceX,
@@ -644,10 +844,15 @@ local function GetSeededHostWaypoint(force)
                 tostring(target.x),
                 tostring(target.y),
                 target.title or "",
-                tostring(realDistance)
+                tostring(realDistance),
+                "reason=" .. tostring(surrogateFailureReason or "-"),
+                tostring(surrogateFailureA or "-"),
+                tostring(surrogateFailureB or "-"),
+                tostring(surrogateFailureC or "-"),
+                tostring(surrogateFailureD or "-")
             )
         end
-        return SetSeededHostTarget(targetMapID, targetX, targetY, realDistance, false)
+        return SkipUnavailableSurrogateHost(playerMapID)
     end
 
     ClearSurrogateRejection()
@@ -891,6 +1096,16 @@ local function IsNativeHostRouteProbeBlocked()
     return type(playerMapID) == "number" and overlay.routeProbePlayerMapID == playerMapID
 end
 
+local function IsFreshNativeHostRouteSettle(reason)
+    if FRESH_HOST_SETTLE_FAILURE_REASON[reason] ~= true then
+        return false
+    end
+    if overlay.lastEnsureSig ~= target.sig then
+        return false
+    end
+    return (GetTime() - (overlay.lastEnsureTime or 0)) < FRESH_HOST_ROUTE_SETTLE_SECONDS
+end
+
 local function ShouldThrottleNativeHostEnsure(targetMapID, targetX, targetY)
     local now = GetTime()
     if overlay.lastEnsureSig ~= target.sig then
@@ -1104,9 +1319,10 @@ function NS.OnNativeNavFrameDestroyed()
             ResetInstanceCapabilityForMap(targetMapID)
         end
     end
+    local deferFailedProbe = target.active and IsFreshNativeHostRouteSettle("navigation_frame_destroyed")
     ClearNativeNavigationHost()
     local playerMapID = GetPlayerMapID()
-    if target.active and type(playerMapID) == "number" then
+    if target.active and type(playerMapID) == "number" and not deferFailedProbe then
         MarkNativeRouteProbe(false, playerMapID)
     end
     NS.UpdateNativeWorldOverlay()
@@ -1166,7 +1382,8 @@ local function ResolveMode()
     end
 
     local routeValid, routeReason, playerMapID, nextX, nextY, waypointDescription = GetNativeHostRouteValidation()
-    if type(playerMapID) == "number" then
+    local deferFailedProbe = not routeValid and IsFreshNativeHostRouteSettle(routeReason)
+    if type(playerMapID) == "number" and not deferFailedProbe then
         MarkNativeRouteProbe(routeValid, playerMapID)
     end
     if not routeValid then

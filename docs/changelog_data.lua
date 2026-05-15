@@ -2,6 +2,26 @@ local NS = _G.AzerothWaypointNS
 
 NS.CHANGELOG_DATA = {
     {
+        version = "4.0.1b",
+        sections = {
+            { title = "Native overlay long-distance routing", entries = {
+                { text = "Improved surrogate navigation point selection for far-away world overlay targets by projecting through the real world map, trying target/player map lineage candidates, validating round trips, and logging clearer failure reasons.", level = 1 },
+                { text = "Avoided replacing the real target with a surrogate when Blizzard's native navigation can already resolve the target map directly.", level = 1 },
+                { text = "Cleared unavailable surrogate hosts instead of falling back to an unroutable original target, preventing repeated native-navigation retries and hidden overlay churn on unsupported long-distance routes.", level = 1 },
+                { text = "Added a short settle window after setting the native navigation host so transient missing-waypoint or frame-destroyed events do not immediately mark a fresh route probe as failed.", level = 1 },
+                { text = "Added a one-time in-game notice when AWP uses an intermediate navigation point because Blizzard may not reliably supertrack the requested target at the current distance.", level = 1 },
+            }},
+            { title = "Manual route cancellation", entries = {
+                { text = "Pending manual routes with planned legs can now present through TomTom before the strict route transaction is fully committed.", level = 1 },
+                { text = "Removing TomTom's active waypoint while a strict manual route is still pending now cancels the pending manual queue transaction cleanly instead of treating it like a committed manual authority.", level = 1 },
+                { text = "Manual arrival checks now run only for committed manual authority routes, avoiding arrival cleanup against pending transactions.", level = 1 },
+            }},
+            { title = "Adopted Blizzard waypoint stability", entries = {
+                { text = "Blizzard supertrack-clear suppression now applies to every adopted user waypoint publish, not only manual ask-mode clicks, so AWP-adopted waypoints are less likely to be cleared immediately after adoption.", level = 1 },
+            }},
+        },
+    },
+    {
         version = "4.0.1a",
         sections = {
             { title = "SilverDragon waypoint adoption taint fix", entries = {

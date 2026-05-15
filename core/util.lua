@@ -1547,17 +1547,18 @@ function NS.GetWorldPositionFromMapCoords(mapID, x, y)
     return worldMapID, worldX, worldY
 end
 
-local function TryGetMapCoordsFromWorldPosition(worldX, worldY, preferredMapID)
+local function TryGetMapCoordsFromWorldPosition(worldMapID, worldX, worldY, preferredMapID)
     if type(C_Map.GetMapPosFromWorldPos) ~= "function" or type(CreateVector2D) ~= "function" then
         return
     end
 
     local worldPosition = CreateVector2D(worldX, worldY)
     local uiMapID, mapPosition
+    local continentID = type(worldMapID) == "number" and worldMapID or 0
     if type(preferredMapID) == "number" then
-        uiMapID, mapPosition = C_Map.GetMapPosFromWorldPos(0, worldPosition, preferredMapID)
+        uiMapID, mapPosition = C_Map.GetMapPosFromWorldPos(continentID, worldPosition, preferredMapID)
     else
-        uiMapID, mapPosition = C_Map.GetMapPosFromWorldPos(0, worldPosition)
+        uiMapID, mapPosition = C_Map.GetMapPosFromWorldPos(continentID, worldPosition)
     end
 
     local x, y = ReadMapPositionXY(mapPosition)
@@ -1575,12 +1576,12 @@ local function TryGetMapCoordsFromWorldPosition(worldX, worldY, preferredMapID)
     return uiMapID, x, y
 end
 
-function NS.ResolveUserWaypointMapCoordsFromWorldPosition(worldX, worldY, preferredMapID)
+function NS.ResolveUserWaypointMapCoordsFromWorldPosition(worldX, worldY, preferredMapID, worldMapID)
     if type(worldX) ~= "number" or type(worldY) ~= "number" then
         return
     end
 
-    local mapID, x, y = TryGetMapCoordsFromWorldPosition(worldX, worldY, preferredMapID)
+    local mapID, x, y = TryGetMapCoordsFromWorldPosition(worldMapID, worldX, worldY, preferredMapID)
     if type(mapID) == "number" and type(x) == "number" and type(y) == "number" then
         local settableMapID, settableX, settableY = NS.ResolveSettableUserWaypointTarget(mapID, x, y)
         if type(settableMapID) == "number" and type(settableX) == "number" and type(settableY) == "number" then
@@ -1589,7 +1590,7 @@ function NS.ResolveUserWaypointMapCoordsFromWorldPosition(worldX, worldY, prefer
     end
 
     if type(preferredMapID) == "number" then
-        mapID, x, y = TryGetMapCoordsFromWorldPosition(worldX, worldY)
+        mapID, x, y = TryGetMapCoordsFromWorldPosition(worldMapID, worldX, worldY)
         if type(mapID) == "number" and type(x) == "number" and type(y) == "number" then
             local settableMapID, settableX, settableY = NS.ResolveSettableUserWaypointTarget(mapID, x, y)
             if type(settableMapID) == "number" and type(settableX) == "number" and type(settableY) == "number" then
@@ -1756,33 +1757,164 @@ local function IsValidSurrogateMap(surrogateMapID, targetMapID, playerMapID)
     return false
 end
 
-function NS.ResolveWorldSpaceSurrogateUserWaypoint(targetMapID, targetX, targetY, surrogateDistance, preferredMapID)
-    if type(targetMapID) ~= "number" or type(targetX) ~= "number" or type(targetY) ~= "number" then
+local SURROGATE_ROUND_TRIP_TOLERANCE = 25
+
+local function AddSurrogateMapCandidate(candidates, seen, mapID)
+    if type(mapID) ~= "number" or mapID <= 0 or seen[mapID] then
+        return false
+    end
+    candidates[#candidates + 1] = mapID
+    seen[mapID] = true
+    return true
+end
+
+local function AddSurrogateMapLineageCandidates(candidates, seen, mapID)
+    if type(mapID) ~= "number" or mapID <= 0 then
         return
     end
+    local current = mapID
+    for _ = 1, C.MAX_PARENT_MAP_DEPTH do
+        AddSurrogateMapCandidate(candidates, seen, current)
+        if type(C_Map) ~= "table" or type(C_Map.GetMapInfo) ~= "function" then
+            return
+        end
+        local info = C_Map.GetMapInfo(current)
+        local parent = info and info.parentMapID
+        if type(parent) ~= "number" or parent <= 0 or seen[parent] then
+            return
+        end
+        current = parent
+    end
+end
+
+local function BuildSurrogateMapCandidates(targetMapID, playerMapID, preferredMapID)
+    local candidates, seen = {}, {}
+    AddSurrogateMapCandidate(candidates, seen, preferredMapID)
+    AddSurrogateMapLineageCandidates(candidates, seen, targetMapID)
+    AddSurrogateMapLineageCandidates(candidates, seen, playerMapID)
+    AddSurrogateMapCandidate(candidates, seen, NS.GetMapContinentAncestor(targetMapID))
+    AddSurrogateMapCandidate(candidates, seen, NS.GetMapContinentAncestor(playerMapID))
+    return candidates
+end
+
+local function FormatSurrogateMapCandidates(candidates)
+    if type(candidates) ~= "table" or #candidates == 0 then
+        return "-"
+    end
+    local parts = {}
+    for index = 1, math.min(#candidates, 8) do
+        parts[#parts + 1] = tostring(candidates[index])
+    end
+    if #candidates > #parts then
+        parts[#parts + 1] = "..."
+    end
+    return table.concat(parts, ",")
+end
+
+local function FailSurrogateProjection(reason, detailA, detailB, detailC, detailD)
+    return nil, nil, nil, nil, nil, nil, reason, detailA, detailB, detailC, detailD
+end
+
+local function FormatSurrogateProjectionCoord(value)
+    return type(value) == "number" and string.format("%.4f", value) or "-"
+end
+
+local function ResolveSurrogateMapCoordsFromWorldPosition(
+    worldMapID,
+    worldX,
+    worldY,
+    targetMapID,
+    playerMapID,
+    preferredMapID
+)
+    local candidates = BuildSurrogateMapCandidates(targetMapID, playerMapID, preferredMapID)
+    local candidateList = FormatSurrogateMapCandidates(candidates)
+    local lastReason, lastA, lastB, lastC
+
+    for _, candidateMapID in ipairs(candidates) do
+        local mapID, x, y = TryGetMapCoordsFromWorldPosition(worldMapID, worldX, worldY, candidateMapID)
+        if type(mapID) == "number" and type(x) == "number" and type(y) == "number" then
+            local settableMapID, settableX, settableY = NS.ResolveSettableUserWaypointTarget(mapID, x, y)
+            if type(settableMapID) == "number" and type(settableX) == "number" and type(settableY) == "number" then
+                if IsValidSurrogateMap(settableMapID, targetMapID, playerMapID) then
+                    local roundTripWorldMapID, roundTripWorldX, roundTripWorldY =
+                        NS.GetWorldPositionFromMapCoords(settableMapID, settableX, settableY)
+                    if roundTripWorldMapID == worldMapID
+                        and type(roundTripWorldX) == "number"
+                        and type(roundTripWorldY) == "number"
+                    then
+                        local dx = roundTripWorldX - worldX
+                        local dy = roundTripWorldY - worldY
+                        local delta = math.sqrt(dx * dx + dy * dy)
+                        if delta <= SURROGATE_ROUND_TRIP_TOLERANCE then
+                            return settableMapID, settableX, settableY
+                        end
+                        lastReason = "roundtrip_delta"
+                        lastA = "m=" .. tostring(settableMapID)
+                        lastB = "d=" .. FormatSurrogateProjectionCoord(delta)
+                    else
+                        lastReason = "roundtrip_world_mismatch"
+                        lastA = "m=" .. tostring(settableMapID)
+                        lastB = "world=" .. tostring(roundTripWorldMapID or "-")
+                    end
+                else
+                    lastReason = "invalid_surrogate_map"
+                    lastA = "s=" .. tostring(settableMapID)
+                    lastB = "p=" .. tostring(playerMapID)
+                    lastC = "t=" .. tostring(targetMapID)
+                end
+            else
+                lastReason = "candidate_not_settable"
+                lastA = "m=" .. tostring(mapID)
+            end
+        else
+            lastReason = "candidate_out_of_bounds"
+            lastA = "m=" .. tostring(candidateMapID)
+        end
+    end
+
+    return nil, nil, nil,
+        lastReason or "map_coords_unavailable",
+        "world=" .. tostring(worldMapID),
+        "candidates=" .. candidateList,
+        "point=" .. FormatSurrogateProjectionCoord(worldX) .. "," .. FormatSurrogateProjectionCoord(worldY),
+        table.concat({ tostring(lastA or "-"), tostring(lastB or "-"), tostring(lastC or "-") }, "/")
+end
+
+function NS.ResolveWorldSpaceSurrogateUserWaypoint(targetMapID, targetX, targetY, surrogateDistance, preferredMapID)
+    if type(targetMapID) ~= "number" or type(targetX) ~= "number" or type(targetY) ~= "number" then
+        return FailSurrogateProjection("invalid_target")
+    end
     if type(surrogateDistance) ~= "number" or surrogateDistance <= 0 then
-        return
+        return FailSurrogateProjection("invalid_distance", tostring(surrogateDistance or "-"))
     end
 
     local playerMapID, playerX, playerY = NS.GetPlayerMapPosition()
     if type(playerMapID) ~= "number" or type(playerX) ~= "number" or type(playerY) ~= "number" then
-        return
+        return FailSurrogateProjection("player_position_unavailable")
     end
 
     local playerWorldMapID, playerWorldX, playerWorldY = NS.GetWorldPositionFromMapCoords(playerMapID, playerX, playerY)
     local targetWorldMapID, targetWorldX, targetWorldY = NS.GetWorldPositionFromMapCoords(targetMapID, targetX, targetY)
-    if type(playerWorldMapID) ~= "number"
-        or type(targetWorldMapID) ~= "number"
-        or playerWorldMapID ~= targetWorldMapID
-    then
-        return
+    if type(playerWorldMapID) ~= "number" then
+        return FailSurrogateProjection("player_world_unavailable", "p=" .. tostring(playerMapID))
+    end
+    if type(targetWorldMapID) ~= "number" then
+        return FailSurrogateProjection("target_world_unavailable", "t=" .. tostring(targetMapID))
+    end
+    if playerWorldMapID ~= targetWorldMapID then
+        return FailSurrogateProjection(
+            "world_map_mismatch",
+            "p=" .. tostring(playerMapID) .. "/" .. tostring(playerWorldMapID),
+            "t=" .. tostring(targetMapID) .. "/" .. tostring(targetWorldMapID)
+        )
     end
 
     local dx = targetWorldX - playerWorldX
     local dy = targetWorldY - playerWorldY
     local distance = math.sqrt(dx * dx + dy * dy)
     if distance <= 0 then
-        return
+        return FailSurrogateProjection("zero_distance")
     end
 
     local travelDistance = math.min(surrogateDistance, distance)
@@ -1790,17 +1922,33 @@ function NS.ResolveWorldSpaceSurrogateUserWaypoint(targetMapID, targetX, targetY
     local surrogateWorldX = playerWorldX + dx * scale
     local surrogateWorldY = playerWorldY + dy * scale
 
-    local surrogateMapID, surrogateX, surrogateY = NS.ResolveUserWaypointMapCoordsFromWorldPosition(
-        surrogateWorldX,
-        surrogateWorldY,
-        preferredMapID
-    )
+    local surrogateMapID, surrogateX, surrogateY,
+        surrogateFailureReason, surrogateFailureA, surrogateFailureB, surrogateFailureC, surrogateFailureD =
+        ResolveSurrogateMapCoordsFromWorldPosition(
+            playerWorldMapID,
+            surrogateWorldX,
+            surrogateWorldY,
+            targetMapID,
+            playerMapID,
+            preferredMapID
+        )
     if type(surrogateMapID) ~= "number" or type(surrogateX) ~= "number" or type(surrogateY) ~= "number" then
-        return
+        return FailSurrogateProjection(
+            surrogateFailureReason or "map_coords_unavailable",
+            surrogateFailureA,
+            surrogateFailureB,
+            surrogateFailureC,
+            surrogateFailureD
+        )
     end
 
     if not IsValidSurrogateMap(surrogateMapID, targetMapID, playerMapID) then
-        return
+        return FailSurrogateProjection(
+            "invalid_surrogate_map",
+            "s=" .. tostring(surrogateMapID),
+            "p=" .. tostring(playerMapID),
+            "t=" .. tostring(targetMapID)
+        )
     end
 
     return surrogateMapID, surrogateX, surrogateY, distance, surrogateWorldX, surrogateWorldY

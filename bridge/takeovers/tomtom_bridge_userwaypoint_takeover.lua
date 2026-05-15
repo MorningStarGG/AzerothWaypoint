@@ -21,10 +21,6 @@ local function GetTimeSafe()
     return type(GetTime) == "function" and GetTime() or 0
 end
 
-local function IsManualClickAskMode()
-    return type(NS.GetManualClickQueueMode) == "function" and NS.GetManualClickQueueMode() == "ask"
-end
-
 local function IsWaypointLocationDataProviderStack()
     if type(debugstack) ~= "function" then
         return false
@@ -319,9 +315,7 @@ function NS.InstallUserWaypointHooks()
 
             local adopted = NS.SafeCall(HandleExplicitBlizzardUserWaypointSet, mapID, x, y, sourceAddon)
             if adopted then
-                if IsManualClickAskMode() then
-                    ArmUserWaypointSupertrackClearSuppression(mapID, x, y)
-                end
+                ArmUserWaypointSupertrackClearSuppression(mapID, x, y)
                 return
             end
             return originalSetUserWaypoint(uiMapPoint, ...)
@@ -337,7 +331,7 @@ function NS.InstallUserWaypointHooks()
                 return originalSetSuperTrackedUserWaypoint(enabled, ...)
             end
             if enabled == false and ConsumeUserWaypointSupertrackClearSuppression() then
-                NS.Log("Blizzard waypoint supertrack clear suppressed", "ask")
+                NS.Log("Blizzard waypoint supertrack clear suppressed", "adopted")
                 return
             end
             return originalSetSuperTrackedUserWaypoint(enabled, ...)

@@ -1,5 +1,21 @@
 # Changelog
 
+## 4.0.1b
+- **Native overlay long-distance routing**
+  - Improved surrogate navigation point selection for far-away world overlay targets by projecting through the real world map, trying target/player map lineage candidates, validating round trips, and logging clearer failure reasons.
+  - Avoided replacing the real target with a surrogate when Blizzard's native navigation can already resolve the target map directly.
+  - Cleared unavailable surrogate hosts instead of falling back to an unroutable original target, preventing repeated native-navigation retries and hidden overlay churn on unsupported long-distance routes.
+  - Added a short settle window after setting the native navigation host so transient missing-waypoint or frame-destroyed events do not immediately mark a fresh route probe as failed.
+  - Added a one-time in-game notice when AWP uses an intermediate navigation point because Blizzard may not reliably supertrack the requested target at the current distance.
+
+- **Manual route cancellation**
+  - Pending manual routes with planned legs can now present through TomTom before the strict route transaction is fully committed.
+  - Removing TomTom's active waypoint while a strict manual route is still pending now cancels the pending manual queue transaction cleanly instead of treating it like a committed manual authority.
+  - Manual arrival checks now run only for committed manual authority routes, avoiding arrival cleanup against pending transactions.
+
+- **Adopted Blizzard waypoint stability**
+  - Blizzard supertrack-clear suppression now applies to every adopted user waypoint publish, not only manual ask-mode clicks, so AWP-adopted waypoints are less likely to be cleared immediately after adoption.
+
 ## 4.0.1a
 - **SilverDragon waypoint adoption taint fix**
   - Removed the SilverDragon-specific deferred TomTom adoption path. SilverDragon waypoints now adopt synchronously through the same `RouteExternalTomTomWaypoint` path other external sources already use.

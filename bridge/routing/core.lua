@@ -1155,12 +1155,23 @@ end
 -- Dedupes against state.routing.lastPushedCarrierUID/Sig and
 -- lastPushedOverlaySig so identical re-pushes are no-ops.
 
+local function IsPresentablePendingManualAuthority(record)
+    return type(record) == "table"
+        and type(record.legs) == "table"
+        and #record.legs > 0
+        and record._coreStrictRouteCompleted ~= true
+end
+
 local function ArbitrateAuthority()
     local routing = state.routing
+    local pending = routing.pendingManualAuthority
+    if IsPresentablePendingManualAuthority(pending) then
+        return pending, "manual"
+    end
     if routing.manualAuthority then
         return routing.manualAuthority, "manual"
     end
-    if routing.pendingManualAuthority then
+    if pending then
         return nil, nil
     end
     local gs = type(NS.GetActiveGuideRouteState) == "function" and NS.GetActiveGuideRouteState() or routing.guideRouteState
@@ -1678,6 +1689,7 @@ function NS.RecomputeCarrier()
     local authority, source = ArbitrateAuthority()
     local advanced = PollCoreCurrentLeg(authority, source)
     if source == "manual"
+        and authority == routing.manualAuthority
         and type(NS.CheckManualAuthorityArrival) == "function"
         and not routing._manualArrivalCheckActive
     then
@@ -1753,6 +1765,7 @@ function NS.RecomputeCarrier()
         routing.carrierState.source = source
         routing.carrierState.kind = semanticKind
         routing.carrierState.title = title
+        routing.carrierState.authorityPending = authority._corePendingManualRoute == true or nil
         routing.carrierState.routeLegKind = routeLegKind
         routing.carrierState.routeTravelType = NormalizeCarrierRouteTravelType(leg)
         routing.carrierState.plannerLegKind = leg.kind or nil

@@ -1019,7 +1019,19 @@ local function HandleExternalCarrierRemove(uid)
     -- must run the explicit-clear fan-out first. Guide routes are read-only:
     -- TomTom can remove the physical UID, but the live guide step remains
     -- authoritative and is immediately re-pushed.
-    if type(NS.GetManualAuthority) == "function" and NS.GetManualAuthority() then
+    if cs.source == "manual"
+        and cs.authorityPending == true
+        and type(NS.State.routing.pendingManualAuthority) == "table"
+    then
+        ForgetExternalClearedCarrier(false)
+        if type(NS.CancelPendingManualRoute) == "function" then
+            NS.CancelPendingManualRoute("remove_waypoint")
+        end
+        if type(NS.RecomputeCarrier) == "function" then
+            NS.RecomputeCarrier()
+        end
+        return true
+    elseif type(NS.GetManualAuthority) == "function" and NS.GetManualAuthority() then
         if type(NS.HandleExplicitManualAuthorityRemove) == "function" then
             NS.HandleExplicitManualAuthorityRemove()
             return true
