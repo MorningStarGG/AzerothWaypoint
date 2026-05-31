@@ -217,6 +217,9 @@ local function ClassifyNodeKind(node, specialAction, isDestination)
     if type(mode) == "string" and (mode:find("taxi", 1, true) or mode:find("flightpath", 1, true)) then
         return "taxi"
     end
+    if tonumber(GetTravelField(node, "taxinodeID") or GetTravelField(node, "taxiNodeID") or GetTravelField(node, "taxinodeid")) then
+        return "taxi"
+    end
     if type(mode) == "string" and mode:find("fly", 1, true) then
         return "fly"
     end
@@ -242,6 +245,28 @@ local function RouteTravelTypeForKind(kind)
         return "travel"
     end
     return kind
+end
+
+local function BuildTaxiMetadata(node, kind)
+    if kind ~= "taxi" or type(node) ~= "table" then
+        return nil
+    end
+
+    local nodeID = tonumber(GetTravelField(node, "taxinodeID") or GetTravelField(node, "taxiNodeID") or GetTravelField(node, "taxinodeid"))
+    local operator = TrimString(GetTravelField(node, "taxioperator"))
+    local final = node.taxiFinal == true or node.taxiDestination == true
+        or GetTravelField(node, "taxiFinal") == true
+        or GetTravelField(node, "taxiDestination") == true
+
+    if not nodeID and not operator and not final then
+        return nil
+    end
+
+    return {
+        nodeID = nodeID,
+        operator = operator,
+        final = final or nil,
+    }
 end
 
 local function ResolveRouteTravelType(record, mapID, x, y, legKind, fallbackKind)
@@ -329,6 +354,7 @@ local function TranslatePathToLegs(path, record, fallbackTitle)
                         or IsSameRouteCoord(mapID, x, y, destinationMapID, destinationX, destinationY)
                     local specialAction = NS.BuildSpecialActionFromZygorNode(node)
                     local kind = ClassifyNodeKind(node, specialAction, isDestination)
+                    local taxi = BuildTaxiMetadata(node, kind)
                     local routeLegKind = isDestination and "destination" or "carrier"
                     local legMapID, legX, legY = mapID, x, y
                     if ShouldUseSourceCoordsForSpecialAction(routeLegKind, kind, specialAction, sourceMapID, sourceX, sourceY) then
@@ -351,6 +377,7 @@ local function TranslatePathToLegs(path, record, fallbackTitle)
                         routeLegKind = routeLegKind,
                         source = "zygor",
                         routeTravelType = ResolveRouteTravelType(record, legMapID, legX, legY, routeLegKind, kind),
+                        taxi = taxi,
                         arrivalRadius = ResolveArrivalRadius(node, kind, specialAction),
                         activationCoords = type(specialAction) == "table" and specialAction.activationCoords or nil,
                         arrivalGate = BuildArrivalGate(node),

@@ -59,6 +59,25 @@ Data.PREVIEW_IMAGE_SIZES = {
     [MEDIA_HELP .. "WaypointFooterDestinationName.tga"] = { w = 344, h = 207 },
     [MEDIA_HELP .. "WaypointFooterArrivalTime.tga"] = { w = 344, h = 207 },
     [MEDIA_HELP .. "WaypointFooterDistance.tga"] = { w = 344, h = 207 },
+
+
+    [MEDIA_HELP .. "TrackerViewer.tga"] = { w = 416, h = 253 },
+    [MEDIA_HELP .. "TrackerRoundedBorder.tga"] = { w = 394, h = 31 },
+    [MEDIA_HELP .. "TrackerSquareBorder.tga"] = { w = 394, h = 31 },
+    [MEDIA_HELP .. "TrackerNoProgress.tga"] = { w = 394, h = 31 },
+    [MEDIA_HELP .. "TrackerAutoColor.tga"] = { w = 416, h = 159 },
+    [MEDIA_HELP .. "TrackerWhiteColor.tga"] = { w = 416, h = 159 },
+
+    [MEDIA_HELP .. "MinimapButton.tga"] = { w = 247, h = 553 },
+
+    [MEDIA_HELP .. "ChatCountTitles.tga"] = { w = 587, h = 251 },
+    [MEDIA_HELP .. "ChatStickyDisabled.tga"] = { w = 587, h = 149 },
+    [MEDIA_HELP .. "ChatCountOnly.tga"] = { w = 587, h = 199 },
+    [MEDIA_HELP .. "ChatColorWhite.tga"] = { w = 587, h = 251 },
+
+    [MEDIA_HELP .. "FlightHighlight.tga"] = { w = 259, h = 384 },
+    [MEDIA_HELP .. "TaxiList.tga"] = { w = 596, h = 500 },
+
 }
 
 Data.TWITCH_URL = "https://www.twitch.tv/MorningStarGG"
@@ -67,7 +86,7 @@ Data.ABOUT_SUMMARY =
 Data.ABOUT_DESCRIPTION = table.concat({
     "AzerothWaypoint turns guide steps, Blizzard map interactions, TomTom waypoints, tracked quests, and supported addon POIs into one routed navigation flow.",
     "",
-    "It can plan routes through Farstrider, Mapzeroth, or Zygor backends, or use TomTom Direct, preserve manual and guide queue state across reloads, and present the active waypoint through TomTom and AWP's 3D waypoint.",
+    "It can plan routes through Farstrider, Mapzeroth, or Zygor backends, or use TomTom directly, preserve manual and guide queue state across reloads, and present the active destination through TomTom and AWP's 3D world overlay.",
 }, "\n")
 
 Data.SECTION_DEFS = {
@@ -84,7 +103,8 @@ Data.ZYGOR_SECTION = {
     key = "zygor",
     label = "Zygor",
     image = MEDIA_HELP .. "Normal.tga",
-    desc = "Settings for optional Zygor Guides integration.",
+    desc =
+    "Settings for optional Zygor Guides integration, compact guide display, tracker viewer UI, and chat step display.",
 }
 
 Data.OPTION_PREVIEWS = {
@@ -98,11 +118,11 @@ Data.OPTION_PREVIEWS = {
     },
     ["Hide During Combat"] = {
         image = MEDIA_HELP .. "Overlay.tga",
-        desc = "Temporarily hides TomTom, the special travel button, the 3D overlay, or both while you are in combat.",
+        desc = "Temporarily hides selected navigation displays while you are in combat, then restores them afterward.",
     },
     ["Quick-Start Popup"] = {
         image = MEDIA_HELP .. "MainShot.tga",
-        desc = "Controls whether the first-time quick-start guide opens automatically on login.",
+        desc = "Controls whether quick-start guide opens automatically on login.",
     },
     ["What's New Popup"] = {
         image = MEDIA_HELP .. "MainShot.tga",
@@ -141,9 +161,66 @@ Data.OPTION_PREVIEWS = {
         desc =
         "Scales the special travel action button shown for hearthstones, items, spells, and other travel actions.",
     },
+    ["Show Flight Map Route Marker"] = {
+        image = MEDIA_HELP .. "FlightHighlight.tga",
+        desc =
+        "Marks the route flight path destination on the flight map when the active route uses a taxi.",
+    },
+    ["Auto Take Flight Paths"] = {
+        image = MEDIA_HELP .. "FlightHighlight.tga",
+        desc =
+        "Automatically takes flight paths from the flight map. Hold Alt to skip.",
+    },
+    ["Show Flight Map Taxi List"] = {
+        image = MEDIA_HELP .. "TaxiList.tga",
+        desc =
+        "Shows an AWP taxi list attached to the flight map with favorites, recent flights, current-zone flights, search, and reachable destinations.",
+    },
+    ["Flight Map Taxi List Side"] = {
+        image = MEDIA_HELP .. "TaxiList.tga",
+        desc = "Chooses which side of the flight map the AWP taxi list attaches to.",
+    },
+    ["Flight Map Taxi List Text Size"] = {
+        image = MEDIA_HELP .. "TaxiList.tga",
+        desc = "Adjusts text size in the attached flight map taxi list.",
+    },
+    ["Show Minimap Button"] = {
+        image = MEDIA_HELP .. "MinimapButton.tga",
+        desc = "Shows the AzerothWaypoint minimap button.",
+    },
     ["Show Only Guide Steps Until Mouseover"] = {
         image = MEDIA_HELP .. "MinimalMode.tga",
         desc = "Compacts the Zygor guide frame until you mouse over it.",
+    },
+    ["Enable Tracker Viewer"] = {
+        image = MEDIA_HELP .. "TrackerViewer.tga",
+        desc =
+        "Shows Zygor guide steps inside the objective tracker. Supports Blizzard's Objective Tracker and Kaliel's Tracker.",
+    },
+    ["Tracker Viewer Progress Bar"] = {
+        image = MEDIA_HELP .. "TrackerRoundedBorder.tga",
+        desc = "Choose square, rounded border, or no progress bar for the tracker Viewer.",
+    },
+    ["Tracker Viewer Text"] = {
+        image = MEDIA_HELP .. "TrackerAutoColor.tga",
+        desc = "Use contextual Tracker Viewer text colors or force all step text one selected color.",
+    },
+    ["Show Step in Chat on Step Change"] = {
+        image = MEDIA_HELP .. "ChatCountTitles.tga",
+        desc =
+        "Shows the current Zygor step in your own chat frame when Zygor changes steps. This is local-only and is not sent to other players.",
+    },
+    ["Chat Step Text"] = {
+        image = MEDIA_HELP .. "ChatCountTitles.tga",
+        desc = "Use contextual colors or force displayed Zygor step text to one selected color.",
+    },
+    ["Chat Sticky Summary"] = {
+        image = MEDIA_HELP .. "ChatCountTitles.tga",
+        desc = "Controls whether chat step output includes active sticky step count or titles.",
+    },
+    ["Hide Zygor's Native Frame"] = {
+        image = MEDIA_HELP .. "TrackerViewer.tga",
+        desc = "Hides Zygor's full-size viewer while keeping guide state, waypoints, guide picker, and menus available.",
     },
 }
 
@@ -190,6 +267,84 @@ Data.OPTION_VALUE_PREVIEWS = {
         ["Hide Step Backgrounds + Line Colors"] = {
             image = MEDIA_HELP .. "MinimalModeHideBGColors.tga",
             desc = "Hides guide step row backgrounds and removes goal line colors until mouseover.",
+        },
+    },
+    ["Auto Take Flight Paths"] = {
+        [C.FLIGHT_MAP_AUTO_TAKE_DISABLED] = {
+            image = MEDIA_HELP .. "FlightHighlight.tga",
+            desc = "Never auto-take flight paths.",
+        },
+        [C.FLIGHT_MAP_AUTO_TAKE_EXACT] = {
+            image = MEDIA_HELP .. "FlightHighlight.tga",
+            desc = "Auto-take only exact Zygor/LibRover taxi-node matches for route.",
+        },
+        [C.FLIGHT_MAP_AUTO_TAKE_STRONG] = {
+            image = MEDIA_HELP .. "FlightHighlight.tga",
+            desc = "Auto-take exact matches and strict coordinate/name matches for route.",
+        },
+    },
+    ["Flight Map Taxi List Side"] = {
+        ["auto"] = {
+            image = MEDIA_HELP .. "TaxiList.tga",
+            desc =
+            "Auto attaches the taxi list to the side with available screen space and updates as the flight map moves.",
+        },
+        ["left"] = {
+            image = MEDIA_HELP .. "TaxiList.tga",
+            desc = "Attach the taxi list to the left side of the flight map.",
+        },
+        ["right"] = {
+            image = MEDIA_HELP .. "TaxiList.tga",
+            desc = "Attach the taxi list to the right side of the flight map.",
+        },
+    },
+    ["Tracker Viewer Progress Bar"] = {
+        ["square"] = {
+            image = MEDIA_HELP .. "TrackerSquareBorder.tga",
+            desc = "Uses a square progress bar.",
+        },
+        ["rounded"] = {
+            image = MEDIA_HELP .. "TrackerRoundedBorder.tga",
+            desc = "Uses a rounded progress bar.",
+        },
+        ["none"] = {
+            image = MEDIA_HELP .. "TrackerNoProgress.tga",
+            desc = "Hides the progress bar.",
+        },
+    },
+    ["Tracker Viewer Text"] = {
+        [C.WORLD_OVERLAY_COLOR_AUTO] = {
+            image = MEDIA_HELP .. "TrackerAutoColor.tga",
+            desc = "Use contextual tracker viewer text colors.",
+        },
+        [C.WORLD_OVERLAY_COLOR_CUSTOM] = {
+            image = MEDIA_HELP .. "TrackerWhiteColor.tga",
+            desc = "Use selected text color for tracker viewer goal rows. White is shown.",
+        },
+    },
+    ["Chat Step Text"] = {
+        [C.WORLD_OVERLAY_COLOR_AUTO] = {
+            image = MEDIA_HELP .. "ChatCountTitles.tga",
+            desc = "Use contextual colors for `/awp zygor output` and step-change chat text.",
+        },
+        [C.WORLD_OVERLAY_COLOR_CUSTOM] = {
+            image = MEDIA_HELP .. "ChatColorWhite.tga",
+            desc = "Use selected text color for `/awp zygor output` and step-change chat text. White is shown.",
+        },
+    },
+    ["Chat Sticky Summary"] = {
+        [C.ZYGOR_STEP_CHAT_STICKY_NONE] = {
+            image = MEDIA_HELP .. "ChatStickyDisabled.tga",
+            desc = "`/awp zygor output` and step-change chat display won't mention active sticky steps.",
+        },
+        [C.ZYGOR_STEP_CHAT_STICKY_COUNT] = {
+            image = MEDIA_HELP .. "ChatCountOnly.tga",
+            desc = "`/awp zygor output` and step-change chat display will show only the number of active sticky steps.",
+        },
+        [C.ZYGOR_STEP_CHAT_STICKY_TITLES] = {
+            image = MEDIA_HELP .. "ChatCountTitles.tga",
+            desc =
+            "`/awp zygor output` and step-change chat display will show the number of active sticky steps and their titles.",
         },
     },
     ["Manual Click Queue Behavior"] = {
@@ -259,77 +414,91 @@ Data.SEARCH_FILTERS = {
     { value = "visual",       text = "Visual Markers",   desc = "World overlay, waypoints, pinpoint, navigator, and arrow presentation." },
     { value = "sizing",       text = "Size & Opacity",   desc = "Scale, distance, opacity, offset, and height controls." },
     { value = "styles",       text = "Colors & Styles",  desc = "Skins, colors, plaques, context display, and text styling." },
-    { value = "integrations", text = "Integrations",     desc = "TomTom, Zygor, routing backends, and special travel behavior." },
+    { value = "integrations", text = "Integrations",     desc = "TomTom, Zygor, guide addons, routing backends, tracker addons, map/POI addons, and flight-map helpers." },
 }
 
 Data.OPTIONS = {
-    { key = "about",     label = "About",                                     desc = Data.ABOUT_SUMMARY },
-    { key = "general",   label = "Enable Routing",                            desc = "Enable or disable AzerothWaypoint route ownership.",                                                  added = "3.0.0", updated = "4.0.0",                                                                                                 note = "Reworked for v4 route ownership and backend selection." },
-    { key = "general",   label = "Routing Backend",                           desc = "Choose the routing backend: Farstrider, Mapzeroth, Zygor or use TomTom Directly",                     added = "4.0.0", note = "Adds TomTom Direct, Zygor, Mapzeroth, and FarstriderLib backend support.",                                 tags = "direct tomtom direct farstrider mapzeroth zygor" },
-    { key = "general",   label = "Hide During Combat",                        desc = "Temporarily hide TomTom, the special travel button, the 3D world overlay, or both while in combat.",      added = "4.0.0b", tags = "combat hide tomtom arrow travel button special action overlay world overlay both disabled" },
-    { key = "general",   label = "Quick-Start Popup",                         desc = "Choose whether the first-time quick-start guide opens account-wide, per-character, or not automatically.", added = "4.0.0b", tags = "help popup login startup account character disabled first time quick start overview guide" },
-    { key = "general",   label = "What's New Popup",                          desc = "Choose whether What's New opens account-wide, per-character, or not automatically after addon updates.", added = "4.0.0b", tags = "whats new changelog popup login startup account character disabled updates release notes" },
-    { key = "general",   label = "Manual Click Queue Behavior",               desc = "Choose how Blizzard map clicks enter the manual queue.",                                              added = "4.0.0", note = "Adds explicit create, replace, append, and prompt behavior for map clicks.",                               tags = "create new queue replace active append ask prompt" },
-    { key = "general",   label = "Auto-Clear Manual Waypoints on Arrival",    desc = "Clear manual waypoints when you reach the destination.",                                              added = "2.3.0" },
-    { key = "general",   label = "Manual Waypoint Clear Distance",            desc = "Set the arrival distance used to clear manual waypoints.",                                            added = "2.3.0" },
-    { key = "general",   label = "Auto-Route Tracked Quests",                 desc = "Automatically route tracked Blizzard quests. Guide steps are protected while a guide is active.",     added = "3.1.0", updated = "4.0.0",                                                                                                 note = "Now uses v4 route authority and guide protection." },
-    { key = "general",   label = "Auto-Clear Untracked Quests",               desc = "Remove matching AWP quest waypoint and queue entries when quests are untracked.",                     added = "4.0.0", tags = "quest tracking untracking queue clear" },
-    { key = "general",   label = "Auto-Clear Supertracked Quests on Arrival", desc = "Clear supertracked quest routes when you reach the destination.",                                     added = "3.1.0" },
-    { key = "general",   label = "Adopt Waypoints from Unknown Addons",       desc = "Adopt click-like Blizzard waypoint calls from addons without dedicated AWP support.",                 added = "4.0.0", tags = "addon allowlist blocklist worldquesttab" },
-    { key = "general",   label = "Detected Addon Callers",                    desc = "Review recent unknown addon waypoint API callers and allow or block them.",                           added = "4.0.0", tags = "addon allowlist blocklist" },
-    { key = "general",   label = "Addon Allowlist",                           desc = "Addon folder names allowed to use generic waypoint adoption.",                                        added = "4.0.0", tags = "addon allowlist allow" },
-    { key = "general",   label = "Addon Blocklist",                           desc = "Addon folder names blocked from generic waypoint adoption.",                                          added = "4.0.0", tags = "addon blocklist block" },
-    { key = "tomtom",    label = "Use Custom Arrow Skin",                     desc = "Use a registered skin instead of TomTom's default arrow art.",                                        added = "3.0.0", updated = "4.0.0",                                                                                                 note = "Now uses the registered arrow skin system.",                                    tags = "zygor starlight stealth" },
-    { key = "tomtom",    label = "Arrow Skin",                                desc = "Choose the active TomTom arrow skin.",                                                                added = "3.0.0", updated = "4.0.0",                                                                                                 note = "Now lists registered skins dynamically, including Zygor skins when available.", tags = "tomtom default zygor starlight stealth awp awp bomber awp modern alliance horde" },
-    { key = "tomtom",    label = "TomTom Arrow Scale",                        desc = "Scale the active custom TomTom arrow skin.",                                                          added = "3.0.0", updated = "4.0.0",                                                                                                 note = "Moved into the v4 arrow skin settings.",                                        tags = "zygor arrow scale" },
-    { key = "tomtom",    label = "Special Travel Button Scale",               desc = "Scale the button that shows for routes using hearthstones, items, spells, and other travel actions.", added = "4.0.0", note = "Adds a scale control for the special travel button.",                                                      tags = "travel action button hearthstone portal item spell" },
-    { key = "overlay",   label = "Enable 3D World Overlay",                   desc = "Show or hide the in-world waypoint overlay.",                                                         added = "3.0.0" },
-    { key = "overlay",   label = "Fade on Hover",                             desc = "Fade the 3D overlay while the mouse is over it.",                                                     added = "3.0.0" },
-    { key = "overlay",   label = "Context Display",                           desc = "Choose context display: diamond and icon, icon only, or hidden.",                                     added = "3.0.0", tags = "context diamond + icon context diamond icon icon only hidden" },
-    { key = "overlay",   label = "Context Diamond",                           desc = "Change the context diamond color.",                                                                   added = "3.0.0", updated = "4.0.0",                                                                                                 note = "Color modes now use Auto contextual hints and the Gray preset.",                tags = "color tint auto blue custom cyan gold gray green pink purple red silver white" },
-    { key = "overlay",   label = "Icons",                                     desc = "Change overlay icon color.",                                                                          added = "3.0.0", updated = "4.0.0",                                                                                                 note = "Color modes now use Auto contextual hints and the Gray preset.",                tags = "color tint auto blue custom cyan gold gray green pink purple red silver white" },
-    { key = "waypoint",  label = "Waypoint",                                  desc = "Control the long-range waypoint marker.",                                                             added = "3.0.0", tags = "enabled disabled" },
-    { key = "waypoint",  label = "Waypoint Size",                             desc = "Scale the 3D waypoint frame.",                                                                        added = "3.0.0" },
-    { key = "waypoint",  label = "Waypoint Min Size",                         desc = "Set the minimum dynamic waypoint scale.",                                                             added = "3.0.0" },
-    { key = "waypoint",  label = "Waypoint Max Size",                         desc = "Set the maximum dynamic waypoint scale.",                                                             added = "3.0.0" },
-    { key = "waypoint",  label = "Waypoint Opacity",                          desc = "Change waypoint marker opacity.",                                                                     added = "3.0.0", tags = "transparency transparent alpha visibility" },
-    { key = "waypoint",  label = "Vertical Offset",                           desc = "Move the waypoint marker up or down.",                                                                added = "3.0.0" },
-    { key = "waypoint",  label = "Beacon Style",                              desc = "Choose beacon, base only, distance based, or off.",                                                   added = "3.0.0" },
-    { key = "waypoint",  label = "Beacon Base Distance",                      desc = "Set the distance where the beacon switches to base-only.",                                            added = "3.0.0" },
-    { key = "waypoint",  label = "Beacon Opacity",                            desc = "Change beacon opacity.",                                                                              added = "3.0.0", tags = "transparency transparent alpha visibility" },
-    { key = "waypoint",  label = "Base Vertical Offset",                      desc = "Move the base-only beacon vertically.",                                                               added = "3.0.0" },
-    { key = "waypoint",  label = "Use Meters instead of Yards",               desc = "Format overlay distance in meters.",                                                                  added = "3.0.0" },
-    { key = "waypoint",  label = "Footer Text",                               desc = "Choose waypoint footer information.",                                                                 added = "3.0.0", tags = "all distance arrival time destination name none" },
-    { key = "waypoint",  label = "Info Text Size",                            desc = "Scale waypoint footer text.",                                                                         added = "3.0.0" },
-    { key = "waypoint",  label = "Info Text Opacity",                         desc = "Change waypoint footer text opacity.",                                                                added = "3.0.0", tags = "transparency transparent alpha visibility" },
-    { key = "waypoint",  label = "Distance/Arrival Time Opacity",             desc = "Change distance and arrival time text opacity.",                                                      added = "3.0.0", tags = "transparency transparent alpha visibility" },
-    { key = "waypoint",  label = "Waypoint Text",                             desc = "Change waypoint footer text color.",                                                                  added = "3.0.0", updated = "4.0.0",                                                                                                 note = "Color modes now use Auto contextual hints and the Gray preset.",                tags = "color tint auto blue custom cyan gold gray green pink purple red silver white" },
-    { key = "waypoint",  label = "Beacon",                                    desc = "Change 3D beacon color.",                                                                             added = "3.0.0", updated = "4.0.0",                                                                                                 note = "Color modes now use Auto contextual hints and the Gray preset.",                tags = "color tint auto blue custom cyan gold gray green pink purple red silver white" },
-    { key = "pinpoint",  label = "Pinpoint Mode",                             desc = "Control the close-range pinpoint display.",                                                           added = "3.0.0", tags = "full plaque off no plaque disabled box dialog popup overhead" },
-    { key = "pinpoint",  label = "Show Pinpoint At",                          desc = "Set the distance where the overlay switches to pinpoint mode.",                                       added = "3.0.0" },
-    { key = "pinpoint",  label = "Hide Pinpoint At",                          desc = "Set the arrival distance where the pinpoint display hides.",                                          added = "3.0.0" },
-    { key = "pinpoint",  label = "Pinpoint Size",                             desc = "Scale the 3D pinpoint.",                                                                              added = "3.0.0" },
-    { key = "pinpoint",  label = "Pinpoint Opacity",                          desc = "Change pinpoint opacity.",                                                                            added = "3.0.0", tags = "transparency transparent alpha visibility" },
-    { key = "pinpoint",  label = "Plaque Style",                              desc = "Choose the pinpoint plaque art style.",                                                               added = "3.0.0", tags = "default glowing gems horde alliance modern steampunk steam punk" },
-    { key = "pinpoint",  label = "Animate Plaque Effects",                    desc = "Toggle pulsing plaque overlays and gem glows.",                                                       added = "3.0.0" },
-    { key = "pinpoint",  label = "Show Destination Info",                     desc = "Show the title inside the pinpoint plaque.",                                                          added = "3.0.0" },
-    { key = "pinpoint",  label = "Show Extended Info",                        desc = "Show quest or guide context in the plaque.",                                                          added = "3.0.0" },
-    { key = "pinpoint",  label = "Show Coordinate Fallback",                  desc = "Show coordinates when no extended text exists.",                                                      added = "3.0.0" },
-    { key = "pinpoint",  label = "Show Pinpoint Arrows",                      desc = "Show animated downward chevrons.",                                                                    added = "3.0.0" },
-    { key = "pinpoint",  label = "Base Pinpoint Height",                      desc = "Adjust the pinpoint height.",                                                                         added = "3.0.0" },
-    { key = "pinpoint",  label = "Camera Pinpoint Height",                    desc = "Adjust pinpoint height based on camera pitch.",                                                       added = "3.0.0" },
-    { key = "pinpoint",  label = "Pinpoint Title",                            desc = "Change pinpoint title color.",                                                                        added = "3.0.0", updated = "4.0.0",                                                                                                 note = "Color modes now use Auto contextual hints and the Gray preset.",                tags = "color tint auto blue custom cyan gold gray green pink purple red silver white" },
-    { key = "pinpoint",  label = "Pinpoint Subtext",                          desc = "Change pinpoint subtext color.",                                                                      added = "3.0.0", updated = "4.0.0",                                                                                                 note = "Color modes now use Auto contextual hints and the Gray preset.",                tags = "color tint auto blue custom cyan gold gray green pink purple red silver white" },
-    { key = "pinpoint",  label = "Pinpoint Plaque",                           desc = "Change pinpoint plaque color.",                                                                       added = "3.0.0", updated = "4.0.0",                                                                                                 note = "Color modes now use Auto contextual hints and the Gray preset.",                tags = "color tint auto blue custom cyan gold gray green pink purple red silver white" },
-    { key = "pinpoint",  label = "Animated Parts",                            desc = "Change plaque gem and glow colors.",                                                                  added = "3.0.0", updated = "4.0.0",                                                                                                 note = "Color modes now use Auto contextual hints and the Gray preset.",                tags = "color tint auto blue custom cyan gold gray green pink purple red silver white" },
-    { key = "pinpoint",  label = "Chevrons",                                  desc = "Change pinpoint chevron colors.",                                                                     added = "3.0.0", updated = "4.0.0",                                                                                                 note = "Color modes now use Auto contextual hints and the Gray preset.",                tags = "color tint auto blue custom cyan gold gray green pink purple red silver white" },
-    { key = "navigator", label = "Enable Navigator",                          desc = "Show the off-screen navigator arrow.",                                                                added = "3.0.0" },
-    { key = "navigator", label = "Navigator Size",                            desc = "Scale the navigator.",                                                                                added = "3.0.0" },
-    { key = "navigator", label = "Navigator Opacity",                         desc = "Change navigator opacity.",                                                                           added = "3.0.0", tags = "transparency transparent alpha visibility" },
-    { key = "navigator", label = "Navigator Distance",                        desc = "Move the navigator closer to or farther away from the screen center.",                                added = "3.0.0" },
-    { key = "navigator", label = "Navigator Dynamic Distance",                desc = "Adjust navigator distance with camera zoom.",                                                         added = "3.0.0" },
-    { key = "navigator", label = "Navigator Arrow",                           desc = "Change navigator arrow color.",                                                                       added = "3.0.0", updated = "4.0.0",                                                                                                 note = "Color modes now use Auto contextual hints and the Gray preset.",                tags = "color tint auto blue custom cyan gold gray green pink purple red silver white" },
-    { key = "zygor",     label = "Show Only Guide Steps Until Mouseover",     desc = "Compact the Zygor guide frame until you mouse over it.",                                              added = "3.0.0" },
-    { key = "zygor",     label = "Hide Step Backgrounds Until Mouseover",     desc = "Fade guide step row backgrounds while compacted.",                                                    added = "3.0.0", tags = "hide step backgrounds hide step backgrounds + line colors line colors goal lines disabled mouseover zygor" },
-    { key = "release",   label = "Release Notes",                             desc = "Recent changes and version notes." },
+    { key = "about",        label = "About",                                     desc = Data.ABOUT_SUMMARY },
+    { key = "general",      label = "Enable Routing",                            desc = "Enable or disable AzerothWaypoint route ownership.",                                                                                                       added = "3.0.0",                                                                                                                                                                      updated = "4.0.0",                                                                                                                                                                  note = "Reworked for v4 route ownership and backend selection." },
+    { key = "general",      label = "Routing Backend",                           desc = "Choose the routing backend: Farstrider, Mapzeroth, Zygor or use TomTom Directly",                                                                          added = "4.0.0",                                                                                                                                                                      note = "Adds TomTom Direct, Zygor, Mapzeroth, and FarstriderLib backend support.",                                                                                                  tags = "direct tomtom direct farstrider mapzeroth zygor" },
+    { key = "general",      label = "Show Flight Map Route Marker",              desc = "Mark the intended flight path destination on the flight map.",                                                                                             added = "4.1.0",                                                                                                                                                                      tags = "flight map flightmap taxi flight path taxi node marker route zygor librover mapzeroth farstrider fly fp inflight auto automatic" },
+    { key = "general",      label = "Auto Take Flight Paths",                    desc = "Automatically take route flight paths from the flight map. Disabled by default.",                                                                          added = "4.1.0",                                                                                                                                                                      tags = "flight map flightmap taxi flight path auto take exact strong disabled zygor librover mapzeroth farstrider alt suppress fly fp" },
+    { key = "general",      label = "Show Flight Map Taxi List",                 desc = "Show a AWP taxi list attached to flight map with route destination, favorites, recent flights, current-zone flights, search, and reachable destinations.", added = "4.1.0",                                                                                                                                                                      tags = "flight map flightmap taxi flight path list catalog favorites recent current zone search route destination fly fp " },
+    { key = "general",      label = "Flight Map Taxi List Side",                 desc = "Choose which side of the flight map the AWP taxi list attaches to. Auto will swap as needed based on screen space.",                                       added = "4.1.0",                                                                                                                                                                      tags = "flight map flightmap taxi flight path list catalog side left right auto destination fly fp" },
+    { key = "general",      label = "Flight Map Taxi List Text Size",            desc = "Adjust destination-name text size in the attached flight map taxi list.",                                                                                  added = "4.1.0",                                                                                                                                                                      tags = "flight map flightmap taxi flight path list catalog text size font destination readable readability" },
+    { key = "general",      label = "Hide During Combat",                        desc = "Temporarily hide TomTom, the special travel button, the 3D world overlay, or all while in combat.",                                                        added = "4.0.0b",                                                                                                                                                                     tags = "combat hide tomtom arrow travel button special action overlay world overlay both disabled" },
+    { key = "general",      label = "Quick-Start Popup",                         desc = "Choose whether the first-time quick-start guide opens account-wide, per-character, or not automatically.",                                                 added = "4.0.0b",                                                                                                                                                                     tags = "help popup login startup account character disabled first time quick start overview guide" },
+    { key = "general",      label = "What's New Popup",                          desc = "Choose whether What's New opens account-wide, per-character, or not automatically after addon updates.",                                                   added = "4.0.0b",                                                                                                                                                                     tags = "whats new changelog popup login startup account character disabled updates release notes" },
+    { key = "general",      label = "Show Minimap Button",                       desc = "Show the AzerothWaypoint minimap button for quick access to settings, help, queue, and integration controls.",                                             added = "4.1.0",                                                                                                                                                                      tags = "minimap minimapbutton button addon compartment addoncompartment icon broker ldb databroker quick menu settings help queue zygor tracker viewer show hide toggle reset" },
+    { key = "general",      label = "Manual Click Queue Behavior",               desc = "Choose how Blizzard map clicks enter the manual queue.",                                                                                                   added = "4.0.0",                                                                                                                                                                      note = "Adds explicit create, replace, append, and ask behavior for map clicks.",                                                                                                   tags = "create new queue replace active append ask prompt" },
+    { key = "general",      label = "Auto-Clear Manual Waypoints on Arrival",    desc = "Clear manual waypoints when you reach the destination.",                                                                                                   added = "2.3.0" },
+    { key = "general",      label = "Manual Waypoint Clear Distance",            desc = "Set the arrival distance used to clear manual waypoints.",                                                                                                 added = "2.3.0" },
+    { key = "general",      label = "Auto-Route Tracked Quests",                 desc = "Automatically route tracked Blizzard quests. Guide steps are protected while a guide is active.",                                                          added = "3.1.0",                                                                                                                                                                      updated = "4.0.0",                                                                                                                                                                  note = "Now uses v4 route authority and guide protection." },
+    { key = "general",      label = "Auto-Clear Untracked Quests",               desc = "Remove matching AWP quest waypoint and queue entries when quests are untracked.",                                                                          added = "4.0.0",                                                                                                                                                                      tags = "quest tracking untracking queue clear" },
+    { key = "general",      label = "Auto-Clear Supertracked Quests on Arrival", desc = "Clear supertracked quest routes when you reach the destination.",                                                                                          added = "3.1.0" },
+    { key = "general",      label = "Adopt Waypoints from Unknown Addons",       desc = "Adopt Blizzard waypoint API calls from addons without dedicated AWP support.",                                                                             added = "4.0.0",                                                                                                                                                                      tags = "addon allowlist blocklist worldquesttab" },
+    { key = "general",      label = "Detected Addon Callers",                    desc = "Review recent unknown addon waypoint API callers and allow or block them.",                                                                                added = "4.0.0",                                                                                                                                                                      tags = "addon allowlist blocklist" },
+    { key = "general",      label = "Addon Allowlist",                           desc = "Addon folder names allowed to use generic waypoint adoption.",                                                                                             added = "4.0.0",                                                                                                                                                                      tags = "addon allowlist allow" },
+    { key = "general",      label = "Addon Blocklist",                           desc = "Addon folder names blocked from generic waypoint adoption.",                                                                                               added = "4.0.0",                                                                                                                                                                      tags = "addon blocklist block" },
+    { key = "tomtom",       label = "Use Custom Arrow Skin",                     desc = "Use a registered skin instead of TomTom's default arrow art.",                                                                                             added = "3.0.0",                                                                                                                                                                      updated = "4.0.0",                                                                                                                                                                  note = "Now uses the registered arrow skin system.",                                    tags = "zygor starlight stealth" },
+    { key = "tomtom",       label = "Arrow Skin",                                desc = "Choose the active TomTom arrow skin.",                                                                                                                     added = "3.0.0",                                                                                                                                                                      updated = "4.0.0",                                                                                                                                                                  note = "Now lists registered skins dynamically, including Zygor skins when available.", tags = "tomtom default zygor starlight stealth awp awp bomber awp modern alliance horde" },
+    { key = "tomtom",       label = "TomTom Arrow Scale",                        desc = "Scale the active custom TomTom arrow skin.",                                                                                                               added = "3.0.0",                                                                                                                                                                      updated = "4.0.0",                                                                                                                                                                  note = "Moved into the v4 arrow skin settings.",                                        tags = "zygor arrow scale" },
+    { key = "tomtom",       label = "Special Travel Button Scale",               desc = "Scale the special travel button shown for route legs that require a hearthstone, item, spell, portal, toy, or similar action.",                            added = "4.0.0",                                                                                                                                                                      note = "Adds a scale control for the special travel button.",                                                                                                                       tags = "travel action button hearthstone portal item spell" },
+    { key = "overlay",      label = "Enable 3D World Overlay",                   desc = "Show or hide the in-world waypoint overlay.",                                                                                                              added = "3.0.0" },
+    { key = "overlay",      label = "Fade on Hover",                             desc = "Fade the 3D overlay while the mouse is over it.",                                                                                                          added = "3.0.0" },
+    { key = "overlay",      label = "Context Display",                           desc = "Choose context display: diamond and icon, icon only, or hidden.",                                                                                          added = "3.0.0",                                                                                                                                                                      tags = "context diamond + icon context diamond icon icon only hidden" },
+    { key = "overlay",      label = "Context Diamond",                           desc = "Change the context diamond color.",                                                                                                                        added = "3.0.0",                                                                                                                                                                      updated = "4.0.0",                                                                                                                                                                  note = "Color modes now use Auto contextual hints and the Gray preset.",                tags = "color tint auto blue custom cyan gold gray green pink purple red silver white" },
+    { key = "overlay",      label = "Icons",                                     desc = "Change overlay icon color.",                                                                                                                               added = "3.0.0",                                                                                                                                                                      updated = "4.0.0",                                                                                                                                                                  note = "Color modes now use Auto contextual hints and the Gray preset.",                tags = "color tint auto blue custom cyan gold gray green pink purple red silver white" },
+    { key = "waypoint",     label = "Waypoint",                                  desc = "Control the long-range waypoint marker.",                                                                                                                  added = "3.0.0",                                                                                                                                                                      tags = "enabled disabled" },
+    { key = "waypoint",     label = "Waypoint Size",                             desc = "Scale the 3D waypoint frame.",                                                                                                                             added = "3.0.0" },
+    { key = "waypoint",     label = "Waypoint Min Size",                         desc = "Set the minimum dynamic waypoint scale.",                                                                                                                  added = "3.0.0" },
+    { key = "waypoint",     label = "Waypoint Max Size",                         desc = "Set the maximum dynamic waypoint scale.",                                                                                                                  added = "3.0.0" },
+    { key = "waypoint",     label = "Waypoint Opacity",                          desc = "Change waypoint marker opacity.",                                                                                                                          added = "3.0.0",                                                                                                                                                                      tags = "transparency transparent alpha visibility" },
+    { key = "waypoint",     label = "Vertical Offset",                           desc = "Move the waypoint marker up or down.",                                                                                                                     added = "3.0.0" },
+    { key = "waypoint",     label = "Beacon Style",                              desc = "Choose beacon, base only, distance based, or off.",                                                                                                        added = "3.0.0" },
+    { key = "waypoint",     label = "Beacon Base Distance",                      desc = "Set the distance where the beacon switches to base-only.",                                                                                                 added = "3.0.0" },
+    { key = "waypoint",     label = "Beacon Opacity",                            desc = "Change beacon opacity.",                                                                                                                                   added = "3.0.0",                                                                                                                                                                      tags = "transparency transparent alpha visibility" },
+    { key = "waypoint",     label = "Base Vertical Offset",                      desc = "Move the base-only beacon vertically.",                                                                                                                    added = "3.0.0" },
+    { key = "waypoint",     label = "Use Meters instead of Yards",               desc = "Format overlay distance in meters.",                                                                                                                       added = "3.0.0" },
+    { key = "waypoint",     label = "Footer Text",                               desc = "Choose waypoint footer information.",                                                                                                                      added = "3.0.0",                                                                                                                                                                      tags = "all distance arrival time destination name none" },
+    { key = "waypoint",     label = "Info Text Size",                            desc = "Scale waypoint footer text.",                                                                                                                              added = "3.0.0" },
+    { key = "waypoint",     label = "Info Text Opacity",                         desc = "Change waypoint footer text opacity.",                                                                                                                     added = "3.0.0",                                                                                                                                                                      tags = "transparency transparent alpha visibility" },
+    { key = "waypoint",     label = "Distance/Arrival Time Opacity",             desc = "Change distance and arrival time text opacity.",                                                                                                           added = "3.0.0",                                                                                                                                                                      tags = "transparency transparent alpha visibility" },
+    { key = "waypoint",     label = "Waypoint Text",                             desc = "Change waypoint footer text color.",                                                                                                                       added = "3.0.0",                                                                                                                                                                      updated = "4.0.0",                                                                                                                                                                  note = "Color modes now use Auto contextual hints and the Gray preset.",                tags = "color tint auto blue custom cyan gold gray green pink purple red silver white" },
+    { key = "waypoint",     label = "Beacon",                                    desc = "Change 3D beacon color.",                                                                                                                                  added = "3.0.0",                                                                                                                                                                      updated = "4.0.0",                                                                                                                                                                  note = "Color modes now use Auto contextual hints and the Gray preset.",                tags = "color tint auto blue custom cyan gold gray green pink purple red silver white" },
+    { key = "pinpoint",     label = "Pinpoint Mode",                             desc = "Control the close-range pinpoint display.",                                                                                                                added = "3.0.0",                                                                                                                                                                      tags = "full plaque off no plaque disabled box dialog popup overhead" },
+    { key = "pinpoint",     label = "Show Pinpoint At",                          desc = "Set the distance where the overlay switches to pinpoint mode.",                                                                                            added = "3.0.0" },
+    { key = "pinpoint",     label = "Hide Pinpoint At",                          desc = "Set the arrival distance where the pinpoint display hides.",                                                                                               added = "3.0.0" },
+    { key = "pinpoint",     label = "Pinpoint Size",                             desc = "Scale the 3D pinpoint.",                                                                                                                                   added = "3.0.0" },
+    { key = "pinpoint",     label = "Pinpoint Opacity",                          desc = "Change pinpoint opacity.",                                                                                                                                 added = "3.0.0",                                                                                                                                                                      tags = "transparency transparent alpha visibility" },
+    { key = "pinpoint",     label = "Plaque Style",                              desc = "Choose the pinpoint plaque art style.",                                                                                                                    added = "3.0.0",                                                                                                                                                                      tags = "default glowing gems horde alliance modern steampunk steam punk" },
+    { key = "pinpoint",     label = "Animate Plaque Effects",                    desc = "Toggle animated plaque pulse, glow, and gem effects.",                                                                                                     added = "3.0.0" },
+    { key = "pinpoint",     label = "Show Destination Info",                     desc = "Show the title inside the pinpoint plaque.",                                                                                                               added = "3.0.0" },
+    { key = "pinpoint",     label = "Show Extended Info",                        desc = "Show quest or guide context in the plaque.",                                                                                                               added = "3.0.0" },
+    { key = "pinpoint",     label = "Show Coordinate Fallback",                  desc = "Show coordinates when no extended text exists.",                                                                                                           added = "3.0.0" },
+    { key = "pinpoint",     label = "Show Pinpoint Arrows",                      desc = "Show animated downward chevrons.",                                                                                                                         added = "3.0.0" },
+    { key = "pinpoint",     label = "Base Pinpoint Height",                      desc = "Adjust the pinpoint height.",                                                                                                                              added = "3.0.0" },
+    { key = "pinpoint",     label = "Camera Pinpoint Height",                    desc = "Adjust pinpoint height based on camera pitch.",                                                                                                            added = "3.0.0" },
+    { key = "pinpoint",     label = "Pinpoint Title",                            desc = "Change pinpoint title color.",                                                                                                                             added = "3.0.0",                                                                                                                                                                      updated = "4.0.0",                                                                                                                                                                  note = "Color modes now use Auto contextual hints and the Gray preset.",                tags = "color tint auto blue custom cyan gold gray green pink purple red silver white" },
+    { key = "pinpoint",     label = "Pinpoint Subtext",                          desc = "Change pinpoint subtext color.",                                                                                                                           added = "3.0.0",                                                                                                                                                                      updated = "4.0.0",                                                                                                                                                                  note = "Color modes now use Auto contextual hints and the Gray preset.",                tags = "color tint auto blue custom cyan gold gray green pink purple red silver white" },
+    { key = "pinpoint",     label = "Pinpoint Plaque",                           desc = "Change pinpoint plaque color.",                                                                                                                            added = "3.0.0",                                                                                                                                                                      updated = "4.0.0",                                                                                                                                                                  note = "Color modes now use Auto contextual hints and the Gray preset.",                tags = "color tint auto blue custom cyan gold gray green pink purple red silver white" },
+    { key = "pinpoint",     label = "Animated Parts",                            desc = "Change plaque gem and glow colors.",                                                                                                                       added = "3.0.0",                                                                                                                                                                      updated = "4.0.0",                                                                                                                                                                  note = "Color modes now use Auto contextual hints and the Gray preset.",                tags = "color tint auto blue custom cyan gold gray green pink purple red silver white" },
+    { key = "pinpoint",     label = "Chevrons",                                  desc = "Change pinpoint chevron colors.",                                                                                                                          added = "3.0.0",                                                                                                                                                                      updated = "4.0.0",                                                                                                                                                                  note = "Color modes now use Auto contextual hints and the Gray preset.",                tags = "color tint auto blue custom cyan gold gray green pink purple red silver white" },
+    { key = "navigator",    label = "Enable Navigator",                          desc = "Show the off-screen navigator arrow.",                                                                                                                     added = "3.0.0" },
+    { key = "navigator",    label = "Navigator Size",                            desc = "Scale the navigator.",                                                                                                                                     added = "3.0.0" },
+    { key = "navigator",    label = "Navigator Opacity",                         desc = "Change navigator opacity.",                                                                                                                                added = "3.0.0",                                                                                                                                                                      tags = "transparency transparent alpha visibility" },
+    { key = "navigator",    label = "Navigator Distance",                        desc = "Move the navigator closer to or farther away from the screen center.",                                                                                     added = "3.0.0" },
+    { key = "navigator",    label = "Navigator Dynamic Distance",                desc = "Adjust navigator distance with camera zoom.",                                                                                                              added = "3.0.0" },
+    { key = "navigator",    label = "Navigator Arrow",                           desc = "Change navigator arrow color.",                                                                                                                            added = "3.0.0",                                                                                                                                                                      updated = "4.0.0",                                                                                                                                                                  note = "Color modes now use Auto contextual hints and the Gray preset.",                tags = "color tint auto blue custom cyan gold gray green pink purple red silver white" },
+    { key = "zygor",        label = "Show Only Guide Steps Until Mouseover",     desc = "Compact the Zygor guide frame until you mouse over it.",                                                                                                   added = "3.0.0" },
+    { key = "zygor",        label = "Hide Step Backgrounds Until Mouseover",     desc = "Fade guide step row backgrounds while compacted.",                                                                                                         added = "3.0.0",                                                                                                                                                                      tags = "hide step backgrounds hide step backgrounds + line colors line colors goal lines disabled mouseover zygor" },
+    { key = "zygor",        label = "Enable Tracker Viewer",                     desc = "Show Zygor guide steps inside the objective tracker. Supports Blizzard's Objective Tracker and Kaliel's Tracker.",                                         added = "4.1.0",                                                                                                                                                                      tags = "tracker viewer zygor guide step dock docked embed embedded replacement compact mini kaliel kalielstracker kt blizzard quest frame objective tracker watched tracked enable" },
+    { key = "zygor",        label = "Hide Zygor's Native Frame",                 desc = "Hide Zygor's full-size viewer while keeping guide state, waypoints, guide picker, and settings menus available.",                                          added = "4.1.0",                                                                                                                                                                      tags = "tracker viewer hide native guide zygor frame viewer window fullsize big main visual cloak hidden minimap menu" },
+    { key = "zygor",        label = "Tracker Viewer Progress Bar",               desc = "Choose square, rounded border, or hidden progress bar for the tracker viewer.",                                                                            added = "4.1.0",                                                                                                                                                                      tags = "tracker viewer progress bar style square rounded none hidden objective tracker header steps percentage percent step completion" },
+    { key = "zygor",        label = "Tracker Viewer Text",                       desc = "Use contextual Tracker Viewer text colors or force all step text to one selected color.",                                                                  added = "4.1.0",                                                                                                                                                                      tags = "tracker viewer text color colors tint semantic contextual zygor inline guide step steps" },
+    { key = "zygor",        label = "Show Step in Chat on Step Change",          desc = "Show the current Zygor step in your own chat when Zygor changes steps.",                                                                                   added = "4.1.0",                                                                                                                                                                      tags = "zygor chat step display message show announce macro colors command guide tracker viewer goals steps automatic auto on step change" },
+    { key = "zygor",        label = "Chat Step Text",                            desc = "Use contextual colors or force displayed Zygor step text one selected color.",                                                                             added = "4.1.0",                                                                                                                                                                      tags = "zygor chat step text color colors tint semantic show guide command contextual output message steps" },
+    { key = "zygor",        label = "Chat Sticky Summary",                       desc = "Choose whether the chat step display includes active sticky step count or titles.",                                                                        added = "4.1.0",                                                                                                                                                                      tags = "zygor chat step sticky stickies summary count titles names none off output guide extra display show info command" },
+    { key = "integrations", label = "Integrations",                              desc = "Supported addon integrations, route backends, map sources, and what AWP uses them for.",                                                                   tags = "addons integrations tomtom zygor apr wowpro farstrider mapzeroth inflight kaliel kalielstracker objective tracker worldquesttab handynotes silverdragon rarescanner blizzard" },
+    { key = "release",      label = "Release Notes",                             desc = "Recent changes and version notes." },
 }

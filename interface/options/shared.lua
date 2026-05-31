@@ -127,7 +127,7 @@ end
 local function ShowCopyLinkPopup(url)
     if not StaticPopupDialogs[TWITCH_COPY_POPUP] then
         StaticPopupDialogs[TWITCH_COPY_POPUP] = {
-            text = "Copy Twitch URL (Ctrl+C):",
+            text = "Copy URL (Ctrl+C):",
             button1 = OKAY,
             hasEditBox = 1,
             editBoxWidth = 320,
@@ -488,6 +488,22 @@ local function CreateGuideStepBackgroundHoverOptions()
     return container:GetData()
 end
 
+local function CreateZygorTrackerViewerProgressStyleOptions()
+    local container = CreateControlTextContainer()
+    container:Add("square", "Square")
+    container:Add("rounded", "Rounded")
+    container:Add("none", "None")
+    return container:GetData()
+end
+
+local function CreateZygorStepChatStickySummaryOptions()
+    local container = CreateControlTextContainer()
+    container:Add(C.ZYGOR_STEP_CHAT_STICKY_NONE, "Disabled")
+    container:Add(C.ZYGOR_STEP_CHAT_STICKY_COUNT, "Count Only")
+    container:Add(C.ZYGOR_STEP_CHAT_STICKY_TITLES, "Count + Titles")
+    return container:GetData()
+end
+
 local function CreateRoutingBackendOptions()
     local function getAddOnInfo(name)
         if type(name) ~= "string" or name == "" then
@@ -698,6 +714,22 @@ local function CreateManualClickQueueModeOptions()
     return container:GetData()
 end
 
+local function CreateFlightMapAutoTakeModeOptions()
+    local container = CreateControlTextContainer()
+    container:Add(C.FLIGHT_MAP_AUTO_TAKE_DISABLED, "Disabled")
+    container:Add(C.FLIGHT_MAP_AUTO_TAKE_EXACT, "Exact Matches")
+    container:Add(C.FLIGHT_MAP_AUTO_TAKE_STRONG, "Strong Matches")
+    return container:GetData()
+end
+
+local function CreateFlightMapCatalogSideOptions()
+    local container = CreateControlTextContainer()
+    container:Add("auto", "Auto")
+    container:Add("left", "Left")
+    container:Add("right", "Right")
+    return container:GetData()
+end
+
 local function CreateWorldOverlayInfoOptions()
     local container = CreateControlTextContainer()
     container:Add(C.WORLD_OVERLAY_INFO_ALL, "All")
@@ -809,10 +841,14 @@ M.ApplySkinAndScale = ApplySkinAndScale
 M.RefreshViewerChromeMode = RefreshViewerChromeMode
 M.CreateSkinOptions = CreateSkinOptions
 M.CreateGuideStepBackgroundHoverOptions = CreateGuideStepBackgroundHoverOptions
+M.CreateZygorTrackerViewerProgressStyleOptions = CreateZygorTrackerViewerProgressStyleOptions
+M.CreateZygorStepChatStickySummaryOptions = CreateZygorStepChatStickySummaryOptions
 M.CreateRoutingBackendOptions = CreateRoutingBackendOptions
 M.CreateCombatHideModeOptions = CreateCombatHideModeOptions
 M.CreateStartupHelpModeOptions = CreateStartupHelpModeOptions
 M.CreateManualClickQueueModeOptions = CreateManualClickQueueModeOptions
+M.CreateFlightMapAutoTakeModeOptions = CreateFlightMapAutoTakeModeOptions
+M.CreateFlightMapCatalogSideOptions = CreateFlightMapCatalogSideOptions
 M.CreateWorldOverlayInfoOptions = CreateWorldOverlayInfoOptions
 M.CreateWorldOverlayColorModeOptions = CreateWorldOverlayColorModeOptions
 M.CreateWorldOverlayContextDisplayOptions = CreateWorldOverlayContextDisplayOptions

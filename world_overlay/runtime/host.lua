@@ -41,6 +41,7 @@ local SURROGATE_SEED_DISTANCE = 2650
 local SURROGATE_EXIT_DISTANCE = 2450
 local SURROGATE_RESEED_COOLDOWN = 0.5
 local SURROGATE_RESEED_MIN_WORLD_DELTA = 25
+local SURROGATE_NOTICE_COOLDOWN = 30
 local SURROGATE_NATIVE_NAV_BOUNDS_TOLERANCE = 0.1
 local INSTANCE_CAPABILITY_PROBE_COOLDOWN = 1.0
 local SPECIAL_TRAVEL_SUPPRESS_HYSTERESIS = 2.0
@@ -57,6 +58,7 @@ local FRESH_HOST_SETTLE_FAILURE_REASON = {
 local ClearNativeNavigationHost
 local IsNativeNavigationHostReady
 local ClearNativeRouteMismatchBlock
+local surrogateNavigationNoticeLastAt
 
 local function CallInternalUserWaypointMutation(fn, ...)
     if type(NS.WithInternalUserWaypointMutation) == "function" then
@@ -497,10 +499,11 @@ local function SetSeededHostTarget(mapID, x, y, realDistance, isSurrogate, surro
     overlay.surrogateRealDistance = realDistance
 
     if isSurrogate then
+        local now = GetTime()
         overlay.surrogateActive = true
         overlay.surrogateTargetSig = target.sig
         overlay.surrogateEverActiveForSig = target.sig
-        overlay.lastSurrogateSeedAt = GetTime()
+        overlay.lastSurrogateSeedAt = now
         overlay.lastSurrogateWorldX = surrogateWorldX
         overlay.lastSurrogateWorldY = surrogateWorldY
         if not wasSurrogate or previousTargetSig ~= target.sig then
@@ -512,8 +515,14 @@ local function SetSeededHostTarget(mapID, x, y, realDistance, isSurrogate, surro
                 target.title or "",
                 tostring(realDistance)
             )
-            if previousEverActiveSig ~= target.sig then
-                NS.Msg("[AWP] Using an intermediate navigation point because Blizzard may not reliably supertrack the requested waypoint from this distance.")
+            if previousEverActiveSig ~= target.sig
+                and (
+                    not surrogateNavigationNoticeLastAt
+                    or now - surrogateNavigationNoticeLastAt >= SURROGATE_NOTICE_COOLDOWN
+                )
+            then
+                surrogateNavigationNoticeLastAt = now
+                NS.Msg("Using an intermediate navigation point because Blizzard may not reliably supertrack the requested waypoint from this distance.")
             end
         elseif previousSeedSig ~= sig then
             NS.Log(

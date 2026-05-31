@@ -16,6 +16,11 @@ local handleUntrackClear = M.handleUntrackClear
 local handleQuestClear = M.handleQuestClear
 local handleAddonTakeover = M.handleAddonTakeover
 local handleCompact = M.handleCompact
+local handleTrackerViewer = M.handleTrackerViewer
+local handleZygorViewer = M.handleZygorViewer
+local handleZygorGuide = M.handleZygorGuide
+local handleMinimap = M.handleMinimap
+local handleFlightAssist = M.handleFlightAssist
 local handleSearch = M.handleSearch
 local handleDiag = M.handleDiag
 local handleMem = M.handleMem
@@ -135,6 +140,16 @@ local function handleCommand(msg)
         handleAddonTakeover(rest)
     elseif cmd == "compact" or cmd == "guidechrome" or cmd == "guidehover" then
         handleCompact(rest:lower())
+    elseif cmd == "trackerviewer" or cmd == "zygortracker" or cmd == "ztv" then
+        handleTrackerViewer(rest:lower())
+    elseif cmd == "zygorviewer" or cmd == "zygorframe" or cmd == "nativeviewer" then
+        handleZygorViewer(rest:lower())
+    elseif cmd == "zygor" or cmd == "zguide" then
+        handleZygorGuide(rest)
+    elseif cmd == "minimap" or cmd == "minimapbutton" or cmd == "button" then
+        handleMinimap(rest:lower())
+    elseif cmd == "flightassist" or cmd == "flightmap" or cmd == "flight" then
+        handleFlightAssist(rest:lower())
     elseif cmd == "search" then
         handleSearch(rest)
     elseif cmd == "repair" then

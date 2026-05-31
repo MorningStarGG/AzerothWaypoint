@@ -1,0 +1,14 @@
+## Interface: 30400
+## Interface-Mainline: 90205
+## Interface-Wrath: 30400
+## Interface-Classic: 11403
+## Interface-BCC: 20504
+
+## Title: RXPGuides - Kargoz' Test Guide
+## Notes: Dun Morogh test guide
+## Author: Kargoz
+## Version: 1.0
+
+## Dependencies: RXPGuides
+
+MyGuide.lua

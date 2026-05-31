@@ -2,12 +2,15 @@
 ## Title: AzerothWaypoint
 ## Notes: A TomTom-powered navigation bridge, route planner selector, manual waypoint queue, and 3D world overlay for World of Warcraft
 ## Author: MorningStarGG
-## Version: 4.0.1b
+## Version: 4.1.0
 ## IconTexture: Interface\AddOns\AzerothWaypoint\media\icon.png
 ## SavedVariables: AzerothWaypointDB
 ## SavedVariablesPerCharacter: AzerothWaypointCharDB
 ## RequiredDeps: TomTom
-## OptionalDeps: ZygorGuidesViewer, APR, WoWPro, Mapzeroth, FarstriderLib, FarstriderLibData, WorldQuestTab
+## OptionalDeps: ZygorGuidesViewer, APR, WoWPro, Mapzeroth, FarstriderLib, FarstriderLibData, !KalielsTracker, WorldQuestTab, HandyNotes, HandyNotes_MapNotes, SilverDragon, RareScanner, InFlight
+## AddonCompartmentFunc: AzerothWaypoint_OnAddonCompartmentClick
+## AddonCompartmentFuncOnEnter: AzerothWaypoint_OnAddonCompartmentEnter
+## AddonCompartmentFuncOnLeave: AzerothWaypoint_OnAddonCompartmentLeave
 
 core/addon.lua
 core/core.lua
@@ -77,12 +80,25 @@ bridge/takeovers/tomtom_bridge_quest_takeover.lua
 bridge/takeovers/tomtom_bridge_digsite_takeover.lua
 bridge/takeovers/tomtom_bridge_housingplot_takeover.lua
 bridge/takeovers/tomtom_bridge_gossipoi_takeover.lua
+bridge/flightmap_assist.lua
+bridge/flightmap_times.lua
+bridge/flightmap_catalog.lua
 integrations/guides/zygor/zygor_poi.lua
 integrations/worldquesttab_takeover.lua
 docs/changelog_data.lua
 docs/changelog_format.lua
+docs/integrations_data.lua
 docs/help_pages.lua
 interface/panel_framework.lua
+integrations/guides/zygor/viewer/shared.lua
+integrations/guides/zygor/viewer/tracker_util.lua
+integrations/guides/zygor/viewer/tracker_host.lua
+integrations/guides/zygor/viewer/tracker_controls.lua
+integrations/guides/zygor/viewer/tracker_rows.lua
+integrations/guides/zygor/viewer/tracker_render.lua
+integrations/guides/zygor/viewer/tracker_module.lua
+integrations/guides/zygor/viewer/frame.lua
+integrations/guides/zygor/viewer/binding.lua
 interface/help_frame.lua
 interface/ui_style.lua
 interface/manual_queue_prompt.lua
@@ -100,6 +116,7 @@ interface/options/canvas_widgets.lua
 interface/options/canvas.lua
 interface/options/canvas_sections.lua
 interface/options/panel.lua
+interface/minimap_button.lua
 interface/commands_settings.lua
 interface/commands_search.lua
 interface/commands_diagnostics.lua

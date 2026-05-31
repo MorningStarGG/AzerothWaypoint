@@ -257,6 +257,15 @@ local function InstallHooks(schedule)
         end
     end
 
+    local function scheduleGuideStateChanged(reason, opts)
+        schedule(reason, opts)
+        if type(NS.After) == "function" then
+            NS.After(0.05, function()
+                schedule((reason or "guide_changed") .. "_settled", opts)
+            end)
+        end
+    end
+
     if type(Z.SetCurrentStep) == "function" then
         hooksecurefunc(Z, "SetCurrentStep", scheduleFor("SetCurrentStep", switchOpts))
     end
@@ -269,9 +278,21 @@ local function InstallHooks(schedule)
     if type(Z.Tabs) == "table" and type(Z.Tabs.LoadGuideToTab) == "function" then
         hooksecurefunc(Z.Tabs, "LoadGuideToTab", scheduleFor("LoadGuideToTab", switchOpts))
     end
+    if type(Z.Tabs) == "table"
+        and type(Z.Tabs.RemoveTab) == "function"
+        and not Z.Tabs._awpGuideRemoveTabHooked
+    then
+        hooksecurefunc(Z.Tabs, "RemoveTab", function()
+            scheduleGuideStateChanged("RemoveTab", switchOpts)
+        end)
+        Z.Tabs._awpGuideRemoveTabHooked = true
+    end
     if type(Z.AddMessageHandler) == "function" then
         pcall(Z.AddMessageHandler, Z, "LIBROVER_TRAVEL_REPORTED", function()
             schedule("LIBROVER_TRAVEL_REPORTED")
+        end)
+        pcall(Z.AddMessageHandler, Z, "GUIDE_CHANGED", function()
+            scheduleGuideStateChanged("GUIDE_CHANGED", switchOpts)
         end)
         pcall(Z.AddMessageHandler, Z, "ZGV_GOAL_PROGRESS", function()
             ScheduleZygorPresentationRefresh("ZGV_GOAL_PROGRESS")

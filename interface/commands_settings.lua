@@ -197,6 +197,13 @@ local function usage()
     NS.Msg("       /awp addontakeover on|off|toggle|status")
     NS.Msg("       /awp addontakeover allowlist|blocklist add|remove|list|clear <addon>")
     NS.Msg("       /awp compact on|off|toggle")
+    NS.Msg("       /awp trackerviewer on|off|toggle|status")
+    NS.Msg("       /awp zygorviewer show|hide|toggle|status")
+    NS.Msg("       /awp zygor next|prev|skip|picker|load <title>|output [full|sticky]|menu|settings|reset|list|switch <index>|close [index]")
+    NS.Msg("       /awp minimap show|hide|toggle|reset|status")
+    NS.Msg("       /awp flightassist marker on|off|toggle|status")
+    NS.Msg("       /awp flightassist auto disabled|exact|strong|status")
+    NS.Msg("       /awp flightassist catalog on|off|toggle|reset|status")
     NS.Msg("       /awp resolvercases [all|case_id]")
     NS.Msg("       /awp routeenv on|off|dump")
     NS.Msg("       /awp churn [seconds] [phases] | /awp churnmem [seconds]")
@@ -290,6 +297,19 @@ local function FormatStartupHelpMode(mode)
         return "Disabled"
     end
     return "Account Wide"
+end
+
+local function FormatFlightMapAutoTakeMode(mode)
+    mode = type(NS.NormalizeFlightMapAutoTakeMode) == "function"
+        and NS.NormalizeFlightMapAutoTakeMode(mode)
+        or tostring(mode or "")
+    if mode == C.FLIGHT_MAP_AUTO_TAKE_EXACT then
+        return "Exact Matches"
+    end
+    if mode == C.FLIGHT_MAP_AUTO_TAKE_STRONG then
+        return "Strong Matches"
+    end
+    return "Disabled"
 end
 
 local function handleBackend(arg)
@@ -521,6 +541,450 @@ local function handleCompact(arg)
     end
 end
 
+local function ApplyZygorTrackerViewerSettings()
+    if type(NS.ApplyZygorTrackerViewerSettings) == "function" then
+        NS.ApplyZygorTrackerViewerSettings()
+    end
+end
+
+local function GetZygorTrackerViewerSettings()
+    if type(NS.GetZygorTrackerViewerSettings) ~= "function" then
+        return nil
+    end
+    return NS.GetZygorTrackerViewerSettings()
+end
+
+local function SetZygorTrackerViewerSetting(key, value)
+    if type(NS.SetZygorTrackerViewerSetting) ~= "function" then
+        return false
+    end
+    NS.SetZygorTrackerViewerSetting(key, value)
+    ApplyZygorTrackerViewerSettings()
+    return true
+end
+
+local function handleTrackerViewer(arg)
+    local settings = GetZygorTrackerViewerSettings()
+    if not settings then
+        NS.Msg("Tracker Viewer settings are unavailable.")
+        return
+    end
+
+    if arg == "on" or arg == "show" or arg == "enable" then
+        if SetZygorTrackerViewerSetting("enabled", true) then
+            NS.Msg("Tracker Viewer: enabled")
+        end
+    elseif arg == "off" or arg == "hide" or arg == "disable" then
+        if SetZygorTrackerViewerSetting("enabled", false) then
+            NS.Msg("Tracker Viewer: disabled")
+        end
+    elseif arg == "toggle" then
+        local enabled = not settings.enabled
+        if SetZygorTrackerViewerSetting("enabled", enabled) then
+            NS.Msg("Tracker Viewer:", enabled and "enabled" or "disabled")
+        end
+    elseif arg == "" or arg == "status" then
+        NS.Msg("Tracker Viewer:", settings.enabled and "enabled" or "disabled")
+    else
+        NS.Msg("Tracker Viewer:", settings.enabled and "enabled" or "disabled")
+        NS.Msg("Usage: /awp trackerviewer on | off | toggle | status")
+    end
+end
+
+local function handleZygorViewer(arg)
+    local settings = GetZygorTrackerViewerSettings()
+    if not settings then
+        NS.Msg("Zygor viewer hide setting is unavailable.")
+        return
+    end
+
+    if arg == "show" or arg == "on" or arg == "enable" then
+        if SetZygorTrackerViewerSetting("hideZygorFrame", false) then
+            NS.Msg("Zygor native viewer: shown")
+        end
+    elseif arg == "hide" or arg == "off" or arg == "disable" then
+        if SetZygorTrackerViewerSetting("hideZygorFrame", true) then
+            NS.Msg("Zygor native viewer: hidden")
+        end
+    elseif arg == "toggle" then
+        local hidden = not settings.hideZygorFrame
+        if SetZygorTrackerViewerSetting("hideZygorFrame", hidden) then
+            NS.Msg("Zygor native viewer:", hidden and "hidden" or "shown")
+        end
+    elseif arg == "" or arg == "status" then
+        NS.Msg("Zygor native viewer:", settings.hideZygorFrame and "hidden" or "shown")
+    else
+        NS.Msg("Zygor native viewer:", settings.hideZygorFrame and "hidden" or "shown")
+        NS.Msg("Usage: /awp zygorviewer show | hide | toggle | status")
+    end
+end
+
+local function GetZygorGuideActions()
+    local shared = NS.Internal
+        and NS.Internal.ZygorTrackerViewer
+    if type(shared) ~= "table" or type(shared.GetZygor) ~= "function" then
+        return nil
+    end
+
+    local Z = shared.GetZygor()
+    if not Z then
+        return nil
+    end
+
+    return shared, Z
+end
+
+local function PrintZygorGuideUsage()
+    NS.Msg("Usage: /awp zygor next | prev | skip | picker | load <guide title> [step N] | output [full|sticky] | menu | settings | reset | list | switch <index> | close [current|index|all]")
+end
+
+local function GetIndexedZygorGuideTabs(shared)
+    local tabs = {}
+    if type(shared.GetZygorGuideTabs) ~= "function" then
+        return tabs
+    end
+
+    local pool = shared.GetZygorGuideTabs()
+    if type(pool) ~= "table" then
+        return tabs
+    end
+
+    for _, tab in ipairs(pool) do
+        if type(tab) == "table" and tab.guide then
+            tabs[#tabs + 1] = tab
+        end
+    end
+
+    return tabs
+end
+
+local function GetZygorGuideTitle(shared, tab)
+    if type(shared.GetZygorGuideTitle) == "function" then
+        return shared.GetZygorGuideTitle(tab)
+    end
+    return "Guide"
+end
+
+local function PrintZygorGuideList(shared)
+    local tabs = GetIndexedZygorGuideTabs(shared)
+    if #tabs == 0 then
+        NS.Msg("No open Zygor guides.")
+        return
+    end
+
+    local activeTab = type(shared.GetActiveZygorGuideTab) == "function" and shared.GetActiveZygorGuideTab() or nil
+    NS.Msg("Open Zygor guides:")
+    for index, tab in ipairs(tabs) do
+        local prefix = tab == activeTab and "* " or "  "
+        NS.Msg(string.format("%s%d. %s", prefix, index, GetZygorGuideTitle(shared, tab)))
+    end
+end
+
+local function RunZygorGuideAction(shared, fnName, successText, failureText, ...)
+    local fn = shared and shared[fnName]
+    if type(fn) ~= "function" then
+        NS.Msg(failureText)
+        return
+    end
+
+    local ok, result = pcall(fn, ...)
+    if ok and result then
+        NS.Msg(successText)
+    else
+        NS.Msg(failureText)
+    end
+end
+
+local function ParseZygorGuideLoadArgs(rest)
+    local title, step = rest:match("^(.-)%s+[sS][tT][eE][pP]%s+(%d+)$")
+    if title then
+        return trim(title), tonumber(step)
+    end
+    return trim(rest), nil
+end
+
+local function CloseZygorGuideTab(shared, tab)
+    if not tab then
+        return false
+    end
+    if type(shared.CloseZygorTab) ~= "function" then
+        return false
+    end
+    local ok, result = pcall(shared.CloseZygorTab, tab)
+    return ok and result == true
+end
+
+local function handleZygorGuide(arg)
+    local input = trim(arg)
+    local subcmd, rest = input:match("^(%S+)%s*(.-)$")
+    subcmd = (subcmd or ""):lower()
+    rest = trim(rest)
+
+    if subcmd == "" or subcmd == "help" then
+        PrintZygorGuideUsage()
+        return
+    end
+
+    local shared = GetZygorGuideActions()
+    if not shared then
+        NS.Msg("Zygor guide controls require Zygor Guides Viewer.")
+        return
+    end
+
+    if subcmd == "next" or subcmd == "forward" then
+        RunZygorGuideAction(shared, "NextZygorStep", "Zygor guide: next step.", "Unable to move to the next Zygor step.")
+    elseif subcmd == "prev" or subcmd == "previous" or subcmd == "back" then
+        RunZygorGuideAction(shared, "PreviousZygorStep", "Zygor guide: previous step.", "Unable to move to the previous Zygor step.")
+    elseif subcmd == "skip" or subcmd == "force" then
+        RunZygorGuideAction(shared, "SkipZygorStep", "Zygor guide: skipped to next step.", "Unable to skip the Zygor step.")
+    elseif subcmd == "picker" or subcmd == "new" then
+        RunZygorGuideAction(shared, "OpenZygorNewGuide", "Opened Zygor guide picker.", "Unable to open Zygor guide picker.")
+    elseif subcmd == "load" or subcmd == "open" then
+        if rest == "" then
+            RunZygorGuideAction(shared, "OpenZygorNewGuide", "Opened Zygor guide picker.", "Unable to open Zygor guide picker.")
+        else
+            local title, step = ParseZygorGuideLoadArgs(rest)
+            if type(shared.LoadZygorGuide) == "function" then
+                local ok, result = pcall(shared.LoadZygorGuide, title, step)
+                if ok and result then
+                    NS.Msg("Loaded Zygor guide:", title)
+                else
+                    NS.Msg("Unable to load Zygor guide:", title)
+                end
+            else
+                NS.Msg("Unable to load Zygor guide:", title)
+            end
+        end
+    elseif subcmd == "menu" or subcmd == "guidemenu" then
+        if type(shared.OpenZygorViewerMenu) == "function" then
+            local ok = pcall(shared.OpenZygorViewerMenu, _G.UIParent)
+            NS.Msg(ok and "Opened Zygor guide menu." or "Unable to open Zygor guide menu.")
+        else
+            NS.Msg("Unable to open Zygor guide menu.")
+        end
+    elseif subcmd == "settings" or subcmd == "options" then
+        RunZygorGuideAction(shared, "OpenZygorSettings", "Opened Zygor settings.", "Unable to open Zygor settings.")
+    elseif subcmd == "reset" or subcmd == "resetwindow" or subcmd == "fix" then
+        -- Recover a lost or glitched native viewer: stop AWP from cloaking it,
+        -- then reset Zygor's own window back to its default position.
+        if type(NS.SetZygorTrackerViewerSetting) == "function" then
+            NS.SetZygorTrackerViewerSetting("hideZygorFrame", false)
+        end
+        if type(NS.ApplyZygorTrackerViewerSettings) == "function" then
+            NS.ApplyZygorTrackerViewerSettings()
+        end
+        local Z = shared.GetZygor()
+        local didReset = Z and Z.Frame and type(Z.Frame.ResetWindow) == "function"
+            and pcall(Z.Frame.ResetWindow, Z.Frame) or false
+        if didReset then
+            NS.Msg("Zygor viewer reset: unhidden and window moved back to default.")
+        else
+            NS.Msg("Unhid Zygor's viewer (Zygor's own window reset was unavailable).")
+        end
+    elseif subcmd == "output" or subcmd == "print" or subcmd == "step" then
+        local mode = rest ~= "" and rest or nil
+        if type(shared.OutputCurrentZygorStepToChat) == "function" then
+            local ok, result = pcall(shared.OutputCurrentZygorStepToChat, mode)
+            if not ok then
+                NS.Msg("Unable to show the current Zygor step in your chat.")
+            end
+        else
+            NS.Msg("Unable to show the current Zygor step in your chat.")
+        end
+    elseif subcmd == "list" or subcmd == "guides" or subcmd == "tabs" or subcmd == "status" then
+        PrintZygorGuideList(shared)
+    elseif subcmd == "switch" or subcmd == "select" or subcmd == "activate" then
+        local index = tonumber(rest)
+        local tabs = GetIndexedZygorGuideTabs(shared)
+        local tab = index and tabs[index]
+        if tab and type(shared.ActivateZygorTab) == "function" then
+            local title = GetZygorGuideTitle(shared, tab)
+            local ok, result = pcall(shared.ActivateZygorTab, tab)
+            if ok and result then
+                NS.Msg("Switched to Zygor guide:", title)
+            else
+                NS.Msg("Unable to switch to Zygor guide:", title)
+            end
+        else
+            NS.Msg("No open Zygor guide at that index.")
+            PrintZygorGuideList(shared)
+        end
+    elseif subcmd == "close" or subcmd == "clear" then
+        local target = rest:lower()
+        if target == "all" then
+            local tabs = GetIndexedZygorGuideTabs(shared)
+            local closed = 0
+            for index = #tabs, 1, -1 do
+                if CloseZygorGuideTab(shared, tabs[index]) then
+                    closed = closed + 1
+                end
+            end
+            NS.Msg("Closed Zygor guides:", closed)
+        else
+            local tab
+            if target ~= "" and target ~= "current" then
+                local index = tonumber(target)
+                tab = index and GetIndexedZygorGuideTabs(shared)[index] or nil
+            elseif type(shared.GetActiveZygorGuideTab) == "function" then
+                tab = shared.GetActiveZygorGuideTab()
+            end
+
+            if tab then
+                local title = GetZygorGuideTitle(shared, tab)
+                if CloseZygorGuideTab(shared, tab) then
+                    NS.Msg("Closed Zygor guide:", title)
+                else
+                    NS.Msg("Unable to close Zygor guide:", title)
+                end
+            elseif target == "" or target == "current" then
+                RunZygorGuideAction(shared, "ClearCurrentZygorGuide", "Closed current Zygor guide.", "No current Zygor guide to close.")
+            else
+                NS.Msg("No open Zygor guide at that index.")
+                PrintZygorGuideList(shared)
+            end
+        end
+    else
+        PrintZygorGuideUsage()
+    end
+end
+
+local function handleMinimap(arg)
+    if type(NS.SetMinimapButtonEnabled) ~= "function" then
+        NS.Msg("Minimap button settings are unavailable.")
+        return
+    end
+
+    if arg == "show" or arg == "on" or arg == "enable" then
+        NS.SetMinimapButtonEnabled(true)
+        NS.Msg("Minimap button: shown")
+    elseif arg == "hide" or arg == "off" or arg == "disable" then
+        NS.SetMinimapButtonEnabled(false)
+        NS.Msg("Minimap button: hidden")
+    elseif arg == "toggle" then
+        local enabled = not (type(NS.IsMinimapButtonEnabled) == "function" and NS.IsMinimapButtonEnabled())
+        NS.SetMinimapButtonEnabled(enabled)
+        NS.Msg("Minimap button:", enabled and "shown" or "hidden")
+    elseif arg == "reset" then
+        if type(NS.ResetMinimapButtonPosition) == "function" then
+            NS.ResetMinimapButtonPosition()
+        end
+        NS.Msg("Minimap button position reset.")
+    elseif arg == "" or arg == "status" then
+        local status = type(NS.GetMinimapButtonStatus) == "function" and NS.GetMinimapButtonStatus() or "unknown"
+        NS.Msg("Minimap button:", status)
+    else
+        local status = type(NS.GetMinimapButtonStatus) == "function" and NS.GetMinimapButtonStatus() or "unknown"
+        NS.Msg("Minimap button:", status)
+        NS.Msg("Usage: /awp minimap show | hide | toggle | reset | status")
+    end
+end
+
+local function handleFlightAssist(arg)
+    if type(NS.GetFlightMapAssistSettings) ~= "function" or type(NS.SetFlightMapAssistSetting) ~= "function" then
+        NS.Msg("Flight Map Assist settings are unavailable.")
+        return
+    end
+
+    arg = trim((arg or ""):lower())
+    local subcmd, rest = arg:match("^(%S+)%s*(.-)$")
+    subcmd = subcmd or ""
+    rest = trim(rest)
+    local settings = NS.GetFlightMapAssistSettings()
+
+    if subcmd == "" or subcmd == "status" then
+        local catalogSettings = type(NS.GetFlightMapCatalogSettings) == "function" and NS.GetFlightMapCatalogSettings() or nil
+        NS.Msg(
+            "Flight Map Assist marker:",
+            settings.marker and "on" or "off",
+            "auto:",
+            FormatFlightMapAutoTakeMode(settings.autoTakeMode),
+            "taxi list:",
+            catalogSettings and (catalogSettings.enabled and "on" or "off") or "unavailable"
+        )
+        if type(NS.GetFlightMapAssistStatus) == "function" then
+            NS.Msg("Flight Map Assist:", NS.GetFlightMapAssistStatus())
+        end
+        if type(NS.GetFlightMapCatalogStatus) == "function" then
+            NS.Msg("Flight Map Taxi List:", NS.GetFlightMapCatalogStatus())
+        end
+        NS.Msg("Usage: /awp flightassist marker on|off|toggle|status")
+        NS.Msg("       /awp flightassist auto disabled|exact|strong|status")
+        NS.Msg("       /awp flightassist catalog on|off|toggle|reset|status")
+        return
+    end
+
+    if subcmd == "marker" then
+        if rest == "on" or rest == "show" or rest == "enable" then
+            settings = NS.SetFlightMapAssistSetting("marker", true)
+            NS.Msg("Flight Map Assist marker:", settings.marker and "on" or "off")
+        elseif rest == "off" or rest == "hide" or rest == "disable" then
+            settings = NS.SetFlightMapAssistSetting("marker", false)
+            NS.Msg("Flight Map Assist marker:", settings.marker and "on" or "off")
+        elseif rest == "toggle" then
+            settings = NS.SetFlightMapAssistSetting("marker", not settings.marker)
+            NS.Msg("Flight Map Assist marker:", settings.marker and "on" or "off")
+        elseif rest == "" or rest == "status" then
+            NS.Msg("Flight Map Assist marker:", settings.marker and "on" or "off")
+        else
+            NS.Msg("Usage: /awp flightassist marker on | off | toggle | status")
+        end
+        return
+    end
+
+    if subcmd == "catalog" or subcmd == "list" or subcmd == "taxilist" then
+        if type(NS.GetFlightMapCatalogSettings) ~= "function" or type(NS.SetFlightMapCatalogSetting) ~= "function" then
+            NS.Msg("Flight Map Taxi List settings are unavailable.")
+            return
+        end
+
+        local catalogSettings = NS.GetFlightMapCatalogSettings()
+        if rest == "on" or rest == "show" or rest == "enable" then
+            catalogSettings = NS.SetFlightMapCatalogSetting("enabled", true)
+            NS.Msg("Flight Map Taxi List:", catalogSettings.enabled and "on" or "off")
+        elseif rest == "off" or rest == "hide" or rest == "disable" then
+            catalogSettings = NS.SetFlightMapCatalogSetting("enabled", false)
+            NS.Msg("Flight Map Taxi List:", catalogSettings.enabled and "on" or "off")
+        elseif rest == "toggle" then
+            catalogSettings = NS.SetFlightMapCatalogSetting("enabled", not catalogSettings.enabled)
+            NS.Msg("Flight Map Taxi List:", catalogSettings.enabled and "on" or "off")
+        elseif rest == "reset" then
+            if type(NS.ResetFlightMapCatalog) == "function" then
+                NS.ResetFlightMapCatalog()
+            end
+            NS.Msg("Flight Map Taxi List reset.")
+        elseif rest == "" or rest == "status" then
+            local status = type(NS.GetFlightMapCatalogStatus) == "function" and NS.GetFlightMapCatalogStatus() or
+                (catalogSettings.enabled and "on" or "off")
+            NS.Msg("Flight Map Taxi List:", status)
+        else
+            NS.Msg("Usage: /awp flightassist catalog on | off | toggle | reset | status")
+        end
+        return
+    end
+
+    if subcmd == "auto" or subcmd == "autotake" then
+        if rest == "" or rest == "status" then
+            NS.Msg("Flight Map Assist auto-take:", FormatFlightMapAutoTakeMode(settings.autoTakeMode))
+        elseif rest == "disabled" or rest == "disable" or rest == "off" or rest == "none" then
+            settings = NS.SetFlightMapAssistSetting("autoTakeMode", C.FLIGHT_MAP_AUTO_TAKE_DISABLED)
+            NS.Msg("Flight Map Assist auto-take:", FormatFlightMapAutoTakeMode(settings.autoTakeMode))
+        elseif rest == "exact" then
+            settings = NS.SetFlightMapAssistSetting("autoTakeMode", C.FLIGHT_MAP_AUTO_TAKE_EXACT)
+            NS.Msg("Flight Map Assist auto-take:", FormatFlightMapAutoTakeMode(settings.autoTakeMode))
+        elseif rest == "strong" then
+            settings = NS.SetFlightMapAssistSetting("autoTakeMode", C.FLIGHT_MAP_AUTO_TAKE_STRONG)
+            NS.Msg("Flight Map Assist auto-take:", FormatFlightMapAutoTakeMode(settings.autoTakeMode))
+        else
+            NS.Msg("Usage: /awp flightassist auto disabled | exact | strong | status")
+        end
+        return
+    end
+
+    NS.Msg("Usage: /awp flightassist marker on | off | toggle | status")
+    NS.Msg("       /awp flightassist auto disabled | exact | strong | status")
+    NS.Msg("       /awp flightassist catalog on | off | toggle | reset | status")
+end
+
 -- ============================================================
 -- Status and repair
 -- ============================================================
@@ -623,6 +1087,53 @@ local function handleStatus()
         "Compact viewer:",
         NS.IsGuideStepsOnlyHoverEnabled() and "on" or "off"
     )
+    if type(NS.GetFlightMapAssistSettings) == "function" then
+        local flightSettings = NS.GetFlightMapAssistSettings()
+        local catalogSettings = type(NS.GetFlightMapCatalogSettings) == "function" and NS.GetFlightMapCatalogSettings() or nil
+        NS.Msg(
+            "Flight Map Assist marker:",
+            flightSettings.marker and "on" or "off",
+            "auto:",
+            FormatFlightMapAutoTakeMode(flightSettings.autoTakeMode),
+            "taxi list:",
+            catalogSettings and (catalogSettings.enabled and "on" or "off") or "unavailable"
+        )
+        if type(NS.GetFlightMapCatalogStatus) == "function" then
+            NS.Msg("Flight Map Taxi List:", NS.GetFlightMapCatalogStatus())
+        end
+    end
+    local trackerSettings = GetZygorTrackerViewerSettings()
+    if trackerSettings then
+        NS.Msg(
+            "Tracker Viewer:",
+            trackerSettings.enabled and "on" or "off",
+            "Zygor native viewer:",
+            trackerSettings.hideZygorFrame and "hidden" or "shown"
+        )
+    end
+    if type(NS.GetZygorStepChatSettings) == "function" then
+        local stepChatSettings = NS.GetZygorStepChatSettings()
+        NS.Msg(
+            "Zygor chat step display:",
+            stepChatSettings.outputOnChange and "on" or "off",
+            "sticky:",
+            stepChatSettings.stickySummary or "unknown"
+        )
+    end
+    if type(NS.GetObjectiveTrackerVisibilityStatus) == "function" then
+        local tracker = NS.GetObjectiveTrackerVisibilityStatus()
+        NS.Msg(
+            "Objective tracker:",
+            tracker.host or "unknown",
+            "visibility:",
+            tracker.visibility or "unknown",
+            "opacity:",
+            tracker.opacity or "unknown"
+        )
+    end
+    if type(NS.GetMinimapButtonStatus) == "function" then
+        NS.Msg("Minimap button:", NS.GetMinimapButtonStatus())
+    end
 end
 
 local function describeQueue(queue, activeQueueID, index)
@@ -637,7 +1148,7 @@ local function handleQueueList()
     local queues = type(NS.GetManualQueueList) == "function" and NS.GetManualQueueList() or {}
     local activeQueueID = type(NS.ResolveQueueToken) == "function" and NS.ResolveQueueToken(nil) or nil
     if type(NS.ShowQueuePanel) == "function" then
-        NS.ShowQueuePanel()
+        NS.ShowQueuePanel({ forceQuestLog = true })
     end
     if #queues == 0 then
         NS.Msg("Queues: none")
@@ -720,7 +1231,7 @@ end
 
 local function handleQueuePanel()
     if type(NS.ShowQueuePanel) == "function" then
-        NS.ShowQueuePanel()
+        NS.ShowQueuePanel({ forceQuestLog = true })
         return
     end
     NS.Msg("Queue panel unavailable.")
@@ -748,6 +1259,11 @@ M.handleUntrackClear = handleUntrackClear
 M.handleQuestClear = handleQuestClear
 M.handleAddonTakeover = handleAddonTakeover
 M.handleCompact = handleCompact
+M.handleTrackerViewer = handleTrackerViewer
+M.handleZygorViewer = handleZygorViewer
+M.handleZygorGuide = handleZygorGuide
+M.handleMinimap = handleMinimap
+M.handleFlightAssist = handleFlightAssist
 M.handleStatus = handleStatus
 M.handleQueueList = handleQueueList
 M.handleQueueUse = handleQueueUse

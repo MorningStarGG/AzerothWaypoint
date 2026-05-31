@@ -352,6 +352,7 @@ end
 
 local function GetSectionLabel(key)
     if key == "release" then return "Release Notes" end
+    if key == "integrations" then return "Integrations" end
     for _, sec in ipairs(sections or SECTION_DEFS) do
         if sec.key == key then return sec.label end
     end
@@ -360,7 +361,7 @@ local function GetSectionLabel(key)
 end
 
 local function IsSectionAvailable(key)
-    if key == "release" or key == "about" then return true end
+    if key == "release" or key == "integrations" or key == "about" then return true end
     for _, sec in ipairs(sections or SECTION_DEFS) do
         if sec.key == key then return true end
     end
@@ -410,8 +411,9 @@ local function SearchScopeAllows(entry)
                 "footer text", "text", "plaque", "animated parts", "chevrons", "navigator arrow")
             or TextHas(entry.tags or "", "color")
     elseif searchScope == "integrations" then
-        return key == "tomtom" or key == "zygor"
-            or TextHas(haystack, "tomtom", "zygor", "backend", "farstrider", "mapzeroth", "special travel")
+        return key == "integrations" or key == "tomtom" or key == "zygor"
+            or TextHas(haystack, "tomtom", "zygor", "backend", "farstrider", "mapzeroth", "special travel",
+                "handynotes", "silverdragon", "rarescanner", "worldquesttab", "inflight", "kaliel")
     end
 
     return true
@@ -425,7 +427,8 @@ local function GetScrollContentWidth()
         bodyWidth = PANEL_W
     end
 
-    local expectedWidth = bodyWidth - NAV_W - (activeKey == "release" and 0 or PREVIEW_W)
+    local documentLayout = activeKey == "release" or activeKey == "integrations"
+    local expectedWidth = bodyWidth - NAV_W - (documentLayout and 0 or PREVIEW_W)
     local width = scrollFrame:GetWidth() or 0
     if width < 2 or width < expectedWidth - 2 or width > expectedWidth + 2 then
         width = expectedWidth
@@ -451,12 +454,12 @@ local function UpdateContentLayoutForSection(key)
         return
     end
 
-    local releaseLayout = key == "release"
-    SetPreviewColumnShown(not releaseLayout)
+    local documentLayout = key == "release" or key == "integrations"
+    SetPreviewColumnShown(not documentLayout)
 
     scrollFrame:ClearAllPoints()
     scrollFrame:SetPoint("TOPLEFT", bodyFrame, "TOPLEFT", NAV_W, 0)
-    if releaseLayout then
+    if documentLayout then
         scrollFrame:SetPoint("BOTTOMRIGHT", bodyFrame, "BOTTOMRIGHT", 0, 0)
     else
         scrollFrame:SetPoint("BOTTOMRIGHT", bodyFrame, "BOTTOMRIGHT", -PREVIEW_W, 0)
@@ -797,9 +800,9 @@ function SelectSection(key)
         M.Dropdown.Close()
     end
 
-    activeTab = (key == "release") and "release" or "modules"
+    activeTab = (key == "release" or key == "integrations") and key or "modules"
     activeKey = key
-    if key ~= "release" and key ~= "search" then
+    if key ~= "release" and key ~= "integrations" and key ~= "search" then
         lastModuleKey = key
     end
     UpdateTabButtons()
@@ -1066,6 +1069,17 @@ function M.Create()
     end)
     releaseTab:HookScript("OnLeave", UpdateTabButtons)
     tabButtons[#tabButtons + 1] = releaseTab
+
+    local integrationsTab = FW.CreatePanelButton(footerFrame)
+    integrationsTab:SetSize(128, 30)
+    integrationsTab:SetPoint("LEFT", releaseTab, "RIGHT", 8, 0)
+    integrationsTab:SetDisplayText("Integrations")
+    integrationsTab.tabKey = "integrations"
+    integrationsTab:SetScript("OnClick", function()
+        SelectSection("integrations")
+    end)
+    integrationsTab:HookScript("OnLeave", UpdateTabButtons)
+    tabButtons[#tabButtons + 1] = integrationsTab
 
     settingsCanvas:SetScript("OnShow", function()
         SelectSection(activeKey)

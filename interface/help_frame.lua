@@ -1,37 +1,91 @@
-local NS = _G.AzerothWaypointNS
-local FW = NS.Internal.Interface.Framework
+local NS                                                             = _G.AzerothWaypointNS
+local FW                                                             = NS.Internal.Interface.Framework
 
 local frame
 
-local FRAME_WIDTH = 880
-local FRAME_HEIGHT = 660
-local DEFAULT_CONTENT_WIDTH = 740
-local CONTENT_TOP_PADDING = 12
-local CONTENT_BOTTOM_PADDING = 16
-local CONTENT_RIGHT_PADDING = 10
-local SCROLL_STEP = 48
-local BLOCK_SPACING      = 16
-local IMAGE_GAP          = 12
-local BODY_INDENT        = 14
+local FRAME_WIDTH                                                    = 880
+local FRAME_HEIGHT                                                   = 660
+local DEFAULT_CONTENT_WIDTH                                          = 740
+local CONTENT_TOP_PADDING                                            = 12
+local CONTENT_BOTTOM_PADDING                                         = 16
+local CONTENT_RIGHT_PADDING                                          = 10
+local SCROLL_STEP                                                    = 48
+local BLOCK_SPACING                                                  = 16
+local IMAGE_GAP                                                      = 12
+local BODY_INDENT                                                    = 14
 
 local HEADING_LINE_R, HEADING_LINE_G, HEADING_LINE_B, HEADING_LINE_A = 1.0, 0.82, 0.08, 0.38
-local HEADING_GLOW_ATLAS = "AftLevelup-GlowLine"
-local HEADING_GLOW_W     = 322
-local HEADING_GLOW_H     = 18
-local PAGE_GLOW_W        = 360
-local PAGE_GLOW_H        = 20
-local PAGE_INTRO_PAD_X   = 16
-local PAGE_INTRO_PAD_Y   = 10
-local PAGE_INTRO_BG      = { 0.050, 0.040, 0.026, 0.72 }
-local PAGE_INTRO_BORDER  = { 1.000, 0.820, 0.080, 0.22 }
+local HEADING_GLOW_ATLAS                                             = "AftLevelup-GlowLine"
+local HEADING_GLOW_W                                                 = 322
+local HEADING_GLOW_H                                                 = 18
+local PAGE_GLOW_W                                                    = 360
+local PAGE_GLOW_H                                                    = 20
+local PAGE_INTRO_PAD_X                                               = 16
+local PAGE_INTRO_PAD_Y                                               = 10
+local PAGE_INTRO_BG                                                  = { 0.050, 0.040, 0.026, 0.72 }
+local PAGE_INTRO_BORDER                                              = { 1.000, 0.820, 0.080, 0.22 }
 
-local NOTE_BG_R,     NOTE_BG_G,     NOTE_BG_B,     NOTE_BG_A     = 0.08, 0.10, 0.15, 0.92
-local NOTE_ACCENT_R, NOTE_ACCENT_G, NOTE_ACCENT_B, NOTE_ACCENT_A = 0.38, 0.62, 0.90, 0.88
-local NOTE_ACCENT_WIDTH = 3
-local NOTE_PAD_X        = 10
-local NOTE_PAD_Y        = 7
-local FRAME_TITLE = "AzerothWaypoint Help"
-local ChangelogFormat = NS.ChangelogFormat or {}
+local NOTE_BG_R, NOTE_BG_G, NOTE_BG_B, NOTE_BG_A                     = 0.08, 0.10, 0.15, 0.92
+local NOTE_ACCENT_R, NOTE_ACCENT_G, NOTE_ACCENT_B, NOTE_ACCENT_A     = 0.38, 0.62, 0.90, 0.88
+local NOTE_ACCENT_WIDTH                                              = 3
+local NOTE_PAD_X                                                     = 10
+local NOTE_PAD_Y                                                     = 7
+local FRAME_TITLE                                                    = "AzerothWaypoint Help"
+local ChangelogFormat                                                = NS.ChangelogFormat or {}
+
+local function IsAlphaNumeric(ch)
+    return ch ~= "" and ch:match("[%w_]") ~= nil
+end
+
+local function IsValidHelpEscape(text, index)
+    local code = text:sub(index + 1, index + 1)
+    local after = text:sub(index + 2, index + 2)
+
+    if code == "C" or code == "c" then
+        return text:sub(index + 2, index + 9):match("^%x%x%x%x%x%x%x%x$") ~= nil
+    elseif code == "R" or code == "r" then
+        return not IsAlphaNumeric(after)
+    elseif code == "A" then
+        return after == ":"
+    elseif code == "a" then
+        return not IsAlphaNumeric(after)
+    elseif code == "T" or code == "H" or code == "K" or code == "N" then
+        return true
+    elseif code == "t" or code == "h" or code == "k" or code == "n" then
+        return not IsAlphaNumeric(after)
+    end
+
+    return false
+end
+
+local function EscapeHelpText(text)
+    text = tostring(text or "")
+    local out = {}
+    local i = 1
+    local len = #text
+
+    while i <= len do
+        local ch = text:sub(i, i)
+        if ch ~= "|" then
+            out[#out + 1] = ch
+            i = i + 1
+        else
+            local nextCh = text:sub(i + 1, i + 1)
+            if nextCh == "|" then
+                out[#out + 1] = "||"
+                i = i + 2
+            elseif IsValidHelpEscape(text, i) then
+                out[#out + 1] = "|"
+                i = i + 1
+            else
+                out[#out + 1] = "||"
+                i = i + 1
+            end
+        end
+    end
+
+    return table.concat(out)
+end
 
 local TEXT_STYLES = {
     heading = {
@@ -154,6 +208,7 @@ end
 local function ResetPool(pool)
     for _, widget in ipairs(pool) do
         widget:Hide()
+        if widget.awpSelect then widget.awpSelect:Hide() end
     end
     pool.nextIndex = 1
 end
@@ -172,6 +227,98 @@ local function AcquireText(frameRef)
     pool.nextIndex = index + 1
     widget:Show()
     return widget
+end
+
+-- Help text uses non-selectable FontStrings. To let users copy commands and
+-- prose, float a read-only, transparent multiline EditBox exactly over each
+-- FontString, using the SAME text and font so it lays out identically and its
+-- selection highlight lines up with the visible glyphs. The FontString stays
+-- the visible (non-editable-looking) text; the EditBox only adds drag-selection
+-- + Ctrl+C. The box is attached to that FontString and pooled/hidden with it.
+local function MakeSelectable(frameRef, fontString)
+    local eb = fontString.awpSelect
+    if eb then return eb end
+    eb = CreateFrame("EditBox", nil, fontString:GetParent())
+    eb:SetMultiLine(true)
+    eb:SetAutoFocus(false)
+    eb:EnableMouse(true)
+    eb:SetTextInsets(0, 0, 0, 0)
+    eb:SetTextColor(1, 1, 1, 0) -- invisible glyphs; the FontString below shows the text
+    eb:SetHighlightColor(0.30, 0.40, 0.55, 0.45)
+    eb:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    eb:SetScript("OnEditFocusLost", function(self) self:HighlightText(0, 0) end)
+    -- Read-only: revert any typed/pasted change. Selection and copy are unaffected.
+    eb:SetScript("OnTextChanged", function(self, userInput)
+        if userInput then self:SetText(self.awpText or "") end
+    end)
+    -- Keep page scrolling working while the cursor is over the text.
+    eb:EnableMouseWheel(true)
+    eb:SetScript("OnMouseWheel", function(self, delta)
+        local scroll = frameRef.scroll
+        local handler = scroll and scroll:GetScript("OnMouseWheel")
+        if handler then handler(scroll, delta) end
+    end)
+    fontString.awpSelect = eb
+    return eb
+end
+
+local function ApplySelectable(frameRef, fontString)
+    local text = (type(fontString.GetText) == "function") and fontString:GetText() or nil
+    if type(text) ~= "string" or text == "" then
+        if fontString.awpSelect then fontString.awpSelect:Hide() end
+        return
+    end
+    local eb = MakeSelectable(frameRef, fontString)
+    eb.awpText = text
+    -- Match the FontString's font, line spacing and justify so the (invisible)
+    -- EditBox lays the text out identically, keeping the selection highlight
+    -- aligned to the visible glyphs underneath. Line spacing is the important
+    -- one: FontStrings carry SetSpacing from the text style, but EditBoxes
+    -- default to 0, so without this each wrapped line drifts a little further.
+    local file, height, flags = fontString:GetFont()
+    if file then eb:SetFont(file, height, flags) end
+    if type(eb.SetSpacing) == "function" and type(fontString.GetSpacing) == "function" then
+        eb:SetSpacing(fontString:GetSpacing() or 0)
+    end
+    if type(eb.SetJustifyH) == "function" then
+        eb:SetJustifyH(fontString:GetJustifyH() or "LEFT")
+    end
+    if type(eb.SetJustifyV) == "function" and type(fontString.GetJustifyV) == "function" then
+        eb:SetJustifyV(fontString:GetJustifyV() or "TOP")
+    end
+    eb:SetText(text)
+    eb:HighlightText(0, 0)
+    eb:ClearAllPoints()
+    eb:SetAllPoints(fontString)
+    eb:Show()
+end
+
+-- Split a multi-line text block into paragraph segments (runs of non-blank
+-- lines) plus standalone blank lines. Each paragraph gets its own FontString +
+-- selection overlay, so the FontString/EditBox sub-pixel line-height drift can
+-- never accumulate beyond a single short paragraph. Blank lines render as a
+-- non-selectable single space, preserving the original vertical rhythm.
+local function SplitIntoSegments(text, maxLines)
+    local segments, current = {}, {}
+    local function flush()
+        if #current > 0 then
+            segments[#segments + 1] = { text = table.concat(current, "\n"), selectable = true }
+            current = {}
+        end
+    end
+    for line in (tostring(text or "") .. "\n"):gmatch("(.-)\n") do
+        if line:match("^%s*$") then
+            flush()
+            segments[#segments + 1] = { text = " ", selectable = false }
+        else
+            current[#current + 1] = line
+            -- Optional cap so even long sections can't accumulate drift; maxLines
+            -- = 1 makes every line its own segment (zero accumulation).
+            if maxLines and #current >= maxLines then flush() end
+        end
+    end
+    flush()
+    return segments
 end
 
 local function CreateDivider(parent)
@@ -243,7 +390,7 @@ local function ApplyImageBlockData(blockFrame, data)
     blockFrame.canvas:SetPoint("TOPLEFT", blockFrame, "TOPLEFT", 0, 0)
 
     blockFrame.placeholder:SetWidth(math.max(width - 24, 80))
-    blockFrame.placeholder:SetText(placeholder)
+    blockFrame.placeholder:SetText(EscapeHelpText(placeholder))
 
     blockFrame.borderTop:SetPoint("TOPLEFT", blockFrame.canvas, "TOPLEFT", 0, 0)
     blockFrame.borderTop:SetPoint("TOPRIGHT", blockFrame.canvas, "TOPRIGHT", 0, 0)
@@ -303,7 +450,7 @@ local function ApplyImageBlockData(blockFrame, data)
         blockFrame.background:SetColorTexture(0.07, 0.07, 0.07, 0.92)
     end
 
-    blockFrame.caption:SetText(caption)
+    blockFrame.caption:SetText(EscapeHelpText(caption))
     local captionHeight = 0
     if caption ~= "" then
         blockFrame.caption:Show()
@@ -404,7 +551,7 @@ local function CreateNoteBlock(parent)
 
     wrapper.accent = wrapper:CreateTexture(nil, "BORDER")
     wrapper.accent:SetWidth(NOTE_ACCENT_WIDTH)
-    wrapper.accent:SetPoint("TOPLEFT",    wrapper, "TOPLEFT",    0, 0)
+    wrapper.accent:SetPoint("TOPLEFT", wrapper, "TOPLEFT", 0, 0)
     wrapper.accent:SetPoint("BOTTOMLEFT", wrapper, "BOTTOMLEFT", 0, 0)
     wrapper.accent:SetColorTexture(NOTE_ACCENT_R, NOTE_ACCENT_G, NOTE_ACCENT_B, NOTE_ACCENT_A)
 
@@ -456,13 +603,13 @@ local function ApplyNoteBlockLayout(noteFrame, text, contentWidth, block)
     noteWidth = math.floor(math.max(120, math.min(noteWidth, contentWidth)))
     local innerW = math.max(noteWidth - accentW - NOTE_PAD_X * 2, 80)
     noteFrame.label:SetWidth(innerW)
-    noteFrame.label:SetText(text)
+    noteFrame.label:SetText(EscapeHelpText(text))
     noteFrame.label:SetJustifyH(ResolveJustifyH(block.align, "LEFT"))
     noteFrame.label:ClearAllPoints()
     noteFrame.label:SetPoint("TOPLEFT", noteFrame, "TOPLEFT", accentW + NOTE_PAD_X, -NOTE_PAD_Y)
 
-    local textH   = math.ceil(noteFrame.label:GetStringHeight() or noteFrame.label:GetHeight() or 16)
-    local totalH  = textH + NOTE_PAD_Y * 2
+    local textH  = math.ceil(noteFrame.label:GetStringHeight() or noteFrame.label:GetHeight() or 16)
+    local totalH = textH + NOTE_PAD_Y * 2
     noteFrame:SetSize(noteWidth, totalH)
     noteFrame.totalHeight = totalH
 end
@@ -474,7 +621,7 @@ local function ApplyIntroPanelLayout(panel, text, contentWidth, align)
 
     local innerW = math.max(contentWidth - PAGE_INTRO_PAD_X * 2, 120)
     panel.label:SetWidth(innerW)
-    panel.label:SetText(text or "")
+    panel.label:SetText(EscapeHelpText(text))
     panel.label:SetJustifyH(ResolveJustifyH(align, "CENTER"))
     panel.label:ClearAllPoints()
     panel.label:SetPoint("TOPLEFT", panel, "TOPLEFT", PAGE_INTRO_PAD_X, -PAGE_INTRO_PAD_Y)
@@ -612,7 +759,7 @@ local function LayoutPage(frameRef, pageIndex, resetScroll)
         frameRef.pageTitleGlow:Hide()
     else
         frameRef.pageTitle:SetWidth(contentWidth)
-        frameRef.pageTitle:SetText(tostring(page.title or "Help"))
+        frameRef.pageTitle:SetText(EscapeHelpText(page.title or "Help"))
         frameRef.pageTitle:ClearAllPoints()
         frameRef.pageTitle:SetPoint("TOP", frameRef.content, "TOP", 0, cursorY)
         frameRef.pageTitle:Show()
@@ -636,6 +783,7 @@ local function LayoutPage(frameRef, pageIndex, resetScroll)
         frameRef.pageIntroPanel:SetPoint("TOPLEFT", frameRef.content, "TOPLEFT", introX, cursorY)
         frameRef.pageIntroPanel:Show()
         frameRef.pageIntro:Show()
+        ApplySelectable(frameRef, frameRef.pageIntro)
         cursorY = cursorY - math.max(introH or 0, frameRef.pageIntroPanel.totalHeight or 0) - 16
     else
         frameRef.pageIntroPanel:Hide()
@@ -649,9 +797,10 @@ local function LayoutPage(frameRef, pageIndex, resetScroll)
             local widget = AcquireText(frameRef)
             ApplyTextStyle(widget, "heading")
             widget:SetWidth(contentWidth)
-            widget:SetText(tostring(block.text or ""))
+            widget:SetText(EscapeHelpText(block.text))
             widget:ClearAllPoints()
             widget:SetPoint("TOPLEFT", frameRef.content, "TOPLEFT", 0, cursorY)
+            ApplySelectable(frameRef, widget)
             local textH = math.ceil(widget:GetStringHeight() or widget:GetHeight() or 0)
 
             local line = AcquireHeadingLine(frameRef)
@@ -662,13 +811,29 @@ local function LayoutPage(frameRef, pageIndex, resetScroll)
 
             cursorY = cursorY - textH - HEADING_GLOW_H - 3 - (tonumber(block.spacingAfter) or BLOCK_SPACING)
         elseif block.type == "text" then
-            local widget = AcquireText(frameRef)
-            ApplyTextStyle(widget, "body")
-            widget:SetWidth(contentWidth - BODY_INDENT)
-            widget:SetText(tostring(block.text or ""))
-            widget:ClearAllPoints()
-            widget:SetPoint("TOPLEFT", frameRef.content, "TOPLEFT", BODY_INDENT, cursorY)
-            cursorY = cursorY - math.ceil(widget:GetStringHeight() or widget:GetHeight() or 0) - (tonumber(block.spacingAfter) or BLOCK_SPACING)
+            -- Render each paragraph as its own selectable FontString so the
+            -- selection overlay realigns at every blank line and can't drift.
+            local segments = SplitIntoSegments(block.text)
+            local lineSpacing = (TEXT_STYLES.body and TEXT_STYLES.body.spacing) or 0
+            for sIndex, seg in ipairs(segments) do
+                local widget = AcquireText(frameRef)
+                ApplyTextStyle(widget, "body")
+                widget:SetWidth(contentWidth - BODY_INDENT)
+                widget:SetText(EscapeHelpText(seg.text))
+                widget:ClearAllPoints()
+                widget:SetPoint("TOPLEFT", frameRef.content, "TOPLEFT", BODY_INDENT, cursorY)
+                if seg.selectable then
+                    ApplySelectable(frameRef, widget)
+                elseif widget.awpSelect then
+                    widget.awpSelect:Hide()
+                end
+                cursorY = cursorY - (widget:GetStringHeight() or widget:GetHeight() or 0)
+                if sIndex < #segments then
+                    -- Replicate the single-block inter-line gap between segments.
+                    cursorY = cursorY - lineSpacing
+                end
+            end
+            cursorY = cursorY - (tonumber(block.spacingAfter) or BLOCK_SPACING)
         elseif block.type == "note" then
             local widget = AcquireNoteBlock(frameRef)
             ApplyNoteBlockLayout(widget, tostring(block.text or ""), contentWidth, block)
@@ -681,6 +846,7 @@ local function LayoutPage(frameRef, pageIndex, resetScroll)
                 offsetX = math.max(contentWidth - noteWidth, 0)
             end
             widget:SetPoint("TOPLEFT", frameRef.content, "TOPLEFT", offsetX, cursorY)
+            ApplySelectable(frameRef, widget.label)
             cursorY = cursorY - widget.totalHeight - (tonumber(block.spacingAfter) or BLOCK_SPACING)
         elseif block.type == "divider" then
             local divider = AcquireDivider(frameRef)
@@ -698,21 +864,39 @@ local function LayoutPage(frameRef, pageIndex, resetScroll)
                 offsetX = math.floor(math.max(contentWidth - imageWidth, 0) / 2)
             end
             widget:SetPoint("TOPLEFT", frameRef.content, "TOPLEFT", offsetX, cursorY)
-            cursorY = cursorY - math.ceil(widget.totalHeight or widget:GetHeight() or 0) - (tonumber(block.spacingAfter) or BLOCK_SPACING)
+            cursorY = cursorY - math.ceil(widget.totalHeight or widget:GetHeight() or 0) -
+            (tonumber(block.spacingAfter) or BLOCK_SPACING)
         elseif block.type == "image_row" then
             local row = AcquireImageRow(frameRef)
             LayoutImageRow(row, block, contentWidth)
             row:ClearAllPoints()
             row:SetPoint("TOPLEFT", frameRef.content, "TOPLEFT", 0, cursorY)
-            cursorY = cursorY - math.ceil(row.totalHeight or row:GetHeight() or 0) - (tonumber(block.spacingAfter) or BLOCK_SPACING)
+            cursorY = cursorY - math.ceil(row.totalHeight or row:GetHeight() or 0) -
+            (tonumber(block.spacingAfter) or BLOCK_SPACING)
         elseif block.type == "recent_changelog" then
-            local widget = AcquireText(frameRef)
-            ApplyTextStyle(widget, "body")
-            widget:SetWidth(contentWidth)
-            widget:SetText(FormatRecentChangelogText(block.limit or 3))
-            widget:ClearAllPoints()
-            widget:SetPoint("TOPLEFT", frameRef.content, "TOPLEFT", 0, cursorY)
-            cursorY = cursorY - math.ceil(widget:GetStringHeight() or widget:GetHeight() or 0) - (tonumber(block.spacingAfter) or BLOCK_SPACING)
+            -- Changelog sections can be long (entries wrap to 2-3 lines each), so
+            -- split per line (maxLines = 1) — each entry is its own segment and the
+            -- selection overlay can't drift. Changelog text is pre-colored, set raw.
+            local segments = SplitIntoSegments(FormatRecentChangelogText(block.limit or 3), 1)
+            local lineSpacing = (TEXT_STYLES.body and TEXT_STYLES.body.spacing) or 0
+            for sIndex, seg in ipairs(segments) do
+                local widget = AcquireText(frameRef)
+                ApplyTextStyle(widget, "body")
+                widget:SetWidth(contentWidth)
+                widget:SetText(seg.text)
+                widget:ClearAllPoints()
+                widget:SetPoint("TOPLEFT", frameRef.content, "TOPLEFT", 0, cursorY)
+                if seg.selectable then
+                    ApplySelectable(frameRef, widget)
+                elseif widget.awpSelect then
+                    widget.awpSelect:Hide()
+                end
+                cursorY = cursorY - (widget:GetStringHeight() or widget:GetHeight() or 0)
+                if sIndex < #segments then
+                    cursorY = cursorY - lineSpacing
+                end
+            end
+            cursorY = cursorY - (tonumber(block.spacingAfter) or BLOCK_SPACING)
         end
     end
 
@@ -757,7 +941,7 @@ local function GetOrCreateFrame()
     frame:EnableMouse(true)
     frame:RegisterForDrag("LeftButton")
     frame:SetScript("OnDragStart", frame.StartMoving)
-    frame:SetScript("OnDragStop",  frame.StopMovingOrSizing)
+    frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
     frame:Hide()
 
     local versionStr = type(NS.GetAddonMetadataValue) == "function"
@@ -829,7 +1013,7 @@ local function GetOrCreateFrame()
 
     -- Scroll area
     frame.scroll = CreateFrame("ScrollFrame", nil, frame, "UIPanelScrollFrameTemplate")
-    frame.scroll:SetPoint("TOPLEFT",     frame, "TOPLEFT",     14, -(TITLE_H + 12))
+    frame.scroll:SetPoint("TOPLEFT", frame, "TOPLEFT", 14, -(TITLE_H + 12))
     frame.scroll:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -22, FOOTER_H + 12)
     frame.scroll:EnableMouseWheel(true)
     frame.scroll:SetScript("OnMouseWheel", function(self, delta)
@@ -866,12 +1050,14 @@ local function GetOrCreateFrame()
     frame.pageIntroPanel.bg:SetAllPoints()
     frame.pageIntroPanel.bg:SetColorTexture(PAGE_INTRO_BG[1], PAGE_INTRO_BG[2], PAGE_INTRO_BG[3], PAGE_INTRO_BG[4])
     frame.pageIntroPanel.borderTop = frame.pageIntroPanel:CreateTexture(nil, "BORDER")
-    frame.pageIntroPanel.borderTop:SetColorTexture(PAGE_INTRO_BORDER[1], PAGE_INTRO_BORDER[2], PAGE_INTRO_BORDER[3], PAGE_INTRO_BORDER[4])
+    frame.pageIntroPanel.borderTop:SetColorTexture(PAGE_INTRO_BORDER[1], PAGE_INTRO_BORDER[2], PAGE_INTRO_BORDER[3],
+        PAGE_INTRO_BORDER[4])
     frame.pageIntroPanel.borderTop:SetPoint("TOPLEFT", frame.pageIntroPanel, "TOPLEFT", 0, 0)
     frame.pageIntroPanel.borderTop:SetPoint("TOPRIGHT", frame.pageIntroPanel, "TOPRIGHT", 0, 0)
     frame.pageIntroPanel.borderTop:SetHeight(1)
     frame.pageIntroPanel.borderBottom = frame.pageIntroPanel:CreateTexture(nil, "BORDER")
-    frame.pageIntroPanel.borderBottom:SetColorTexture(PAGE_INTRO_BORDER[1], PAGE_INTRO_BORDER[2], PAGE_INTRO_BORDER[3], PAGE_INTRO_BORDER[4])
+    frame.pageIntroPanel.borderBottom:SetColorTexture(PAGE_INTRO_BORDER[1], PAGE_INTRO_BORDER[2], PAGE_INTRO_BORDER[3],
+        PAGE_INTRO_BORDER[4])
     frame.pageIntroPanel.borderBottom:SetPoint("BOTTOMLEFT", frame.pageIntroPanel, "BOTTOMLEFT", 0, 0)
     frame.pageIntroPanel.borderBottom:SetPoint("BOTTOMRIGHT", frame.pageIntroPanel, "BOTTOMRIGHT", 0, 0)
     frame.pageIntroPanel.borderBottom:SetHeight(1)

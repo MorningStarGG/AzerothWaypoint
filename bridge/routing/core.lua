@@ -831,6 +831,17 @@ local function FingerprintSpecialAction(action)
     }, "/")
 end
 
+local function FingerprintTaxi(taxi)
+    if type(taxi) ~= "table" then
+        return "-"
+    end
+    return table.concat({
+        tostring(taxi.nodeID or "-"),
+        tostring(taxi.operator or "-"),
+        tostring(taxi.final == true),
+    }, "/")
+end
+
 local function FingerprintLeg(leg)
     if type(leg) ~= "table" then
         return "-"
@@ -848,6 +859,7 @@ local function FingerprintLeg(leg)
         FingerprintCoords(leg.activationCoords),
         FingerprintGate(leg.arrivalGate),
         FingerprintSpecialAction(leg.specialAction),
+        FingerprintTaxi(leg.taxi),
     }, ":")
 end
 
@@ -1182,6 +1194,10 @@ local function ArbitrateAuthority()
         return gs, "guide"
     end
     return nil, nil
+end
+
+function NS.GetActiveAuthorityRecord()
+    return ArbitrateAuthority()
 end
 
 local function IsSameRouteCoord(aMapID, aX, aY, bMapID, bX, bY)
@@ -1654,6 +1670,12 @@ local function ScheduleRefreshAfterAdvance(record)
     NS.ScheduleActiveRouteRefresh(record._coreLastAdvanceReason or "leg_advance")
 end
 
+local function RefreshFlightMapAssist()
+    if type(NS.RefreshFlightMapAssist) == "function" then
+        SafeCall(NS.RefreshFlightMapAssist)
+    end
+end
+
 local function ClearCarrierPresentation()
     local routing = state.routing
     if routing.carrierState then NS.ClearCarrierWaypoint() end
@@ -1674,6 +1696,7 @@ local function ClearCarrierPresentation()
     if type(NS.SyncGuideVisualState) == "function" then
         NS.SyncGuideVisualState()
     end
+    RefreshFlightMapAssist()
 end
 
 local function PollCoreCurrentLeg(record, source)
@@ -1819,6 +1842,7 @@ function NS.RecomputeCarrier()
     if type(NS.SyncGuideVisualState) == "function" then
         NS.SyncGuideVisualState()
     end
+    RefreshFlightMapAssist()
 end
 
 -- ------------------------------------------------------------

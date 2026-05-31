@@ -8,6 +8,69 @@ local function JoinLines(lines)
     return table.concat(lines, "\n")
 end
 
+local function BuildIntegrationHelpBlocks()
+    local blocks = {
+        {
+            type = "heading",
+            text = "How AWP Integrates",
+        },
+        {
+            type = "text",
+            text = JoinLines({
+                "AzerothWaypoint keeps integrations source-aware: guide addons, route backends, map/POI addons, flight-map helpers, and Blizzard sources can all provide destinations without forcing every route to behave the same way.",
+                "",
+                "Open /awp options and choose the Integrations tab for the same list with load status and Copy Link buttons when addon links are available.",
+            }),
+        },
+    }
+
+    local entries, order = {}, {}
+    if type(NS.GetIntegrationInfo) == "function" then
+        entries, order = NS.GetIntegrationInfo()
+    end
+    if type(entries) ~= "table" or #entries == 0 then
+        blocks[#blocks + 1] = {
+            type = "note",
+            text = "No integration data is available.",
+        }
+        return blocks
+    end
+
+    local byCategory = {}
+    for _, entry in ipairs(entries) do
+        local category = entry.category or "Other"
+        byCategory[category] = byCategory[category] or {}
+        byCategory[category][#byCategory[category] + 1] = entry
+    end
+
+    for _, category in ipairs(order or {}) do
+        local group = byCategory[category]
+        if group and #group > 0 then
+            blocks[#blocks + 1] = {
+                type = "heading",
+                text = category,
+            }
+
+            local lines = {}
+            for _, entry in ipairs(group) do
+                lines[#lines + 1] = tostring(entry.name or "Integration")
+                lines[#lines + 1] = "- " .. tostring(entry.summary or "")
+                for _, bullet in ipairs(entry.bullets or {}) do
+                    lines[#lines + 1] = "  - " .. tostring(bullet)
+                end
+                lines[#lines + 1] = ""
+            end
+
+            blocks[#blocks + 1] = {
+                type = "text",
+                text = JoinLines(lines),
+            }
+        end
+    end
+
+    return blocks
+end
+
 -- Help page schema:
 -- Each page supports:
 --   id      = unique page key used by NS.ShowHelp("page_id")
@@ -116,10 +179,16 @@ NS.HELP_PAGES = {
                     "- Use /awp queue to manage manual queues, imported routes, and guide queue projections.",
                     "- Use /awp changelog to see recent changes.",
                     "",
-                    "The next help pages explain routing, queues, the TomTom arrow, the 3D overlay, customization, and commands.",
+                    "The next help pages explain integrations, routing, queues, the TomTom arrow, Zygor integration, the Zygor tracker viewer, the 3D overlay, customization, and commands.",
                 }),
             },
         },
+    },
+    {
+        id = "integrations",
+        title = "Integrations",
+        intro = "What AzerothWaypoint works with, and what each supported addon or source adds.",
+        blocks = BuildIntegrationHelpBlocks(),
     },
     {
         id = "routing_guides",
@@ -188,6 +257,32 @@ NS.HELP_PAGES = {
             },
             {
                 type = "heading",
+                text = "Flight Map Assist",
+            },
+            {
+                type = "text",
+                text = JoinLines({
+                    "When the active route uses a flight path, AWP can mark the intended destination on the flight map.",
+                    "",
+                    "- Exact Zygor / LibRover taxi destinations can match by Blizzard taxi node ID.",
+                    "- Mapzeroth and Farstrider can use strong coordinate/name matches where visible flight-map data is clear enough.",
+                    "- The marker is visual-only. It does not create routes or supertrack taxi nodes.",
+                    "- Auto Take Flight Paths mode for exact matches or strong matches. `Auto Take Flight Paths` is disabled by default and pressing `Alt` suppresses it for the current flight-map interaction.",
+                    "- Show Flight Map Taxi List adds an AWP side list with the route destination, favorites, recent flights, current-zone flights, search, and reachable destinations grouped by zone.",
+                    "- Flight Map Taxi List Text Size adjusts font size for readability in that attached list.",
+                    "- If InFlight is installed and has timing data, the taxi list can show exact or estimated flight times.",
+                    "",
+                    "Options:",
+                    "",
+                    "General > Routing > Show Flight Map Route Marker",
+                    "General > Routing > Auto Take Flight Paths",
+                    "General > Routing > Show Flight Map Taxi List",
+                    "General > Routing > Flight Map Taxi List Side",
+                    "General > Routing > Flight Map Taxi List Text Size",
+                }),
+            },
+            {
+                type = "heading",
                 text = "Guide Providers",
             },
             {
@@ -199,7 +294,7 @@ NS.HELP_PAGES = {
                     "- Azeroth Pilot Reloaded",
                     "- WoWPro",
                     "",
-                    "Zygor remains the deepest integration because it can provide LibRover routing, richer guide metadata, search data, and Zygor-style arrow skins. APR and WoWPro still provides guide targets, step text, objective context, and actionable overlay text when their data is available.",
+                    "Zygor remains the deepest integration because it can provide LibRover routing, richer guide metadata, search data, Zygor-style arrow skins, native viewer controls, and the optional AWP tracker viewer. APR and WoWPro still provides guide targets, step text, objective context, and actionable overlay text when their data is available.",
                 }),
             },
             {
@@ -483,24 +578,227 @@ NS.HELP_PAGES = {
                 text =
                 "The special travel button is used when a routing backend identifies that the next route leg is not normal travel. It is expected to appear only for route legs that provide a usable action.",
             },
+        },
+    },
+    {
+        id = "zygor_integration",
+        title = "Zygor Integration",
+        intro =
+        "AWP can use Zygor guide state, route data, search data, arrow skins, and viewer controls without taking over Zygor's guide engine.",
+        blocks = {
             {
                 type = "heading",
-                text = "Zygor Viewer Options",
+                text = "What AWP Uses",
+            },
+            {
+                type = "text",
+                text = JoinLines({
+                    "Zygor remains active while AWP adds navigation and display options around it.",
+                    "",
+                    "- Routing backend: AWP can use Zygor routing data when selected.",
+                    "- Guide state: AWP can mirror the active guide target and current step.",
+                    "- Search data: service and profession searches can use Zygor data when available.",
+                    "- Arrow skins: Zygor-style arrow skins are available for TomTom arrow styling.",
+                    "- Viewer controls: AWP can compact or hide Zygor's native viewer without disabling guide logic.",
+                }),
+            },
+            {
+                type = "heading",
+                text = "Native Viewer Options",
             },
             {
                 type = "image_row",
                 items = {
                     { width = 220, height = 80, texture = MEDIA .. "Normal",                  placeholder = "Normal guide view",           caption = "Normal" },
                     { width = 220, height = 80, texture = MEDIA .. "MinimalMode",             placeholder = "Compact guide mode",          caption = "Compact" },
-                    { width = 220, height = 80, texture = MEDIA .. "MinimalModeHideBGColors", placeholder = "Compact mode without colors", caption = "Hide Step Backgrounds + Line Colors" },
+                    { width = 220, height = 80, texture = MEDIA .. "MinimalModeHideBGColors", placeholder = "Compact mode without colors", caption = "Hide Backgrounds + Colors" },
                 },
             },
             {
                 type = "text",
                 text = JoinLines({
-                    "When Zygor is loaded, AWP can compact the guide frame until mouseover and can hide step backgrounds or line colors while compacted.",
+                    "Open /awp options, then go to Zygor.",
                     "",
-                    "These options only appear when Zygor is available.",
+                    "- Show Only Guide Steps Until Mouseover: keeps visible guide steps on screen while compacting the rest of Zygor's viewer until mouseover.",
+                    "- Hide Step Backgrounds Until Mouseover: controls which guide step row backgrounds or line colors fade while compacted.",
+                    "- Hide Zygor's Native Frame: visually hides Zygor's full-size guide frame while keeping guide state, waypoints, guide picker, and settings available.",
+                    "",
+                    "Hide Zygor's Native Frame is independent from Tracker Viewer. Use /awp zygorviewer show, the minimap button menu, /awp zygor commands, or Zygor controls from the tracker header to access Zygor again.",
+                }),
+            },
+            {
+                type = "heading",
+                text = "Zygor Controls in AWP Menu",
+            },
+            {
+                type = "text",
+                text = JoinLines({
+                    "When Zygor is loaded, the AWP minimap button menu includes Zygor-specific controls.",
+                    "",
+                    "- Toggle Tracker Viewer.",
+                    "- Hide or show Zygor's native frame.",
+                    "- Zygor Guide submenu: next, previous, skip, guide picker, open guide switching, guide closing, Zygor Guide Menu, and Zygor Settings.",
+                    "- Macro-friendly /awp zygor commands expose the same guide controls when you do not want to use the minimap button.",
+                    "",
+                    "The minimap button itself is an AWP-wide control. Its general behavior is covered on the Options and Customization page.",
+                }),
+            },
+            {
+                type = "heading",
+                text = "Chat Step Display",
+            },
+            {
+                type = "text",
+                text = JoinLines({
+                    "AWP can show the current Zygor step in your own chat when Zygor changes steps, or on demand with /awp zygor output.",
+                    "This is local-only and does not send anything to say, party, raid, guild, or public channels.",
+                    "",
+                    "- Show Step in Chat Frame on Step Change: shows a chat message for each Zygor step change.",
+                    "- Chat Step Text: Auto uses contextual text colors, or force displayed step text to one selected color.",
+                    "- Chat Sticky Summary: choose whether the chat display hides the sticky summary, shows sticky step count only, or sticky step count plus their titles.",
+                    "",
+                    "Automatic display uses duplicate protection for the same guide step. Manual /awp zygor output always shows the current step in your own chat.",
+                }),
+            },
+            {
+                type = "heading",
+                text = "Useful Commands",
+            },
+            {
+                type = "text",
+                text = JoinLines({
+                    "/awp backend zygor",
+                    "- Use Zygor as the routing backend when available.",
+                    "",
+                    "/awp compact on|off|toggle",
+                    "- Toggle Zygor guide-frame compact mode.",
+                    "",
+                    "/awp zygorviewer show|hide|toggle|status",
+                    "- Show or visually hide Zygor's native viewer.",
+                    "",
+                    "/awp zygor next|prev|skip|picker|load <title>|output [full|sticky]|menu|settings|list|switch <index>|close [index]",
+                    "- Control Zygor guides while Zygor's native viewer is hidden.",
+                    "",
+                    "/awp trackerviewer on|off|toggle|status",
+                    "- Toggle the objective-tracker Zygor viewer described on the Zygor Tracker Viewer page.",
+                }),
+            },
+            {
+                type = "note",
+                text =
+                "AWP's Zygor viewer options are visual controls. They do not turn off Zygor guide state, active waypoints, guide loading, or Zygor settings.",
+            },
+        },
+    },
+    {
+        id = "zygor_tracker_viewer",
+        title = "Zygor Tracker Viewer",
+        intro =
+        "Tracker Viewer shows the current Zygor guide step inside the objective tracker while keeping Zygor's guide data active.",
+        blocks = {
+            {
+                type = "image",
+                texture = MEDIA .. "TrackerViewer",
+                align = "CENTER",
+                width = 253,
+                height = 154,
+                placeholder = "Tracker viewer screenshot placeholder",
+                caption = "The current Zygor guide step can appear in the objective tracker.",
+            },
+            {
+                type = "heading",
+                text = "What It Does",
+            },
+            {
+                type = "text",
+                text = JoinLines({
+                    "Tracker Viewer is for players who want Zygor guide steps in the objective tracker instead of using Zygor's full-size guide window.",
+                    "",
+                    "It mirrors the active Zygor guide step, keeps Zygor guide state and waypoints alive, and works with the native Blizzard objective tracker or Kaliel's Tracker.",
+                    "",
+                    "Long Zygor tip blocks are collapsed by section when a step has many tips. Hover the section row to read the collapsed tips without letting one step overflow the tracker.",
+                    "",
+                    "Confirm rows are clickable, so Click Here to Proceed advances the guide from the tracker.",
+                }),
+            },
+            {
+                type = "note",
+                text =
+                "Tracker Viewer depends on Zygor being loaded. It replaces the guide display, not Zygor's guide engine, guide picker, options menu, routing data, or waypoints.",
+            },
+            {
+                type = "heading",
+                text = "Header Controls",
+            },
+            {
+                type = "text",
+                text = JoinLines({
+                    "The tracker header contains compact guide controls:",
+                    "",
+                    "- Guide title: click it to switch between open guides. If no guide is loaded, click the welcome row to open Zygor's guide picker.",
+                    "- Back and Next: move through Zygor steps.",
+                    "- Progress bar: shows percent complete. Hover it to see the current step number.",
+                    "- Guide dropdown: switch open guides, close guides, or use Open New Guide.",
+                    "- Settings button: opens the Zygor menu used by Zygor's native frame.",
+                    "- Minimize: collapses only the tracker section.",
+                }),
+            },
+            {
+                type = "heading",
+                text = "Tracker Viewer Settings",
+            },
+            {
+                type = "text",
+                text = JoinLines({
+                    "Open /awp options, then go to Zygor > Tracker Viewer.",
+                    "",
+                    "- Enable Tracker Viewer: shows Zygor Guides within the native Blizzard tracker frame. This also supports Kaliel's Tracker.",
+                    "- Tracker Viewer Progress Bar: choose square, rounded, or no progress bar.",
+                    "- Tracker Viewer Text: use contextual tracker viewer text colors or make all step text a single selected color.",
+                }),
+            },
+            {
+                type = "image_row",
+                gap = 14,
+                items = {
+                    { width = 335, height = 26, texture = MEDIA .. "TrackerSquareBorder",  placeholder = "Square tracker progress bar",  caption = "Square" },
+                    { width = 335, height = 26, texture = MEDIA .. "TrackerRoundedBorder", placeholder = "Rounded tracker progress bar", caption = "Rounded" },
+                },
+            },
+            {
+                type = "image",
+                align = "CENTER",
+                width = 335,
+                height = 26,
+                texture = MEDIA .. "TrackerNoProgress",
+                placeholder = "No progress bar",
+                caption = "None",
+                spacingBefore = 4,
+            },
+            {
+                type = "text",
+                text = JoinLines({
+                    "Square has no border and looks flat. Rounded has a Blizzard style border. None hides the progress bar.",
+                }),
+            },
+            {
+                type = "image_row",
+                gap = 14,
+                items = {
+                    { width = 392, height = 150, texture = MEDIA .. "TrackerAutoColor",  placeholder = "Tracker auto color mode",  caption = "Auto" },
+                    { width = 392, height = 150, texture = MEDIA .. "TrackerWhiteColor", placeholder = "Tracker selected color mode", caption = "White Color example" },
+                },
+            },
+            {
+                type = "text",
+                text = JoinLines({
+                    "Auto shows contextual text colors. Selecting a fixed color will force viewer text to the chosen color.",
+                }),
+            },
+            {
+                type = "note",
+                text = JoinLines({
+                    "If the tracker section is missing, check that Zygor is enabled, Enable Tracker Viewer is on, and your objective tracker is visible. AWP warns on login/reload if the active tracker is hidden, or if it appears transparent due to opacity or mouseover tracker addons.",
                 }),
             },
         },
@@ -789,7 +1087,7 @@ NS.HELP_PAGES = {
                     "- Waypoint: long-range marker, beacon, footer, distance, and text controls.",
                     "- Pinpoint: close-range marker, plaque, title, subtext, arrows, and effects.",
                     "- Navigator: off-screen arrow behavior.",
-                    "- Zygor: compact guide options when Zygor is loaded.",
+                    "- Zygor: compact guide-frame controls, Tracker Viewer, native frame hiding, progress bar style, tracker text colors, and chat step display.",
                 }),
             },
             {
@@ -812,6 +1110,8 @@ NS.HELP_PAGES = {
                     "",
                     "Waypoint Text defaults to Gray for readability. Choosing Auto makes it follow contextual icon/spec tint instead.",
                     "",
+                    "Tracker Viewer Text and Chat Step Text can use contextual colors or forced to one selected color.",
+                    "",
                     "Color presets include Auto, Blue, Custom, Cyan, Gold, Gray, Green, Pink, Purple, Red, Silver, and White.",
                 }),
             },
@@ -830,6 +1130,24 @@ NS.HELP_PAGES = {
                     "The right-side preview pane changes as you hover or select settings.",
                     "",
                     "Use search and filters to find settings quickly. Filters can help narrow options by new, updated, visual, navigation, sizing, style, and integration behavior.",
+                }),
+            },
+            {
+                type = "heading",
+                text = "Minimap Button",
+            },
+            {
+                type = "text",
+                text = JoinLines({
+                    "AWP includes a native minimap button and Blizzard addon-compartment entry for quick access.",
+                    "",
+                    "- Left-click: open AWP's quick menu.",
+                    "- Right-click: open AWP settings.",
+                    "- Drag: move it. Near the minimap it snaps to the edge; away from the minimap it can be placed freely.",
+                    "",
+                    "The quick menu can open AWP settings, Help, and Queue, reset or hide the button, and expose integration controls when supported addons are loaded.",
+                    "",
+                    "When Zygor is loaded, Zygor-specific controls appear in the menu. Those are covered on the Zygor Integration page.",
                 }),
             },
         },
@@ -925,6 +1243,140 @@ NS.HELP_PAGES = {
             },
             {
                 type = "heading",
+                text = "Minimap Button",
+            },
+            {
+                type = "text",
+                text = JoinLines({
+                    "/awp minimap show|hide|toggle|reset|status",
+                    "- Control the AWP minimap button. The button menu also opens Help and Queue.",
+                }),
+            },
+            {
+                type = "heading",
+                text = "Flight Map Assist",
+            },
+            {
+                type = "text",
+                text = JoinLines({
+                    "/awp flightassist marker on|off|toggle|status",
+                    "- Control the retail flight-map destination marker for routed taxi / flight path legs.",
+                    "",
+                    "/awp flightassist auto disabled|exact|strong|status",
+                    "- Control opt-in Auto Take Flight Paths for matched flight paths. Disabled never auto-takes, exact only uses exact taxi-node matches, and strong also allows strict visible coordinate/name matches.",
+                    "",
+                    "/awp flightassist catalog on|off|toggle|reset|status",
+                    "- Control the AWP taxi list attached to the flight map. Reset restores the default side and open state without clearing favorites or recents.",
+                    "",
+                    "Holding Alt while opening the flight map suppresses auto-take for that interaction.",
+                }),
+            },
+            {
+                type = "heading",
+                text = "Zygor Display",
+            },
+            {
+                type = "text",
+                text = JoinLines({
+                    "/awp compact on|off|toggle",
+                    "- Toggle Zygor's compact guide-frame mode (show only guide steps until you mouse over the frame).",
+                    "",
+                    "/awp trackerviewer on|off|toggle|status",
+                    "- Show the current Zygor guide docked inside the objective tracker (the AWP Tracker Viewer). status reports the tracker host and whether it is hidden or transparent.",
+                    "",
+                    "/awp zygorviewer show|hide|toggle|status",
+                    "- Show or visually hide Zygor's own full-size viewer. Hiding keeps Zygor's guide engine, active waypoints, guide picker, and settings fully working.",
+                }),
+            },
+            {
+                type = "heading",
+                text = "Zygor Guide Controls",
+            },
+            {
+                type = "text",
+                text =
+                "/awp zygor <subcommand> drives the active Zygor guide without opening Zygor's UI, so it works well in macros and key bindings.",
+            },
+            {
+                type = "text",
+                text = JoinLines({
+                    "Step navigation:",
+                    "",
+                    "/awp zygor next",
+                    "- Advance to the next step.",
+                    "",
+                    "/awp zygor prev",
+                    "- Go back one step.",
+                    "",
+                    "/awp zygor skip",
+                    "- Skip / complete the current step (same as clicking the Tracker Viewer checkbox).",
+                }),
+            },
+            {
+                type = "text",
+                text = JoinLines({
+                    "Loading and switching guides:",
+                    "",
+                    "/awp zygor picker",
+                    "- Open Zygor's guide picker.",
+                    "",
+                    "/awp zygor load <title> [step N]",
+                    "- Load a guide by partial title, optionally jumping straight to step N.",
+                    "",
+                    "/awp zygor list",
+                    "- List your open Zygor guides and which one is active.",
+                    "",
+                    "/awp zygor switch <index>",
+                    "- Switch to an open guide by its number from the list.",
+                    "",
+                    "/awp zygor close [current|index|all]",
+                    "- Close the current guide, a guide by number, or every open guide.",
+                }),
+            },
+            {
+                type = "text",
+                text = JoinLines({
+                    "Zygor menus and chat step display:",
+                    "",
+                    "/awp zygor menu",
+                    "- Open Zygor's guide menu.",
+                    "",
+                    "/awp zygor settings",
+                    "- Open Zygor's settings.",
+                    "",
+                    "/awp zygor reset",
+                    "- Recover a lost or glitched native viewer: unhide it and reset Zygor's window back to its default position.",
+                    "",
+                    "/awp zygor output",
+                    "- Shows the current step in your own chat only. Sticky steps follow your Chat Sticky Summary option.",
+                    "",
+                    "/awp zygor output full",
+                    "- Shows the current step plus full details for each active sticky step.",
+                    "",
+                    "/awp zygor output sticky",
+                    "- Shows only the active sticky steps.",
+                }),
+            },
+            {
+                type = "text",
+                text = JoinLines({
+                    "Examples:",
+                    "",
+                    "/awp zygor next",
+                    "/awp zygor load Emerald Dream",
+                    "/awp zygor load Khaz Algar step 14",
+                    "/awp zygor switch 2",
+                    "/awp zygor output full",
+                    "/awp zygor close all",
+                }),
+            },
+            {
+                type = "note",
+                text =
+                "Tip: put a single /awp zygor command on a macro or key binding (for example /awp zygor next) to step guides without touching Zygor's window.",
+            },
+            {
+                type = "heading",
                 text = "Arrow and Search",
             },
             {
@@ -935,9 +1387,6 @@ NS.HELP_PAGES = {
                     "",
                     "/awp scale <0.60-2.00>",
                     "- Set custom arrow skin scale.",
-                    "",
-                    "/awp compact on|off|toggle",
-                    "- Toggle Zygor compact viewer mode.",
                     "",
                     "/awp search <service>",
                     "- Route to supported services or profession targets. Search requires Zygor search data.",
@@ -996,6 +1445,94 @@ NS.HELP_PAGES = {
                     "/reload",
                     "",
                     "Also check that TomTom is installed and enabled.",
+                }),
+            },
+            {
+                type = "heading",
+                text = "Tracker Viewer Is Missing",
+            },
+            {
+                type = "text",
+                text = JoinLines({
+                    "Check:",
+                    "",
+                    "- Zygor Guides Viewer is installed, enabled, and loaded.",
+                    "- Zygor > Tracker Viewer > Enable Tracker Viewer is on.",
+                    "- A guide is loaded, or click the welcome row to open Zygor's guide picker.",
+                    "- The objective tracker the Tracker Viewer docks into is actually visible.",
+                    "",
+                    "The Tracker Viewer is not its own window. It docks into the objective tracker - Kaliel's Tracker if it is installed, otherwise Blizzard's. If that tracker is hidden, collapsed, or see-through, the Tracker Viewer goes with it.",
+                }),
+            },
+            {
+                type = "text",
+                text = JoinLines({
+                    "If the tracker itself is hidden or hard to see:",
+                    "",
+                    "- Objective tracker opacity: Blizzard's Edit Mode and Kaliel's Tracker both have an opacity setting. If it is very low, the Tracker Viewer looks faint or invisible.",
+                    "- Mouseover-only addons: addons such as MouseoverObjectiveTracker hide the tracker until you hover it, so the Tracker Viewer only appears on mouseover.",
+                    "- UI suites that hide or disable the objective tracker entirely will also hide the Tracker Viewer. Re-enable the objective tracker in that addon.",
+                    "- The tracker may be collapsed or minimized. Expand it.",
+                }),
+            },
+            {
+                type = "text",
+                text = JoinLines({
+                    "/awp status reports the detected objective tracker host and whether it is hard-hidden or transparent. AWP also warns after login or /reload when the Tracker Viewer is on but the tracker is hidden or see-through.",
+                    "",
+                    "If you changed tracker addons or Zygor's load state, try /reload.",
+                }),
+            },
+            {
+                type = "note",
+                text =
+                "Hide Zygor's Native Frame only visually hides Zygor's full-size viewer. It does not turn off Zygor's guide logic or active waypoints.",
+            },
+            {
+                type = "heading",
+                text = "Hid Zygor's Viewer And Can't Reach Zygor",
+            },
+            {
+                type = "text",
+                text = JoinLines({
+                    "Hide Zygor's Native Frame only cloaks Zygor's full-size window - the guide engine, waypoints, and menus stay active. To bring it back, or to reach Zygor without it:",
+                    "",
+                    "/awp zygorviewer show",
+                    "- Show Zygor's native viewer again.",
+                    "",
+                    "/awp zygor reset",
+                    "- If the viewer is stuck off-screen or the cloak glitches, this unhides it and resets Zygor's own window back to its default position.",
+                    "",
+                    "You can also:",
+                    "",
+                    "- Open /awp options and turn off Zygor > Hide Zygor's Native Frame.",
+                    "- Left-click the AWP minimap button and use its menu to toggle Zygor's native viewer.",
+                    "- Use the Tracker Viewer header buttons to open Zygor's guide menu and settings.",
+                    "- Use /awp zygor picker, /awp zygor menu, or /awp zygor settings to reach Zygor's guide picker, menu, and settings directly.",
+                }),
+            },
+            {
+                type = "text",
+                text = JoinLines({
+                    "If it still will not show:",
+                    "",
+                    "- Make sure Zygor Guides Viewer itself is enabled and a guide is loaded - Zygor hides its own viewer when nothing is active.",
+                    "- Zygor has its own controls too: right-click Zygor's minimap button to show or hide its viewer, or use Zygor's own /zygor show and /zygor hide commands.",
+                }),
+            },
+            {
+                type = "heading",
+                text = "Minimap Button Is Gone",
+            },
+            {
+                type = "text",
+                text = JoinLines({
+                    "If you hid the AWP minimap button:",
+                    "",
+                    "/awp minimap show",
+                    "- Show it again (use /awp minimap reset to move it back to a default spot).",
+                    "",
+                    "Even with the button hidden, you can open the addon compartment (the addon menu button on the minimap) and pick AzerothWaypoint - it has the same quick menu and still reaches Settings, Help, the Queue, and the Zygor controls.",
                 }),
             },
             {

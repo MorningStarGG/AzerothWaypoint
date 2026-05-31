@@ -12,6 +12,7 @@ local function CopyOverlayColor(color)
 end
 
 local DEFAULT_OVERLAY_CUSTOM_COLOR = CopyOverlayColor(C.WORLD_OVERLAY_COLOR_PRESETS[C.WORLD_OVERLAY_COLOR_GOLD])
+local DEFAULT_ZYGOR_TRACKER_VIEWER_TEXT_COLOR = CopyOverlayColor(C.WORLD_OVERLAY_COLOR_PRESETS[C.WORLD_OVERLAY_COLOR_WHITE])
 
 -- ============================================================
 -- Schema
@@ -30,6 +31,15 @@ local DB_DEFAULTS = {
 
     routingEnabled           = true,
     routingBackend           = "direct",  -- first-run auto-selects zygor | farstrider | mapzeroth | direct
+    flightMapAssistMarker    = true,
+    flightMapAutoTakeMode    = C.FLIGHT_MAP_AUTO_TAKE_DISABLED,
+    flightMapCatalogEnabled  = true,
+    flightMapCatalogCollapsed = false,
+    flightMapCatalogSide     = "auto",
+    flightMapCatalogFontSize = C.FLIGHT_MAP_CATALOG_FONT_SIZE_DEFAULT,
+    flightMapCatalogFavorites = {},
+    flightMapCatalogRecent   = {},
+    flightMapCatalogRecentMax = 12,
     combatHideMode           = C.COMBAT_HIDE_MODE_DISABLED,
     startupHelpMode          = C.STARTUP_HELP_MODE_CHARACTER,
     startupWhatsNewMode      = C.STARTUP_HELP_MODE_ACCOUNT,
@@ -38,6 +48,21 @@ local DB_DEFAULTS = {
     arrowScale               = C.SCALE_DEFAULT,
     specialTravelDisplayMode = "replace_arrow",  -- "replace_arrow" | "companion_icon"
     specialTravelButtonScale = C.SCALE_DEFAULT,
+
+    zygorTrackerViewerEnabled     = false,
+    zygorTrackerViewerDockMode    = "tracker",
+    zygorTrackerViewerHideNative  = false,
+    zygorTrackerViewerPosition    = nil,           -- { point, relPoint, x, y }
+    zygorTrackerViewerTextColorMode = C.WORLD_OVERLAY_COLOR_AUTO,
+    zygorTrackerViewerTextCustomColor = DEFAULT_ZYGOR_TRACKER_VIEWER_TEXT_COLOR,
+    zygorTrackerViewerProgressStyle = "rounded",
+    zygorStepChatOutputOnChange = false,
+    zygorStepChatTextColorMode = C.WORLD_OVERLAY_COLOR_AUTO,
+    zygorStepChatTextCustomColor = DEFAULT_ZYGOR_TRACKER_VIEWER_TEXT_COLOR,
+    zygorStepChatStickySummary = C.ZYGOR_STEP_CHAT_STICKY_TITLES,
+
+    minimapButtonEnabled = true,
+    minimapButtonPosition = nil, -- { point, relPoint, x, y }
     -- manualAuthority is the persisted authority record; nil by default
     -- and only set when there is an active manual route to resume.
 }
@@ -295,6 +320,40 @@ function NS.NormalizeStartupHelpMode(value)
     end
 
     return C.STARTUP_HELP_MODE_ACCOUNT
+end
+
+function NS.NormalizeFlightMapAutoTakeMode(value)
+    if type(value) == "string" then
+        local key = value:lower():gsub("%s+", "_")
+        if key == "off" or key == "none" then
+            return C.FLIGHT_MAP_AUTO_TAKE_DISABLED
+        end
+        if C.FLIGHT_MAP_AUTO_TAKE_MODES[key] then
+            return key
+        end
+    end
+
+    return C.FLIGHT_MAP_AUTO_TAKE_DISABLED
+end
+
+function NS.NormalizeFlightMapCatalogSide(value)
+    if type(value) == "string" then
+        local key = value:lower():gsub("%s+", "_")
+        if key == "left" or key == "right" or key == "auto" then
+            return key
+        end
+    end
+
+    return "auto"
+end
+
+function NS.NormalizeFlightMapCatalogFontSize(value)
+    local n = tonumber(value) or C.FLIGHT_MAP_CATALOG_FONT_SIZE_DEFAULT
+    if n < C.FLIGHT_MAP_CATALOG_FONT_SIZE_MIN then n = C.FLIGHT_MAP_CATALOG_FONT_SIZE_MIN end
+    if n > C.FLIGHT_MAP_CATALOG_FONT_SIZE_MAX then n = C.FLIGHT_MAP_CATALOG_FONT_SIZE_MAX end
+    local step = C.FLIGHT_MAP_CATALOG_FONT_SIZE_STEP or 1
+    n = math.floor((n / step) + 0.5) * step
+    return math.floor(n + 0.5)
 end
 
 function NS.NormalizeAddonTakeoverName(value)
@@ -575,7 +634,26 @@ function NS.ApplyDBDefaults()
     elseif not VALID_ROUTING_BACKENDS[db.routingBackend] then
         db.routingBackend = "direct"
     end
+    if db.flightMapCatalogFavorites == DB_DEFAULTS.flightMapCatalogFavorites then
+        db.flightMapCatalogFavorites = {}
+    end
+    if db.flightMapCatalogRecent == DB_DEFAULTS.flightMapCatalogRecent then
+        db.flightMapCatalogRecent = {}
+    end
     db.combatHideMode = NS.NormalizeCombatHideMode(db.combatHideMode)
+    db.flightMapAutoTakeMode = NS.NormalizeFlightMapAutoTakeMode(db.flightMapAutoTakeMode)
+    db.flightMapCatalogSide = NS.NormalizeFlightMapCatalogSide(db.flightMapCatalogSide)
+    db.flightMapCatalogFontSize = NS.NormalizeFlightMapCatalogFontSize(db.flightMapCatalogFontSize)
+    if type(db.flightMapCatalogFavorites) ~= "table" then
+        db.flightMapCatalogFavorites = {}
+    end
+    if type(db.flightMapCatalogRecent) ~= "table" then
+        db.flightMapCatalogRecent = {}
+    end
+    db.flightMapCatalogRecentMax = tonumber(db.flightMapCatalogRecentMax) or 12
+    if db.flightMapCatalogRecentMax < 1 then
+        db.flightMapCatalogRecentMax = 12
+    end
     db.startupHelpMode = NS.NormalizeStartupHelpMode(db.startupHelpMode)
     db.startupWhatsNewMode = NS.NormalizeStartupHelpMode(db.startupWhatsNewMode)
     db.guideStepBackgroundsHover = NS.NormalizeGuideStepBackgroundsHoverMode(db.guideStepBackgroundsHover)
@@ -814,6 +892,265 @@ function NS.SetGuideStepBackgroundsHoverEnabled(enabled)
         return NS.SetGuideStepBackgroundsHoverMode(C.GUIDE_STEP_BACKGROUND_MODE_BG)
     end
     return NS.SetGuideStepBackgroundsHoverMode(C.GUIDE_STEP_BACKGROUND_MODE_NONE)
+end
+
+local ZYGOR_TRACKER_VIEWER_DOCK_MODES = {
+    tracker = true,
+}
+
+local ZYGOR_TRACKER_VIEWER_PROGRESS_STYLES = {
+    square = true,
+    rounded = true,
+    none = true,
+}
+
+local function NormalizeZygorTrackerViewerDockMode(value)
+    if type(value) == "string" and ZYGOR_TRACKER_VIEWER_DOCK_MODES[value] then
+        return value
+    end
+    return "tracker"
+end
+
+local function NormalizeZygorTrackerViewerProgressStyle(value)
+    if type(value) == "string" and ZYGOR_TRACKER_VIEWER_PROGRESS_STYLES[value] then
+        return value
+    end
+    return "rounded"
+end
+
+local function NormalizeZygorTrackerViewerTextColorMode(value)
+    if type(value) == "string" and C.WORLD_OVERLAY_COLOR_MODES[value] then
+        return value
+    end
+    return C.WORLD_OVERLAY_COLOR_AUTO
+end
+
+local function NormalizeZygorStepChatStickySummary(value)
+    if type(value) == "string" and C.ZYGOR_STEP_CHAT_STICKY_MODES[value] then
+        return value
+    end
+    return C.ZYGOR_STEP_CHAT_STICKY_TITLES
+end
+
+local ZYGOR_TRACKER_VIEWER_TEXT_COLOR_DEF = {
+    default = DEFAULT_ZYGOR_TRACKER_VIEWER_TEXT_COLOR,
+}
+
+function NS.GetZygorTrackerViewerSettings()
+    local db = NS.GetDB()
+    db.zygorTrackerViewerDockMode = NormalizeZygorTrackerViewerDockMode(db.zygorTrackerViewerDockMode)
+    db.zygorTrackerViewerProgressStyle = NormalizeZygorTrackerViewerProgressStyle(db.zygorTrackerViewerProgressStyle)
+    db.zygorTrackerViewerTextColorMode = NormalizeZygorTrackerViewerTextColorMode(db.zygorTrackerViewerTextColorMode)
+    db.zygorTrackerViewerTextCustomColor = NormalizeOverlayColor(
+        ZYGOR_TRACKER_VIEWER_TEXT_COLOR_DEF,
+        db.zygorTrackerViewerTextCustomColor)
+
+    return {
+        enabled        = db.zygorTrackerViewerEnabled == true,
+        dockMode       = db.zygorTrackerViewerDockMode,
+        hideZygorFrame = db.zygorTrackerViewerHideNative == true,
+        position       = type(db.zygorTrackerViewerPosition) == "table" and db.zygorTrackerViewerPosition or nil,
+        progressStyle  = db.zygorTrackerViewerProgressStyle,
+        textColorMode  = db.zygorTrackerViewerTextColorMode,
+        textCustomColor = db.zygorTrackerViewerTextCustomColor,
+    }
+end
+
+function NS.SetZygorTrackerViewerSetting(key, value)
+    local db = NS.GetDB()
+    if key == "enabled" then
+        db.zygorTrackerViewerEnabled = value and true or false
+    elseif key == "dockMode" then
+        db.zygorTrackerViewerDockMode = NormalizeZygorTrackerViewerDockMode(value)
+    elseif key == "hideZygorFrame" then
+        db.zygorTrackerViewerHideNative = value and true or false
+    elseif key == "progressStyle" then
+        db.zygorTrackerViewerProgressStyle = NormalizeZygorTrackerViewerProgressStyle(value)
+    elseif key == "textColorMode" then
+        db.zygorTrackerViewerTextColorMode = NormalizeZygorTrackerViewerTextColorMode(value)
+    elseif key == "textCustomColor" then
+        db.zygorTrackerViewerTextCustomColor = NormalizeOverlayColor(
+            ZYGOR_TRACKER_VIEWER_TEXT_COLOR_DEF,
+            value)
+    elseif key == "position" then
+        if type(value) == "table" and value.point then
+            db.zygorTrackerViewerPosition = {
+                point = value.point,
+                relPoint = value.relPoint or "CENTER",
+                x = tonumber(value.x) or 0,
+                y = tonumber(value.y) or 0,
+            }
+        else
+            db.zygorTrackerViewerPosition = nil
+        end
+    end
+end
+
+function NS.GetZygorStepChatSettings()
+    local db = NS.GetDB()
+    db.zygorStepChatTextColorMode = NormalizeZygorTrackerViewerTextColorMode(db.zygorStepChatTextColorMode)
+    db.zygorStepChatTextCustomColor = NormalizeOverlayColor(
+        ZYGOR_TRACKER_VIEWER_TEXT_COLOR_DEF,
+        db.zygorStepChatTextCustomColor)
+    db.zygorStepChatStickySummary = NormalizeZygorStepChatStickySummary(db.zygorStepChatStickySummary)
+
+    return {
+        outputOnChange = db.zygorStepChatOutputOnChange == true,
+        textColorMode = db.zygorStepChatTextColorMode,
+        textCustomColor = db.zygorStepChatTextCustomColor,
+        stickySummary = db.zygorStepChatStickySummary,
+    }
+end
+
+function NS.SetZygorStepChatSetting(key, value)
+    local db = NS.GetDB()
+    if key == "outputOnChange" then
+        db.zygorStepChatOutputOnChange = value and true or false
+    elseif key == "textColorMode" then
+        db.zygorStepChatTextColorMode = NormalizeZygorTrackerViewerTextColorMode(value)
+    elseif key == "textCustomColor" then
+        db.zygorStepChatTextCustomColor = NormalizeOverlayColor(
+            ZYGOR_TRACKER_VIEWER_TEXT_COLOR_DEF,
+            value)
+    elseif key == "stickySummary" then
+        db.zygorStepChatStickySummary = NormalizeZygorStepChatStickySummary(value)
+    end
+end
+
+function NS.GetMinimapButtonSettings()
+    local db = NS.GetDB()
+    return {
+        enabled = db.minimapButtonEnabled ~= false,
+        position = type(db.minimapButtonPosition) == "table" and db.minimapButtonPosition or nil,
+    }
+end
+
+function NS.SetMinimapButtonSetting(key, value)
+    local db = NS.GetDB()
+    if key == "enabled" then
+        db.minimapButtonEnabled = value and true or false
+    elseif key == "position" then
+        if type(value) == "table" and value.point then
+            db.minimapButtonPosition = {
+                point = value.point,
+                relPoint = value.relPoint or "CENTER",
+                x = tonumber(value.x) or 0,
+                y = tonumber(value.y) or 0,
+            }
+        else
+            db.minimapButtonPosition = nil
+        end
+    end
+end
+
+function NS.IsMinimapButtonEnabled()
+    local settings = NS.GetMinimapButtonSettings()
+    return settings.enabled == true
+end
+
+function NS.SetMinimapButtonEnabled(enabled)
+    NS.SetMinimapButtonSetting("enabled", enabled)
+    if type(NS.RefreshMinimapButton) == "function" then
+        NS.RefreshMinimapButton()
+    end
+    return NS.IsMinimapButtonEnabled()
+end
+
+function NS.ResetMinimapButtonPosition()
+    NS.SetMinimapButtonSetting("position", nil)
+    if type(NS.RefreshMinimapButton) == "function" then
+        NS.RefreshMinimapButton()
+    end
+end
+
+function NS.GetFlightMapAssistSettings()
+    local db = NS.GetDB()
+    db.flightMapAutoTakeMode = NS.NormalizeFlightMapAutoTakeMode(db.flightMapAutoTakeMode)
+    return {
+        marker = db.flightMapAssistMarker ~= false,
+        autoTakeMode = db.flightMapAutoTakeMode,
+    }
+end
+
+function NS.SetFlightMapAssistSetting(key, value)
+    local db = NS.GetDB()
+    if key == "marker" then
+        db.flightMapAssistMarker = value and true or false
+    elseif key == "autoTakeMode" then
+        db.flightMapAutoTakeMode = NS.NormalizeFlightMapAutoTakeMode(value)
+    end
+    if type(NS.RefreshFlightMapAssist) == "function" then
+        NS.RefreshFlightMapAssist()
+    end
+    return NS.GetFlightMapAssistSettings()
+end
+
+function NS.GetFlightMapCatalogSettings()
+    local db = NS.GetDB()
+    db.flightMapCatalogSide = NS.NormalizeFlightMapCatalogSide(db.flightMapCatalogSide)
+    db.flightMapCatalogFontSize = NS.NormalizeFlightMapCatalogFontSize(db.flightMapCatalogFontSize)
+    if type(db.flightMapCatalogFavorites) ~= "table" then
+        db.flightMapCatalogFavorites = {}
+    end
+    if type(db.flightMapCatalogRecent) ~= "table" then
+        db.flightMapCatalogRecent = {}
+    end
+    db.flightMapCatalogRecentMax = tonumber(db.flightMapCatalogRecentMax) or 12
+    if db.flightMapCatalogRecentMax < 1 then
+        db.flightMapCatalogRecentMax = 12
+    end
+
+    return {
+        enabled = db.flightMapCatalogEnabled ~= false,
+        collapsed = db.flightMapCatalogCollapsed == true,
+        side = db.flightMapCatalogSide,
+        fontSize = db.flightMapCatalogFontSize,
+        favorites = db.flightMapCatalogFavorites,
+        recent = db.flightMapCatalogRecent,
+        recentMax = db.flightMapCatalogRecentMax,
+    }
+end
+
+function NS.SetFlightMapCatalogSetting(key, value)
+    local db = NS.GetDB()
+    if key == "enabled" then
+        db.flightMapCatalogEnabled = value and true or false
+    elseif key == "collapsed" then
+        db.flightMapCatalogCollapsed = value and true or false
+    elseif key == "side" then
+        db.flightMapCatalogSide = NS.NormalizeFlightMapCatalogSide(value)
+    elseif key == "fontSize" then
+        db.flightMapCatalogFontSize = NS.NormalizeFlightMapCatalogFontSize(value)
+    elseif key == "favorites" and type(value) == "table" then
+        db.flightMapCatalogFavorites = value
+    elseif key == "recent" and type(value) == "table" then
+        db.flightMapCatalogRecent = value
+    elseif key == "recentMax" then
+        db.flightMapCatalogRecentMax = math.max(1, tonumber(value) or 12)
+    end
+    if type(NS.RefreshFlightMapCatalog) == "function" then
+        NS.RefreshFlightMapCatalog()
+    end
+    return NS.GetFlightMapCatalogSettings()
+end
+
+function NS.IsFlightMapCatalogEnabled()
+    local settings = NS.GetFlightMapCatalogSettings()
+    return settings.enabled == true
+end
+
+function NS.SetFlightMapCatalogEnabled(enabled)
+    NS.SetFlightMapCatalogSetting("enabled", enabled)
+    return NS.IsFlightMapCatalogEnabled()
+end
+
+function NS.ResetFlightMapCatalog()
+    local db = NS.GetDB()
+    db.flightMapCatalogCollapsed = false
+    db.flightMapCatalogSide = "auto"
+    if type(NS.RefreshFlightMapCatalog) == "function" then
+        NS.RefreshFlightMapCatalog({ resetSearch = true })
+    end
 end
 
 function NS.IsManualWaypointAutoClearEnabled()

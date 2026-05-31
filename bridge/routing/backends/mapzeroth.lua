@@ -481,6 +481,9 @@ local function ResolveRouteTravelType(waypoint, mapID, x, y, method, routeLegKin
     if method == "destination" then
         return nil
     end
+    if method == "flightpath" or method == "taxi" then
+        return routeLegKind == "carrier" and "taxi" or nil
+    end
     if method == "walk"
         or method == "fly"
         or method == "carrier"
@@ -542,9 +545,12 @@ local function StepToLeg(mz, step, waypoint, abilityIndex, location, previous)
     local title = step.destination or step.destinationName or step.abilityName
     if isInstanceEntrance then
         method = "portal"
+    elseif routeLegKind == "carrier" and method == "flightpath" then
+        method = "taxi"
     elseif routeLegKind == "carrier"
         and method ~= "walk"
         and method ~= "fly"
+        and method ~= "taxi"
         and TitleLooksLikePortal(title)
     then
         method = "portal"

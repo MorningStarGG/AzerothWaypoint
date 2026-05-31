@@ -1,0 +1,56 @@
+Text Tutor,,,,.goto Guru - All steps should have a .goto of some sort!,,,
+*Text,Creates a note in the step window but not the guide/map,,,".goto [ZONE],xx.xx,yy.yy",,,"Default Goto, shows on map and has quest arrow."
+"""+Text""",Objective text box,,,".goto [ZONE],xx.xx,yy.yy,z",,,"Objective Goto, arrow and map show. Objective completes when player is within z yards"
+>>Text,"Default text, can be on its own line or after a syntax",,,".goto [ZONE],xx.xx,yy.yy,z,0",,,"Hidden Objective, same as above but no objective to complete. Used for changing waypoint"
+<< Class (<< Race),Shows text to one class or race,,,".goto [ZONE],xx.xx,yy.yy,0",,,"Map Waypoint goto, No arrow but shows on map"
+<< Class/Class/Class,Shows text to multiple class/races,,,".goto [ZONE],xx.xx,yy.yy,-1",,,"Closest Point goto, points to nearest coordinate on that step. Req multiple coordinates."
+<< !Class,Shows text to everyone but that class or race,,,.zone zoneName,,,Checkbox that completes when you enter zone
+<< !Class !Class,Shows text to everyone but those classes/races,,,.zoneskip ZoneNameorID,,,Skips step if you're in the given zone
+<< tbc << wotlk,Skips step if server is not on a tbc or wotlk patch,,,.groundgoto,,,Goto arrow that disappears if you can fly (mostly for Outlands / Northrend)
+How to combine:,"Spaces are an ""AND"" operator, ""/"" is an ""OR"" operator, ""!"" is a ""NOT"" operator.  Priority system is ""!"" > ""Space"" > ""/""",,,".line zone,x1,y1,x2,y2,x3,y3..",,,"Draw lines on the map connecting the coordinates, using negative values for both x/y coordinates will draw a dash line"
+,,,,".loop minDist,zone,x1,y2,x2,y2,x3,y3...",,,Draws a loop where minDist is the distance in yards where waypoint is marked as visited
+,,,,,,,
+.xp Expert,,,,Inventory Instructor,,,
+.xp 10,Makes you grind to level 10,,,".buy id,n",Purchases item with id from vendor,,
+.xp 10+200,Grind to level 10 and 200 exp,,,.use id,Creates clickable item window,,
+.xp 10-300,Grind to til you are 300 exp from level 10,,,".bankwithdraw id1,id2",Withdraws items from bank,,
+.xp 10.5,Grind til 50% into level 10,,,".bankdeposit id1,id2",Deposits items into bank,,
+".xp 10.5,1",Skip step if you are above 50% of 10,,,.money <0.01,Skips step if you have less than 1 silver,,
+".xp <10,1",Completes step if below level 10,,,.money >0.01,Skips step if you have more than 1 silver,,
+.maxlevel X,Skips step if you're above level X,,,.destroy id,Completes obj if you destroy item,,
+#level n,Step will only show if player is greater or equal to n. Only use on stickies! Use .maxlevel otherwise,,,.bronzetube,Skips step if player has a bronze tube or has completed duskwood BT quest,,
+,,,,".itemcount id,n",Skips step if user doesn't have n or greater of item id,,
+,,,,,,,
+Quest Coach,,,,NPC Conversation Counselor ,,,
+.collect,".collect,itemId,n,questID,skipifTurnedin",,,.trainer ,Obj completes when you talk to a class trainer,,
+,"Auto completes the step when you have n items of itemId, or if you have accepted questId (questId is optional, set skipIfTurnedIn to 1 if you want the task to complete if the quest is turned in already)",,,.train spellID,Obj to train specific spell,,
+,,,,.fly / .fp,"Use flightmaster """".fly Menethil Harbor"" / Get flightpath",,
+,,,,.stable id,"Obj completes when you talk to a stable master, id optional",,
+.collect objBitMask,".collect itemId,amount,questId,objectiveBitMask,-1 --",,,.skipgossip,Skips dialogue with npcs,,
+,,,,.home / .hs,Set hearthstone / Cast hearthstone,,
+".complete id,obj",Track quest objective ,,,.vehicle id,Obj completes when vehicle ui shows up,,
+".accept id,n,nid",Accepts quest id. ,,,".emote EmoteToken,NPCID",Emotes at npc - see comment for emote ids,,
+".turnin id,n",Turns in quest id. N autoselects the nth reward.,,,,,,
+.abandon id,Abandons quest id,,,Header Hero - All steps must eventually autocomplete~!,,,
+.isQuestComplete id,Skips step if quest is incomplete,,,#sticky,Step won't disappear until completed,,
+.isQuestTurnedIn id,Skips step if quest id isn't turned in,,,#completewith next,Step completes once next step is finished - good for ending stickys,,
+.isQuestAvailable id,Skips step if quest id isn't able to be accepted,,,#label MyLabel,Labels the step as MyLabel,,
+.isOnQuest id,"Skips step if quest id isn't in quest log, can also add a ""-"" before a quest id, ie "".turnin -1234 >>"" applies .isOnQuest to that quest, good for steps w/ multiple quests",,,#completewith MyLabel,Step completes once MyLabel is complete - good for ending stickys,,
+,,,,#requires MyLabel,Step will only show up if MyLabel is complete,,
+,,,,TBC Headers,,,
+.unitscan,Adds unitscan of enemy,,,#scryer,Skips step if rep with scryers is below friendly,,
+.reputation ,".reputation factionID,standing,value -- completes when you have required rep",,,#aldor,Skips step if rep with aldor is below friendly,,
+,,,,Vanilla Headers,,,
+".daily id1,id2,id3,id4","Accepts daily quests, completes when u accept atleast 1",,,#phase1-4,Step only shows if server is phase1-4,,
+".dailyturnin id1,id2,id3,id4","Turnsin daily quests, completes when u turnin atleast 1",,,#phase5,Step only shows if server is phase5+,,
+Misc Mentor,,,,#era,Only shows step on era servers,,
+.link url,Clickable hyperlink in step,,,#som,Only shows step on SoM servers,,
+.deathskip,Tells the player to go die. Completes on spirit rez,,,Hardcore Headers,,,
+".skill Name,n,skipStep",Completes if skill is = or greater than n,,,#softcore,Only shows step if hardcore is disabled,,
+.cooldown,"type,id,timeRemaining,updateOnlyOnce",,,#hardcore,Only shows step if hardcore is enabled,,
+".zoneskip zoneNameorID,1","Skips the step if player is in the given zoneID. Adding a 1 reverses the logic, shows the step only to people in that zoneID.",,,Exp Rate Headers,,,
+,,,,#xprate <# or >#,Shows or hides step if xprate is above or below amount. Used to skip bad quests during increased xp events or when using heirlooms,,
+,,,,,,,
+".timer timeInSeconds,Timertext",Latches to .accept or .turnin directly above and shows a timer bar.,,,,,,
+,,,,,,,
+.tame npcID,Instructs hunters to tame the specified animal id,,,,,,

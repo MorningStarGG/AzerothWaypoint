@@ -118,6 +118,22 @@ C.MANUAL_CLEAR_DISTANCE_MIN = 5
 C.MANUAL_CLEAR_DISTANCE_MAX = 100
 C.MANUAL_CLEAR_DISTANCE_STEP = 1
 
+-- Flight map assist auto-take modes
+C.FLIGHT_MAP_AUTO_TAKE_DISABLED = "disabled"
+C.FLIGHT_MAP_AUTO_TAKE_EXACT = "exact"
+C.FLIGHT_MAP_AUTO_TAKE_STRONG = "strong"
+
+C.FLIGHT_MAP_AUTO_TAKE_MODES = {
+    [C.FLIGHT_MAP_AUTO_TAKE_DISABLED] = true,
+    [C.FLIGHT_MAP_AUTO_TAKE_EXACT] = true,
+    [C.FLIGHT_MAP_AUTO_TAKE_STRONG] = true,
+}
+
+C.FLIGHT_MAP_CATALOG_FONT_SIZE_DEFAULT = 14
+C.FLIGHT_MAP_CATALOG_FONT_SIZE_MIN = 10
+C.FLIGHT_MAP_CATALOG_FONT_SIZE_MAX = 18
+C.FLIGHT_MAP_CATALOG_FONT_SIZE_STEP = 1
+
 -- Guide compact chrome step background modes
 C.GUIDE_STEP_BACKGROUND_MODE_NONE = "none"
 C.GUIDE_STEP_BACKGROUND_MODE_BG = "bg"
@@ -127,6 +143,17 @@ C.GUIDE_STEP_BACKGROUND_MODES = {
     [C.GUIDE_STEP_BACKGROUND_MODE_NONE] = true,
     [C.GUIDE_STEP_BACKGROUND_MODE_BG] = true,
     [C.GUIDE_STEP_BACKGROUND_MODE_BG_GOAL] = true,
+}
+
+-- Zygor step chat sticky summary modes
+C.ZYGOR_STEP_CHAT_STICKY_NONE = "none"
+C.ZYGOR_STEP_CHAT_STICKY_COUNT = "count"
+C.ZYGOR_STEP_CHAT_STICKY_TITLES = "titles"
+
+C.ZYGOR_STEP_CHAT_STICKY_MODES = {
+    [C.ZYGOR_STEP_CHAT_STICKY_NONE] = true,
+    [C.ZYGOR_STEP_CHAT_STICKY_COUNT] = true,
+    [C.ZYGOR_STEP_CHAT_STICKY_TITLES] = true,
 }
 
 -- Combat visibility modes
@@ -301,9 +328,63 @@ local function FormatControlCharForChat(char)
     return string.format("<0x%02X>", byte or 0)
 end
 
+local function IsAlphaNumeric(ch)
+    return ch ~= "" and ch:match("[%w_]") ~= nil
+end
+
+local function IsValidChatEscape(text, index)
+    local code = text:sub(index + 1, index + 1)
+    local after = text:sub(index + 2, index + 2)
+
+    if code == "C" or code == "c" then
+        return text:sub(index + 2, index + 9):match("^%x%x%x%x%x%x%x%x$") ~= nil
+    elseif code == "R" or code == "r" then
+        return not IsAlphaNumeric(after)
+    elseif code == "A" then
+        return after == ":"
+    elseif code == "a" then
+        return not IsAlphaNumeric(after)
+    elseif code == "T" or code == "H" or code == "K" or code == "N" then
+        return true
+    elseif code == "t" or code == "h" or code == "k" or code == "n" then
+        return not IsAlphaNumeric(after)
+    end
+
+    return false
+end
+
+local function EscapeLiteralPipesForChat(value)
+    local out = {}
+    local i = 1
+    local len = #value
+
+    while i <= len do
+        local ch = value:sub(i, i)
+        if ch ~= "|" then
+            out[#out + 1] = ch
+            i = i + 1
+        else
+            local nextCh = value:sub(i + 1, i + 1)
+            if nextCh == "|" then
+                out[#out + 1] = "||"
+                i = i + 2
+            elseif IsValidChatEscape(value, i) then
+                out[#out + 1] = "|"
+                i = i + 1
+            else
+                out[#out + 1] = "||"
+                i = i + 1
+            end
+        end
+    end
+
+    return table.concat(out)
+end
+
 function NS.SanitizeDiagnosticText(value)
     value = tostring(value)
-    return (value:gsub("[%c]", FormatControlCharForChat))
+    value = value:gsub("[%c]", FormatControlCharForChat)
+    return EscapeLiteralPipesForChat(value)
 end
 
 local function JoinArgs(...)

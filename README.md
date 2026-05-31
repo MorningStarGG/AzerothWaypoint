@@ -2,10 +2,12 @@
 
 > A TomTom-powered navigation bridge, route planner selector, manual waypoint queue, and 3D world overlay for World of Warcraft.
 
-![Version](https://img.shields.io/badge/version-4.0.1b-blue)
+![](https://github.com/MorningStarGG/AzerothWaypoint/blob/main/media/banner.png?raw=true)
+
+![Version](https://img.shields.io/badge/version-4.1.0-blue)
 ![Game](https://img.shields.io/badge/World%20of%20Warcraft-Addon-orange)
 ![Required](https://img.shields.io/badge/Required-TomTom-red)
-![Optional](https://img.shields.io/badge/Optional-Zygor%20%7C%20APR%20%7C%20WoWPro%20%7C%20Farstrider%20%7C%20Mapzeroth-lightgrey)
+![Optional](https://img.shields.io/badge/Optional-Zygor%20%7C%20APR%20%7C%20WoWPro%20%7C%20Farstrider%20%7C%20Mapzeroth%20%7C%20InFlight-lightgrey)
 ![License](https://img.shields.io/badge/license-GPL--3.0-green)
 
 **Support development:** [Donate via PayPal](https://paypal.me/TheThinkCritic)
@@ -27,7 +29,8 @@ AzerothWaypoint is the renamed and expanded successor to ZygorWaypoint.
 - [How Navigation Works](#how-navigation-works)
 - [Feature Highlights](#feature-highlights)
 - [Supported Integrations](#supported-integrations)
-- [What's New in 4.0.0](#whats-new-in-400)
+- [What's New in 4.1.0](#whats-new-in-410)
+- [What Changed in 4.0.0](#what-changed-in-400)
 - [Options](#options)
 - [Slash Commands](#slash-commands)
 - [Installation](#installation)
@@ -94,7 +97,9 @@ Optional integrations provide richer route planning and guide data.
 /awp queue
 ```
 
-6. Open help or release notes in-game:
+6. Use the AzerothWaypoint minimap button for quick access to settings, help, the queue, and supported integration controls.
+
+7. Open help or release notes in-game:
 
 ```text
 /awp help
@@ -305,6 +310,50 @@ Some route legs require using an item, spell, toy, hearthstone, portal, or simil
 
 When the current route leg needs a special action, AWP can show a secure special travel button in place of normal arrow presentation.
 
+### Combat Visibility
+
+AWP can temporarily hide TomTom, the special travel button, the 3D world overlay, or both while you are in combat, then restore them afterward.
+
+### Minimap Button and Addon Compartment
+
+AWP includes a native minimap button with no external minimap library dependency.
+
+The minimap button can:
+
+- open the AWP quick menu
+- open AWP settings
+- open in-game help
+- open the queue panel
+- toggle Tracker Viewer
+- toggle Zygor's native viewer when Zygor is loaded
+- expose Zygor guide controls when Zygor is loaded
+- reset or hide the minimap button
+
+The button can snap around the minimap edge or be dragged away as a free-floating button. AWP also registers a Blizzard addon-compartment entry so the quick menu remains available if you hide the minimap button.
+
+### Flight Map Assist
+
+When the active route uses a flight path, AWP can mark the intended destination on the retail flight map.
+
+- Exact Zygor/LibRover taxi destinations can be matched by Blizzard taxi node ID.
+- Mapzeroth and Farstrider routes can use strict coordinate/name matches where the visible flight-map data is clear enough.
+- The marker is visual-only; it does not create routes or supertrack taxi nodes.
+- Optional `Auto Take Flight Paths` is disabled by default and pressing `Alt` suppresses it for the current flight-map interaction.
+- The optional taxi list adds a searchable AWP side panel with the route destination at the top, favorites, recent flights, current-zone flights, and reachable destinations grouped by zone.
+- The taxi list can auto-attach to the side with available screen space, follow the flight map when it is moved, center against the visible map area, and resize for shorter lists.
+- The taxi list destination text size can be adjusted from General > Routing.
+- If InFlight is installed and has timing data for the current route, the taxi list can show exact or estimated flight times.
+
+Options:
+
+```text
+General > Routing > Show Flight Map Route Marker
+General > Routing > Auto Take Flight Paths
+General > Routing > Show Flight Map Taxi List
+General > Routing > Flight Map Taxi List Side
+General > Routing > Flight Map Taxi List Text Size
+```
+
 ### Arrow Skins
 
 AWP includes an arrow skin system for TomTom.
@@ -322,14 +371,38 @@ Zygor skins, when Zygor is loaded:
 - Starlight
 - Stealth
 
-### Zygor Viewer Polish
+### Zygor Integration and Viewer Controls
 
 When Zygor is installed, AWP can:
 
 - use compact guide presentation
 - hide step backgrounds until mouseover
 - hide step backgrounds and line colors until mouseover
+- show Zygor guides in the objective tracker with Tracker Viewer
+- hide Zygor's native viewer without disabling Zygor guide state or waypoints
+- control Zygor steps, guide switching, guide loading, guide closing, menus, and settings from the minimap menu or `/awp zygor` commands
+- show the current Zygor step in your own chat frame on step change or on demand with contextual or selected colors
 - detect Zygor arrow conflict settings and offer a one-click disable prompt
+
+### Zygor Tracker Viewer
+
+When Zygor is installed, AWP can show the active Zygor guide inside the objective tracker instead of requiring Zygor's full-size native viewer to stay visible.
+
+Tracker Viewer supports:
+
+- Blizzard's default Objective Tracker
+- Kaliel's Tracker
+- current guide title and step rows
+- previous, next, and skip controls
+- guide switching and guide picker access
+- Zygor menu and settings access
+- clickable confirm rows
+- active sticky steps grouped above the current step
+- long tip-block grouping so large guide steps do not overflow the tracker
+- square, rounded, or hidden progress bar styles
+- contextual tracker text colors for common Zygor goal types
+
+You can also hide Zygor's native viewer while keeping Zygor's guide engine, active waypoints, guide picker, settings, and guide navigation available through AWP.
 
 ### Search Routing
 
@@ -350,33 +423,120 @@ Supported services include vendors, repair, auctioneers, bankers, barbers, fligh
 
 ## Supported Integrations
 
+AWP includes an in-game **Integrations** tab in `/awp options` and a matching Help page. Those pages explain what each supported addon or source contributes, show load status, and provides buttons to copy the URLs of the addons.
+
 ### Required
 
-| Addon | Purpose |
+| Addon | What AWP Uses It For |
 |---|---|
-| **TomTom** | Provides the primary navigation arrow and waypoint carrier. |
+| **TomTom** | Required waypoint carrier and primary arrow display. AWP chooses the active route; TomTom shows it. |
 
-### Optional
+### Guide Addons
 
-AzerothWaypoint works without these addons, but enables additional behavior when they are installed.
-
-| Addon | What AzerothWaypoint Uses It For |
+| Addon | What AWP Uses It For |
 |---|---|
-| **Zygor Guides Viewer** | Guide targets, LibRover routing backend, search data, Zygor-style arrow skins, and compact guide options |
-| **Azeroth Pilot Reloaded** | Guide step targets, guide text, objective context, and queue projection |
-| **WoWPro** | Guide step targets, guide text, objective context, and queue projection |
-| **FarstriderLib / FarstriderLibData** | Travel-aware route planning with flights, portals, transports, items, spells, and travel nodes |
-| **Mapzeroth** | Travel-aware route planning with flights, portals, transports, items, spells, and travel nodes |
-| **WorldQuestTab** | World quest click adoption with quest metadata |
-| **HandyNotes** | Source-aware transient POI waypoint adoption |
-| **SilverDragon** | Source-aware rare waypoint adoption |
-| **RareScanner** | Source-aware rare waypoint adoption |
+| **Zygor Guides Viewer** | Guide targets, LibRover routing, search data, Zygor-style arrow skins, Tracker Viewer, native viewer hiding, guide controls, and chat step display. |
+| **Azeroth Pilot Reloaded** | Guide step targets, guide text, objective context, and guide queue. |
+| **WoWPro** | Guide step targets, guide text, objective context, and guide queue. |
 
-Other addons that create TomTom waypoints may also work through AzerothWaypoint's normal TomTom adoption flow.
+### Route Backends
+
+| Backend | What AWP Uses It For |
+|---|---|
+| **Zygor / LibRover** | Travel-aware routing with rich Zygor route data, including exact taxi node matches where LibRover exposes them. |
+| **FarstriderLib / FarstriderLibData** | Travel-aware route planning with flights, portals, transports, items, spells, and travel nodes when available. |
+| **Mapzeroth** | Travel-aware route planning with Mapzeroth pathfinding data when available. |
+
+### Flight Map
+
+| Addon | What AWP Uses It For |
+|---|---|
+| **InFlight** | Optional flight timing data for AWP's flight-map taxi list. |
+
+### Tracker Addons
+
+| Addon | What AWP Uses It For |
+|---|---|
+| **Kaliel's Tracker** | Optional objective tracker host for AWP's Zygor Tracker Viewer, including Zygor guide rows, sticky steps, long-tip grouping, and header controls. |
+
+### Map and POI Addons
+
+| Addon | What AWP Uses It For |
+|---|---|
+| **WorldQuestTab** | World quest POI adoption with quest metadata when available. |
+| **HandyNotes** | Source-aware temporary POI waypoint adoption, including plugins such as MapNotes. |
+| **SilverDragon** | Source-aware rare waypoint adoption as temporary routes. |
+| **RareScanner** | Source-aware rare waypoint adoption as temporary routes. |
+
+### Blizzard Sources and Other Addons
+
+AWP can also adopt supported Blizzard map clicks, user waypoints, quest POIs, supertracked quests, tracked quests, area POIs, vignettes, taxi nodes, gossip POIs, dig sites, and housing plots.
+
+Other addons that create normal TomTom or Blizzard waypoint calls can work through AWP's addon waypoint adoption flow. You can review detected callers and manage allow/block lists under **General > Addon Waypoint Adoption**.
 
 ---
 
-## What's New in 4.0.0
+## What's New in 4.1.0
+
+### Minimap Button
+
+- Added a native AzerothWaypoint minimap button and addon-compartment entry.
+- Left-click opens the quick menu. Right-click opens AWP settings.
+- The button supports minimap-edge snapping near the minimap and free-floating placement away from it.
+- The quick menu opens settings, help, queue, Tracker Viewer controls, Zygor controls, and minimap button management.
+
+### Queue and Tracker Reliability
+
+- `/awp queue` and the minimap button's Open Queue action now force the quest-log side panel open for that interaction, so the AWP queue tab is visible even when the world map normally opens with the quest log hidden.
+- `/awp status` reports objective tracker host, hidden state, opacity state, Tracker Viewer state, Zygor native viewer state, chat step-display state, Flight Map Assist and Taxi List state, and minimap button state.
+- AWP warns after login or reload if Tracker Viewer is enabled but the active objective tracker is hidden or appears transparent.
+- The intermediate surrogate navigation-point notice is throttled so rapidly stepping through guides does not spam chat.
+- In-game help page text can now be selected and copied.
+
+### Flight Map Assist
+
+- Added a flight-map marker for route legs that use flight paths.
+- Exact Zygor/LibRover taxi destinations can match by Blizzard taxi node ID.
+- Mapzeroth and Farstrider flight-path legs can match through strict visible coordinate/name checks where available.
+- Added opt-in `Auto Take Flight Paths` modes for exact matches or strong matches. `Auto Take Flight Paths` is disabled by default and pressing `Alt` suppresses it for the current flight-map interaction.
+- Added an AWP taxi list attached to the flight map with the route destination at the top, favorites, recent flights, current-zone flights, search, and reachable destinations grouped by zone.
+- The taxi list can auto-attach to the side with available screen space, follow the flight map when it is moved, center against the visible map area, and resize for shorter lists.
+- If InFlight is installed, AWP can show exact or estimated flight times in the taxi list when matching timing data is available.
+
+### Integrations Page
+
+- Added a bottom-tab **Integrations** page in AWP options and a matching in-game Help page.
+- These pages explain supported addons, route backends, tracker addons, flight-map helpers, and Blizzard sources in normal user terms, including load status and buttons to copy the URLs of the addons.
+
+### Zygor Tracker Viewer
+
+- Added an optional Zygor guide display inside Blizzard's Objective Tracker or Kaliel's Tracker.
+- Header controls for guide title, previous/next, guide switching, Zygor menu/settings, and progress display.
+- Square, rounded border, and hidden tracker progress bar styles.
+- Contextual tracker text colors for common Zygor goal types.
+- Long tip-block grouping and sticky-step display for large or persistent Zygor guide steps.
+- Clickable confirm rows in the tracker.
+- No-guide-loaded row that opens Zygor's guide picker.
+
+### Zygor Native Viewer Controls
+
+- Added an option to hide Zygor's native viewer while leaving Zygor's guide logic, waypoints, guide picker, menus, and settings available.
+- Added AWP minimap menu controls for Zygor next, previous, skip, guide picker, open guide switching, guide closing, guide menu, and settings.
+- Added macro-friendly `/awp zygor` commands for the same guide controls.
+- Added `/awp zygor reset` to recover a hidden, lost, or glitched native Zygor viewer.
+- Added optional chat step display for the current Zygor step, including step percentage, contextual colors, sticky step summaries, and `/awp zygor output`.
+- Closing all Zygor guide tabs now clears AWP's guide route state so the last guide waypoint does not linger.
+
+### Recent 4.0.x Highlights
+
+- HandyNotes support was added, including plugins such as MapNotes.
+- WorldQuestTab adoption was improved for world quest and bonus objective clicks.
+- Hide During Combat was added and refined for TomTom, the special travel button, and the world overlay.
+- The in-game help frame received expanded pages, screenshots, and a page dropdown.
+
+---
+
+## What Changed in 4.0.0
 
 Version 4.0.0 is a major release and rename from the old ZygorWaypoint identity to AzerothWaypoint.
 
@@ -458,13 +618,15 @@ Options are organized into these sections:
 | Section | Controls |
 |---|---|
 | **About** | Addon summary, help access, release notes, author links |
-| **General** | Routing, backend selection, manual queue behavior, quest routing, quest clearing, addon waypoint adoption |
+| **General** | Routing, backend selection, flight map assist, manual queue behavior, quest routing, quest clearing, addon waypoint adoption, minimap button visibility, combat visibility |
 | **TomTom Arrow** | Custom arrow skins, arrow scale, special travel button scale |
 | **World Overlay** | 3D overlay enablement, hover fade, context display, shared icon and color behavior |
 | **Waypoint** | Long-range marker mode, size, opacity, beacon, footer text, units, and colors |
 | **Pinpoint** | Close-range marker, plaque style, destination info, arrows, coordinates, colors, and height |
 | **Navigator** | Off-screen arrow size, opacity, distance, dynamic distance, and color |
-| **Zygor** | Compact Zygor viewer presentation when Zygor is loaded |
+| **Zygor** | Compact Zygor viewer presentation, native viewer hiding, Tracker Viewer, tracker progress style, tracker text colors, and chat step display when Zygor is loaded |
+
+The bottom tabs also include **Release Notes** and **Integrations**. Integrations explains supported addons and sources, shows whether addon-based integrations are loaded, and provides copy-link buttons when addon URLs are configured.
 
 ### General Options
 
@@ -472,6 +634,11 @@ General navigation behavior includes:
 
 - Enable Routing
 - Routing Backend
+- Show Flight Map Route Marker
+- Auto Take Flight Paths
+- Show Flight Map Taxi List
+- Flight Map Taxi List Side
+- Flight Map Taxi List Text Size
 - Manual Click Queue Behavior
 - Auto-Clear Manual Waypoints on Arrival
 - Manual Waypoint Clear Distance
@@ -482,6 +649,8 @@ General navigation behavior includes:
 - Detected Addon Callers
 - Addon Allowlist
 - Addon Blocklist
+- Show Minimap Button
+- Hide During Combat
 
 ### TomTom Arrow Options
 
@@ -572,6 +741,13 @@ Shown only when Zygor is loaded:
 
 - Show Only Guide Steps Until Mouseover
 - Hide Step Backgrounds Until Mouseover
+- Hide Zygor's Native Frame
+- Enable Tracker Viewer
+- Tracker Viewer Progress Bar
+- Tracker Viewer Text
+- Show Step in Chat Frame on Step Change
+- Chat Step Text Output
+- Chat Sticky Summary Output
 
 ---
 
@@ -594,6 +770,9 @@ Root command:
 | `/awp changelog` | Open What's New. |
 | `/awp routing on\|off\|toggle` | Enable or disable route ownership. |
 | `/awp backend direct\|zygor\|mapzeroth\|farstrider` | Choose routing backend. |
+| `/awp flightassist marker on\|off\|toggle\|status` | Toggle the retail flight-map route marker. |
+| `/awp flightassist auto disabled\|exact\|strong\|status` | Configure opt-in local auto-take for matched flight paths. |
+| `/awp flightassist catalog on\|off\|toggle\|reset\|status` | Control the AWP taxi list attached to the retail flight map. |
 | `/awp queue` | Open the waypoint queue panel. |
 | `/awp manualclear on\|off\|toggle` | Toggle manual waypoint auto-clear. |
 | `/awp cleardistance <5-100>` | Set manual waypoint clear distance. |
@@ -602,6 +781,10 @@ Root command:
 | `/awp questclear on\|off\|toggle` | Toggle arrival clear for supertracked quest routes. |
 | `/awp addontakeover on\|off\|toggle\|status` | Control unknown addon waypoint adoption. |
 | `/awp compact on\|off\|toggle` | Toggle Zygor compact viewer mode. |
+| `/awp trackerviewer on\|off\|toggle\|status` | Toggle the Zygor Tracker Viewer. |
+| `/awp zygorviewer show\|hide\|toggle\|status` | Show or visually hide Zygor's native viewer. |
+| `/awp zygor next\|prev\|skip\|picker\|load <title>\|output [full\|sticky]\|menu\|settings\|list\|switch <index>\|close [index]\|reset` | Control Zygor guides from AWP. |
+| `/awp minimap show\|hide\|toggle\|reset\|status` | Control the AWP minimap button. |
 | `/awp skin <skin>` | Set TomTom arrow skin. |
 | `/awp scale <0.60-2.00>` | Set custom arrow skin scale. |
 | `/awp search <type>` | Route to a service or profession target. |
@@ -628,6 +811,52 @@ Queue aliases:
 - `queue rm`
 - `queue paste`
 - `queue ttpaste`
+
+### Zygor Commands
+
+Zygor commands require Zygor Guides Viewer to be installed and enabled.
+
+```text
+/awp trackerviewer on|off|toggle|status
+/awp zygorviewer show|hide|toggle|status
+/awp zygor next
+/awp zygor prev
+/awp zygor skip
+/awp zygor picker
+/awp zygor load <guide title> [step N]
+/awp zygor output
+/awp zygor output full
+/awp zygor output sticky
+/awp zygor list
+/awp zygor switch <index>
+/awp zygor close [current|index|all]
+/awp zygor menu
+/awp zygor settings
+/awp zygor reset
+```
+
+These are useful if you hide Zygor's native viewer and want macros or keybinds for guide controls instead of using the minimap menu. The `output` command shows the current step in your own chat only; it does not send anything to say, party, raid, guild, or public channels. The `reset` command shows Zygor's native viewer again and resets Zygor's own window position if it becomes hidden, lost, or glitched.
+
+### Flight Assist Commands
+
+```text
+/awp flightassist marker on
+/awp flightassist marker off
+/awp flightassist marker toggle
+/awp flightassist marker status
+/awp flightassist auto disabled
+/awp flightassist auto exact
+/awp flightassist auto strong
+/awp flightassist auto status
+/awp flightassist catalog on
+/awp flightassist catalog off
+/awp flightassist catalog toggle
+/awp flightassist catalog reset
+/awp flightassist catalog status
+```
+
+`exact` auto-take uses exact Zygor/LibRover taxi node matches. `strong` also allows strict visible coordinate/name matches from other route backends where available.
+The taxi list command controls only the attached flight-map list; `reset` restores its side/open state without clearing favorites or recent flights.
 
 ### Search Commands
 
@@ -748,6 +977,23 @@ Check:
 - `/awp queue`
 - `/awp status`
 
+### The Zygor Tracker Viewer is missing
+
+Check:
+
+- Zygor Guides Viewer is installed, enabled, and loaded.
+- **Zygor > Tracker Viewer > Enable Tracker Viewer** is on.
+- Blizzard's Objective Tracker or Kaliel's Tracker is visible.
+- The tracker is not being hidden or made transparent by another addon.
+
+Use:
+
+```text
+/awp status
+```
+
+AWP reports which objective tracker host it detected and whether the tracker appears hidden or transparent.
+
 ### Unknown addon waypoints are being ignored
 
 Check:
@@ -794,6 +1040,7 @@ Good reports include:
 - which guide addon was active
 - current routing backend
 - `/awp status`
+- whether Tracker Viewer or Zygor native viewer hiding was enabled, if the issue involves Zygor display
 - `/awp waytype`
 - `/awp stepdebug` when guide routing is involved
 - any Lua error stack

@@ -502,7 +502,7 @@ function M.CreateWidgets(ctx)
         SetCursorY(rowY + 4)
     end
 
-    local function AddColorRow(label, tooltip, modeGetter, modeSetter, customGetter, customSetter)
+    local function AddColorRow(label, tooltip, modeGetter, modeSetter, customGetter, customSetter, refreshFn)
         local scrollChild = GetScrollChild()
         local y = GetCursorY()
         local opts = GetOpts()
@@ -609,7 +609,11 @@ function M.CreateWidgets(ctx)
                 onLeave = RestoreSectionPreview,
                 onSelect = function(value)
                     modeSetter(value)
-                    NS.RefreshWorldOverlay()
+                    if type(refreshFn) == "function" then
+                        refreshFn()
+                    else
+                        NS.RefreshWorldOverlay()
+                    end
                     refreshDD()
                     RestoreSectionPreview()
                 end,
@@ -627,12 +631,20 @@ function M.CreateWidgets(ctx)
                 swatchFunc = function()
                     local r, g, b = ColorPickerFrame:GetColorRGB()
                     customSetter({ r = r, g = g, b = b })
-                    NS.RefreshWorldOverlay()
+                    if type(refreshFn) == "function" then
+                        refreshFn()
+                    else
+                        NS.RefreshWorldOverlay()
+                    end
                     refreshSwatch()
                 end,
                 cancelFunc = function(prev)
                     customSetter(copyColor(prev))
-                    NS.RefreshWorldOverlay()
+                    if type(refreshFn) == "function" then
+                        refreshFn()
+                    else
+                        NS.RefreshWorldOverlay()
+                    end
                     refreshSwatch()
                 end,
             })

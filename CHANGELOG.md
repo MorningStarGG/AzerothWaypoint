@@ -1,5 +1,79 @@
 # Changelog
 
+## 4.1.0
+- **Zygor Tracker Viewer**
+  - Added a new Tracker Viewer, an optional Zygor guide display that docks the current guide cleanly into the objective tracker instead of requiring Zygor's full-size native viewer.
+  - Tracker Viewer supports both Blizzard's Objective Tracker and Kaliel's Tracker.
+  - The Zygor tracker header shows the guide title, previous/next step buttons, guide switching, Zygor menu/settings access, and square, rounded, or hidden progress bar styles.
+  - Added contextual Tracker Viewer text colors for accept, turn-in, complete, travel, kill, talk, use, and tip rows, plus an option to force all tracker step text to a selected color.
+  - Long Zygor tip blocks collapse by section in Tracker Viewer when a single step contains many tips, with hover tooltips for collapsed rows so large steps, such as raid-mechanic instructions, do not overflow the tracker.
+  - Active Zygor sticky steps display as separate grouped tracker blocks above the current guide step in Tracker Viewer.
+  - Confirm rows such as `Click Here to Continue` can be clicked to continue to the next Zygor step in Tracker Viewer mode.
+  - When no Zygor guide is loaded, Tracker Viewer shows a message that opens Zygor's guide picker.
+
+- **Zygor native viewer controls**
+  - Added `Hide Zygor's Native Frame` as a Zygor option, so users can visually hide Zygor's full-size viewer.
+  - Native Zygor viewer hiding cloaks and moves the viewer off screen while keeping Zygor's guide engine, active guide state, waypoints, guide picker, and settings available.
+  - Added open-guide switching, current-guide closing, guide picker, Zygor guide menu, and Zygor settings actions for users who keep Zygor's native viewer hidden.
+  - Added macro-friendly `/awp zygor` guide controls for next, previous, skip, guide picker, guide loading by title, menu, settings, open-guide list, guide switching, and guide closing.
+  - Added `/awp zygor reset` to recover a lost or glitched native Zygor viewer. It unhides the viewer and resets Zygor's own window back to its default position. This is intended as a recovery option if the native viewer ever becomes inaccessible.
+  - Added optional local chat-frame step display for the current Zygor step on step change, including step percentage, contextual or selected text colors, and sticky step summaries.
+  - Added `/awp zygor output` to show the current Zygor step in your own chat frame with step percentage, contextual or selected text colors, and sticky step summaries.
+
+- **Native minimap button**
+  - Added an AzerothWaypoint minimap button.
+  - Left-click opens the AWP quick menu; right-click opens AWP settings; dragging supports minimap-edge snapping near the minimap and free-floating placement when pulled away.
+  - Minimap button position and visibility can be controlled with `/awp minimap show|hide|toggle|reset|status`.
+  - Added addon compartment support with the same quick menu, tooltip, and settings access so users can still reach the same AWP menu when the minimap button is hidden.
+  - The minimap quick menu includes Tracker Viewer toggle, Zygor native viewer toggle, Zygor guide controls, Open AWP Settings, Open Help, Open Queue, reset position, and hide button actions.
+
+- **Flight Map Assist**
+  - Added Flight Map Assist, which can highlight the intended flight path destination when the active AWP route includes a matched taxi leg.
+  - Added an optional AWP taxi list attached to the flight map, with route destination, favorites, recent flights, current-zone flights, search, and reachable destinations grouped by zone.
+  - The taxi list can auto-attach to the side with available screen space, update its side when the flight map is moved, center against the visible map area, and resize based on content.
+  - Taxi list text-size option for adjusting font readability in the list of destinations.
+  - Taxi list rows can take reachable flights, toggle favorites, and pulse the matching map node on hover.
+  - When InFlight is installed and has matching timing data, the AWP taxi list can show exact or estimated flight times without importing or copying InFlight's database.
+  - Zygor / LibRover taxi legs carry exact Blizzard taxi node metadata for precise flight map matching.
+  - Mapzeroth `flightpath` legs now normalize to AWP taxi route legs, allowing strict visible coordinate/name matching where available.
+  - Added opt-in `Auto Take Flight Paths` modes for exact matches or strong matches. This is disabled by default, and holding `Alt` suppresses it for the current flight-map interaction.
+  - Added `/awp flightassist marker on|off|toggle|status`, `/awp flightassist auto disabled|exact|strong|status`, and `/awp flightassist catalog on|off|toggle|reset|status`.
+
+- **Queue panel access**
+  - `/awp queue`, `/awp queue list`, and the minimap button's Open Queue action now force the quest-log side panel open for that interaction so the AWP queue tab is visible even when the user's normal world-map quest log panel is hidden.
+  - The forced queue-open path does not change saved user map or quest-log settings. It behaves like an explicit quest-log open only for the requested queue display action.
+
+- **Objective tracker diagnostics**
+  - Added objective tracker visibility diagnostics that prefer Kaliel's Tracker when present and fall back to Blizzard's ObjectiveTrackerFrame.
+  - `/awp status` now reports the objective tracker host, hard-hidden state, opacity state, Tracker Viewer state, Zygor native viewer state, local chat-frame step-display state, Flight Map Assist and Taxi List state, and minimap button state.
+  - AWP now warns after login or reload when Tracker Viewer is enabled but the active objective tracker is hard-hidden, or when it appears transparent due to tracker opacity or mouseover behavior.
+
+- **Options and help**
+  - Added Zygor options for Enable Tracker Viewer, Hide Zygor's Native Frame, Tracker Viewer Progress Bar, Tracker Viewer Text, Show Step in Chat Frame on Step Change, Chat-Frame Step Text, and Chat-Frame Sticky Summary.
+  - Added General > Routing options for Show Flight Map Route Marker, Auto Take Flight Paths, Show Flight Map Taxi List, Flight Map Taxi List Side, and Flight Map Taxi List Text Size.
+  - Added General > Interface > Show Minimap Button.
+  - Added a bottom-tab Integrations page in AWP options and a matching Help page that explain supported addons, route backends, Blizzard sources, and what AWP uses each for.
+  - Updated option previews and help media for Tracker Viewer, tracker progress bar styles, tracker text colors, and the minimap button.
+  - Reorganized in-game help to give Zygor Integration its own page and added a dedicated Zygor Tracker Viewer page.
+  - Added minimap button documentation to the Options and Customization help page.
+  - Updated command help for `/awp trackerviewer`, `/awp zygorviewer`, `/awp zygor`, and `/awp minimap`.
+  - In-game help page text is now selectable. Drag-select any command or text and press Ctrl+C to copy it.
+
+- **Text rendering fixes**
+  - Escaped literal pipe characters in help text so command examples such as `on|off|toggle` display correctly instead of being interpreted as WoW markup.
+  - Escaped literal pipe characters in chat diagnostics while preserving valid WoW color, atlas, texture, and hyperlink escapes.
+  - Tracker Viewer rows now strip Zygor inline color markup before applying AWP tracker colors, preventing stale Zygor styling from leaking into docked step rows.
+
+- **General Fixes**
+  - Closing all Zygor guide tabs now invalidates AWP's guide route state so the last guide waypoint is cleared instead of lingering after Zygor has no active guide.
+  - `/awp zygor output` labels the active step with a "Current step:" header and uses a clear indent hierarchy, so the active step's objectives don't blend into the sticky block displayed above them.
+  - Throttled the surrogate navigation point chat notice to once every 30 seconds while preserving the existing once-per-waypoint guard.
+  - Removed the duplicate AWP prefix from the surrogate navigation point notice.
+
+- **Developer reference material**
+  - Added RestedXP reference documentation and template files for future guide-provider work.
+  - Added Dugi folder for future guide-provider work.
+
 ## 4.0.1b
 - **Native overlay long-distance routing**
   - Improved surrogate navigation point selection for far-away world overlay targets by projecting through the real world map, trying target/player map lineage candidates, validating round trips, and logging clearer failure reasons.

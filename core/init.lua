@@ -133,10 +133,14 @@ f:SetScript("OnEvent", function(_, ev, arg1)
             SafeCall(NS.InitializeWorldOverlay)
             SafeCall(NS.RegisterOptionsPanel)
             SafeCall(NS.RegisterCommands)
+            SafeCall(NS.RefreshMinimapButton)
             NS.Msg("AzerothWaypoint loaded. Use /awp for commands.")
         end
     elseif ev == "PLAYER_LOGIN" then
         state.init.playerLoggedIn = true
+        SafeCall(NS.InitializeFlightMapAssist)
+        SafeCall(NS.InitializeFlightMapTimes)
+        SafeCall(NS.InitializeFlightMapCatalog)
         if type(rawget(_G, "ZygorWaypointNS")) == "table"
             or (type(C_AddOns) == "table" and type(C_AddOns.IsAddOnLoaded) == "function"
                 and C_AddOns.IsAddOnLoaded("ZygorWaypoint"))
@@ -160,6 +164,9 @@ f:SetScript("OnEvent", function(_, ev, arg1)
             NS.After(0.5, function()
                 SafeCall(NS.MaybeShowZygorWaypointConflictPopup)
                 SafeCall(NS.StartZygorWaypointConflictReminders)
+            end)
+            NS.After(1.0, function()
+                SafeCall(NS.MaybeWarnObjectiveTrackerVisibility)
             end)
             NS.After(startupHelpPage and 6.0 or 1.25, function()
                 SafeCall(NS.MaybeShowZygorArrowRecommendationPopup, 1)

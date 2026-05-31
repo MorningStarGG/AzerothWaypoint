@@ -1082,17 +1082,18 @@ end
 
 local TAXI_COORD_EPSILON = 0.0015
 
-local function CheckTaxiNodeCoordProof(mapID, x, y)
+local function ResolveTaxiNodeAtCoord(mapID, x, y)
     if type(mapID) ~= "number" or type(x) ~= "number" or type(y) ~= "number" then
-        return false
+        return nil
     end
     if type(C_TaxiMap) ~= "table" or type(C_TaxiMap.GetTaxiNodesForMap) ~= "function" then
-        return false
+        return nil
     end
     local nodes = C_TaxiMap.GetTaxiNodesForMap(mapID)
     if type(nodes) ~= "table" then
-        return false
+        return nil
     end
+    local match = nil
     for _, node in ipairs(nodes) do
         local pos = node.position
         if type(pos) == "table" then
@@ -1103,11 +1104,26 @@ local function CheckTaxiNodeCoordProof(mapID, x, y)
                 and math.abs(nx - x) <= TAXI_COORD_EPSILON
                 and math.abs(ny - y) <= TAXI_COORD_EPSILON
             then
-                return true
+                if match then
+                    return nil
+                end
+                match = node
             end
         end
     end
-    return false
+    return match
+end
+
+function NS.ResolveTaxiNodeAtCoord(mapID, x, y)
+    return ResolveTaxiNodeAtCoord(mapID, x, y)
+end
+
+function NS.GetTaxiCoordEpsilon()
+    return TAXI_COORD_EPSILON
+end
+
+local function CheckTaxiNodeCoordProof(mapID, x, y)
+    return ResolveTaxiNodeAtCoord(mapID, x, y) ~= nil
 end
 
 local function ClassifyTravelSemanticsImpl(action, mapID, x, y, rawArrowTitle, detailText)

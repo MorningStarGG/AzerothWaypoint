@@ -270,6 +270,20 @@ local function UpdateFooterState(selectedQueue, queueType, viewMode, activeManua
     end
 end
 
+local function ClearQuestLogDisplayMode(questMapFrame)
+    if not questMapFrame or type(questMapFrame.SetDisplayMode) ~= "function" then
+        return false
+    end
+
+    ui.settingDisplayMode = true
+    if type(QuestLogDisplayMode) == "table" and QuestLogDisplayMode.Quests ~= nil then
+        pcall(questMapFrame.SetDisplayMode, questMapFrame, QuestLogDisplayMode.Quests)
+    end
+    local ok = pcall(questMapFrame.SetDisplayMode, questMapFrame)
+    ui.settingDisplayMode = nil
+    return ok
+end
+
 function M.Refresh()
     if not ui.content then
         return
@@ -316,19 +330,15 @@ function M.Refresh()
     end
 end
 
-ShowQueueTabContent = function()
+ShowQueueTabContent = function(options)
+    options = options or {}
     local questMapFrame = M.EnsureWorldMapLoaded()
     if not ui.content or not questMapFrame then
         return false
     end
 
-    if not ui.content:IsShown() then
-        ui.settingDisplayMode = true
-        if type(QuestLogDisplayMode) == "table" and QuestLogDisplayMode.Quests ~= nil then
-            questMapFrame:SetDisplayMode(QuestLogDisplayMode.Quests)
-        end
-        questMapFrame:SetDisplayMode()
-        ui.settingDisplayMode = nil
+    if options.resetDisplayMode or not ui.content:IsShown() then
+        ClearQuestLogDisplayMode(questMapFrame)
     end
 
     ui.active = true
@@ -566,7 +576,74 @@ CreateQueueTabUI = function()
     return true
 end
 
-local function OpenQueueInQuestMap()
+local function IsShown(frame)
+    if not frame or type(frame.IsShown) ~= "function" then
+        return false
+    end
+    local ok, shown = pcall(frame.IsShown, frame)
+    return ok and shown == true
+end
+
+local function OpenWorldMap()
+    local worldMap = _G["WorldMapFrame"]
+    if IsShown(worldMap) then
+        return true
+    end
+    if type(ToggleWorldMap) == "function" then
+        local ok = pcall(ToggleWorldMap)
+        if ok and IsShown(_G["WorldMapFrame"]) then
+            return true
+        end
+    end
+    worldMap = _G["WorldMapFrame"]
+    if worldMap and type(worldMap.Show) == "function" then
+        local ok = pcall(worldMap.Show, worldMap)
+        return ok and IsShown(worldMap)
+    end
+    return false
+end
+
+local function SetQuestLogDisplayMode(questMapFrame)
+    if not questMapFrame or type(questMapFrame.SetDisplayMode) ~= "function" then
+        return false
+    end
+
+    ui.settingDisplayMode = true
+    local ok = false
+    if type(QuestLogDisplayMode) == "table" and QuestLogDisplayMode.Quests ~= nil then
+        ok = pcall(questMapFrame.SetDisplayMode, questMapFrame, QuestLogDisplayMode.Quests)
+    end
+    if not ok then
+        ok = pcall(questMapFrame.SetDisplayMode, questMapFrame)
+    end
+    ui.settingDisplayMode = nil
+    return ok
+end
+
+local function ForceQuestLogSidePanel()
+    M.EnsureWorldMapLoaded()
+
+    if type(OpenQuestLog) == "function" then
+        pcall(OpenQuestLog)
+    elseif type(ToggleQuestLog) == "function" and not IsShown(_G["WorldMapFrame"]) then
+        pcall(ToggleQuestLog)
+    end
+
+    OpenWorldMap()
+
+    local questMapFrame = M.EnsureWorldMapLoaded()
+    if questMapFrame then
+        if not IsShown(questMapFrame) and type(questMapFrame.Show) == "function" then
+            pcall(questMapFrame.Show, questMapFrame)
+        end
+        SetQuestLogDisplayMode(questMapFrame)
+    end
+
+    return IsShown(questMapFrame)
+end
+
+local function OpenQueueInQuestMap(options)
+    options = options or {}
     local questMapFrame = M.EnsureWorldMapLoaded()
     if not questMapFrame then
         return false
@@ -575,13 +652,10 @@ local function OpenQueueInQuestMap()
         return false
     end
 
-    local worldMap = _G["WorldMapFrame"]
-    if not (worldMap and worldMap:IsShown()) then
-        if type(ToggleWorldMap) == "function" then
-            ToggleWorldMap()
-        elseif worldMap then
-            worldMap:Show()
-        end
+    if options.forceQuestLog then
+        ForceQuestLogSidePanel()
+    else
+        OpenWorldMap()
     end
 
     M.SetViewMode("list")
@@ -599,7 +673,17 @@ local function OpenQueueInQuestMap()
         if not frame then
             return
         end
-        ShowQueueTabContent()
+        if options.forceQuestLog then
+            ForceQuestLogSidePanel()
+        end
+        ShowQueueTabContent({ resetDisplayMode = options.forceQuestLog == true })
+        if options.forceQuestLog and type(C_Timer) == "table" and type(C_Timer.After) == "function" then
+            C_Timer.After(0.05, function()
+                if ui.active and ui.content and ui.content:IsShown() then
+                    ShowQueueTabContent({ resetDisplayMode = true })
+                end
+            end)
+        end
     end)
     return true
 end
@@ -610,8 +694,8 @@ function NS.RefreshQueuePanel()
     end
 end
 
-function NS.ShowQueuePanel()
-    if OpenQueueInQuestMap() then
+function NS.ShowQueuePanel(options)
+    if OpenQueueInQuestMap(options) then
         return true
     end
     NS.Msg("Queue UI unavailable: World Map could not be opened.")
