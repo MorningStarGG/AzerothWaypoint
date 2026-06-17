@@ -4,7 +4,7 @@
 
 ![](https://github.com/MorningStarGG/AzerothWaypoint/blob/main/media/banner.png?raw=true)
 
-![Version](https://img.shields.io/badge/version-4.1.0-blue)
+![Version](https://img.shields.io/badge/version-4.1.0a-blue)
 ![Game](https://img.shields.io/badge/World%20of%20Warcraft-Addon-orange)
 ![Required](https://img.shields.io/badge/Required-TomTom-red)
 ![Optional](https://img.shields.io/badge/Optional-Zygor%20%7C%20APR%20%7C%20WoWPro%20%7C%20Farstrider%20%7C%20Mapzeroth%20%7C%20InFlight-lightgrey)

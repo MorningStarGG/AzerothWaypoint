@@ -1,6 +1,10 @@
 # Changelog
 
 ## 4.1.0
+- **TOC BUMP**
+  - Bumped TOC to patch 12.0.7
+
+## 4.1.0
 - **Zygor Tracker Viewer**
   - Added a new Tracker Viewer, an optional Zygor guide display that docks the current guide cleanly into the objective tracker instead of requiring Zygor's full-size native viewer.
   - Tracker Viewer supports both Blizzard's Objective Tracker and Kaliel's Tracker.
