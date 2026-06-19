@@ -1,6 +1,11 @@
 # Changelog
 
-## 4.1.0
+## 4.1.0b
+- **Blizzard Quest POI Routing**
+  - Fixed supertracked Blizzard quest POIs that could jump from the clicked active quest destination back to a quest-offer or quest-giver location after opening the map or refreshing quest-log data.
+  - Active supertracked and tracked quest refreshes now resolve through active quest/task destination data. Actual quest-offer pins still use quest-offer resolution.
+
+## 4.1.0a
 - **TOC BUMP**
   - Bumped TOC to patch 12.0.7
 

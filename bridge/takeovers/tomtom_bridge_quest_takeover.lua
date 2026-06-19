@@ -203,21 +203,31 @@ local function SafeGetQuestUiMapID(questID, ignoreWaypoints)
     return nil
 end
 
-ResolveQuestDestination = function(questID, preferredMapID)
+local function ShouldPreferQuestOfferResolution(takeoverSource)
+    -- Accepted quest routes and quest-offer pins can share a questID. Keep
+    -- offer POI resolution exclusive to actual QuestOffer takeovers so a
+    -- supertracked/tracked quest refresh cannot jump back to the giver pin.
+    return NormalizeQuestTakeoverSource(takeoverSource) == QUEST_TAKEOVER_SOURCE_QUEST_OFFER
+end
+
+ResolveQuestDestination = function(questID, preferredMapID, takeoverSource)
     if type(questID) ~= "number" then return nil end
+    local preferQuestOffer = ShouldPreferQuestOfferResolution(takeoverSource)
 
     if type(preferredMapID) == "number" and preferredMapID > 0 then
-        local rMapID, rX, rY, title = FindQuestLineOfferDestinationOnMap(preferredMapID, questID)
-        if type(rMapID) == "number" then
-            return rMapID, rX, rY, "preferred_quest_offer", title
+        if preferQuestOffer then
+            local rMapID, rX, rY, title = FindQuestLineOfferDestinationOnMap(preferredMapID, questID)
+            if type(rMapID) == "number" then
+                return rMapID, rX, rY, "preferred_quest_offer", title
+            end
         end
 
         if type(C_QuestLog) == "table" then
-            rMapID, rX, rY = FindQuestDestinationOnMap(preferredMapID, questID, C_QuestLog.GetQuestsOnMap)
+            local rMapID, rX, rY = FindQuestDestinationOnMap(preferredMapID, questID, C_QuestLog.GetQuestsOnMap)
             if type(rMapID) == "number" then return rMapID, rX, rY, "preferred_quest_map" end
         end
         if type(C_TaskQuest) == "table" then
-            rMapID, rX, rY = FindTaskQuestDestinationOnMap(preferredMapID, questID)
+            local rMapID, rX, rY = FindTaskQuestDestinationOnMap(preferredMapID, questID)
             if type(rMapID) == "number" then return rMapID, rX, rY, "preferred_task_map" end
         end
     end
@@ -517,12 +527,13 @@ AdoptQuestAsManual = function(questID, takeoverSource, explicit, preferredMapID,
         return false, "routing_disabled"
     end
 
-    local destMapID, destX, destY, resolutionSource, resolvedTitle = ResolveQuestDestination(desiredQuestID, preferredMapID)
+    local desiredSource = NormalizeQuestTakeoverSource(takeoverSource)
+    local destMapID, destX, destY, resolutionSource, resolvedTitle =
+        ResolveQuestDestination(desiredQuestID, preferredMapID, desiredSource)
     if not (type(destMapID) == "number" and type(destX) == "number" and type(destY) == "number") then
         return false, "unresolved"
     end
 
-    local desiredSource = NormalizeQuestTakeoverSource(takeoverSource)
     local isExplicit = explicit == true
     local baseTitle = type(resolvedTitle) == "string" and resolvedTitle ~= "" and resolvedTitle
         or ResolveQuestTitle(desiredQuestID)
@@ -817,7 +828,8 @@ local function RefreshActiveQuestBackedManual(eventName, eventQuestID)
     local isExternalQuestPin = sourceAddon ~= nil
     local isActiveQuest = IsQuestStillActive(activeQuestID)
     local storedResolutionSource = GetQuestBackedManualResolutionSource(destination)
-    local destMapID, destX, destY, resolutionSource = ResolveQuestDestination(activeQuestID, preferredMapID)
+    local destMapID, destX, destY, resolutionSource =
+        ResolveQuestDestination(activeQuestID, preferredMapID, activeSource)
     local hasResolvedDestination = type(destMapID) == "number"
         and type(destX) == "number"
         and type(destY) == "number"
@@ -1024,7 +1036,11 @@ end
 M.BlizzardKinds["quest"] = {
     onChanged = nil,  -- adopted via SetSuperTrackedQuestID hook NS.HandleSuperTrackedQuestIDChanged
     resolvePending = function(pending)
-        local mapID, x, y = ResolveQuestDestination(pending.questID, pending.preferredMapID)
+        local mapID, x, y = ResolveQuestDestination(
+            pending.questID,
+            pending.preferredMapID,
+            QUEST_TAKEOVER_SOURCE_SUPERTRACK
+        )
         return mapID, x, y, pending.questID
     end,
     commitPending = function(pending)
@@ -1057,7 +1073,11 @@ M.BlizzardKinds["quest"] = {
 M.BlizzardKinds["quest_offer"] = {
     onChanged = HandleQuestOfferMapPinChanged,
     resolvePending = function(pending)
-        local mapID, x, y = ResolveQuestDestination(pending.questID, pending.preferredMapID)
+        local mapID, x, y = ResolveQuestDestination(
+            pending.questID,
+            pending.preferredMapID,
+            QUEST_TAKEOVER_SOURCE_QUEST_OFFER
+        )
         return mapID, x, y, pending.questID
     end,
     commitPending = function(pending)

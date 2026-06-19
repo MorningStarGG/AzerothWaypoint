@@ -2,7 +2,16 @@ local NS = _G.AzerothWaypointNS
 
 NS.CHANGELOG_DATA = {
     {
-        version = "4.1.0",
+        version = "4.1.0b",
+        sections = {
+            { title = "Blizzard Quest POI Routing", entries = {
+                { text = "Fixed supertracked Blizzard quest POIs that could jump from the clicked active quest destination back to a quest-offer or quest-giver location after opening the map or refreshing quest-log data.", level = 1 },
+                { text = "Active supertracked and tracked quest refreshes now resolve through active quest/task destination data. Actual quest-offer pins still use quest-offer resolution.", level = 1 },
+            }},
+        },
+    },
+    {
+        version = "4.1.0a",
         sections = {
             { title = "TOC BUMP", entries = {
                 { text = "Bumped TOC to patch 12.0.7", level = 1 },

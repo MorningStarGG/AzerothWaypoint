@@ -4,7 +4,7 @@
 
 ![](https://github.com/MorningStarGG/AzerothWaypoint/blob/main/media/banner.png?raw=true)
 
-![Version](https://img.shields.io/badge/version-4.1.0a-blue)
+![Version](https://img.shields.io/badge/version-4.1.0b-blue)
 ![Game](https://img.shields.io/badge/World%20of%20Warcraft-Addon-orange)
 ![Required](https://img.shields.io/badge/Required-TomTom-red)
 ![Optional](https://img.shields.io/badge/Optional-Zygor%20%7C%20APR%20%7C%20WoWPro%20%7C%20Farstrider%20%7C%20Mapzeroth%20%7C%20InFlight-lightgrey)
@@ -29,7 +29,7 @@ AzerothWaypoint is the renamed and expanded successor to ZygorWaypoint.
 - [How Navigation Works](#how-navigation-works)
 - [Feature Highlights](#feature-highlights)
 - [Supported Integrations](#supported-integrations)
-- [What's New in 4.1.0](#whats-new-in-410)
+- [What's New in 4.1.0b](#whats-new-in-410b)
 - [What Changed in 4.0.0](#what-changed-in-400)
 - [Options](#options)
 - [Slash Commands](#slash-commands)
@@ -476,7 +476,12 @@ Other addons that create normal TomTom or Blizzard waypoint calls can work throu
 
 ---
 
-## What's New in 4.1.0
+## What's New in 4.1.0b
+
+### Blizzard Quest POI Routing
+
+- Fixed supertracked Blizzard quest POIs that could jump from the clicked active quest destination back to a quest-offer or quest-giver location after opening the map or refreshing quest-log data.
+- Active supertracked and tracked quest refreshes now resolve through active quest/task destination data. Actual quest-offer pins still use quest-offer resolution.
 
 ### Minimap Button
 
