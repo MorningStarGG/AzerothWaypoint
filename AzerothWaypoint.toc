@@ -1,8 +1,8 @@
-## Interface: 120005, 120007
+## Interface: 120100
 ## Title: AzerothWaypoint
 ## Notes: A TomTom-powered navigation bridge, route planner selector, manual waypoint queue, and 3D world overlay for World of Warcraft
 ## Author: MorningStarGG
-## Version: 4.1.0b
+## Version: 4.1.0c
 ## IconTexture: Interface\AddOns\AzerothWaypoint\media\icon.png
 ## SavedVariables: AzerothWaypointDB
 ## SavedVariablesPerCharacter: AzerothWaypointCharDB

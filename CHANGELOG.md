@@ -1,5 +1,11 @@
 # Changelog
 
+## 4.1.0c
+- **Patch 12.1 Compatibility**
+  - Bumped TOC to patch 12.1.0.
+  - Blizzard moved `GetNextWaypointForMap` from `C_SuperTrack` to `C_Navigation` in 12.1. AWP now calls it from its new location.
+  - That call sits on the 3D world overlay's route validation path, which runs 20 times per second while a waypoint is tracked. On 12.1 it raised a silent Lua error on every pass, which could stop the 3D overlay from drawing and raise CPU use for as long as a waypoint was active.
+
 ## 4.1.0b
 - **Blizzard Quest POI Routing**
   - Fixed supertracked Blizzard quest POIs that could jump from the clicked active quest destination back to a quest-offer or quest-giver location after opening the map or refreshing quest-log data.

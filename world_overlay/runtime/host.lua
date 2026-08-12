@@ -1011,7 +1011,7 @@ local function GetNativeHostRouteValidation()
         return false, "no_player_map", nil, nil, nil, nil
     end
 
-    local nextX, nextY, waypointDescription = C_SuperTrack.GetNextWaypointForMap(playerMapID)
+    local nextX, nextY, waypointDescription = C_Navigation.GetNextWaypointForMap(playerMapID)
     local validationMapID, validationX, validationY = GetRouteValidationTargetForPlayerMap(playerMapID)
     local navUsable = HasUsableCachedNavTarget()
     if type(validationMapID) == "number" then

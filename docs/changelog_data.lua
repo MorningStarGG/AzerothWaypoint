@@ -2,6 +2,16 @@ local NS = _G.AzerothWaypointNS
 
 NS.CHANGELOG_DATA = {
     {
+        version = "4.1.0c",
+        sections = {
+            { title = "Patch 12.1 Compatibility", entries = {
+                { text = "Bumped TOC to patch 12.1.0.", level = 1 },
+                { text = "Blizzard moved `GetNextWaypointForMap` from `C_SuperTrack` to `C_Navigation` in 12.1. AWP now calls it from its new location.", level = 1 },
+                { text = "That call sits on the 3D world overlay's route validation path, which runs 20 times per second while a waypoint is tracked. On 12.1 it raised a silent Lua error on every pass, which could stop the 3D overlay from drawing and raise CPU use for as long as a waypoint was active.", level = 1 },
+            }},
+        },
+    },
+    {
         version = "4.1.0b",
         sections = {
             { title = "Blizzard Quest POI Routing", entries = {
@@ -201,17 +211,6 @@ NS.CHANGELOG_DATA = {
                 { text = "Prevented transient external waypoint sources such as RareScanner and SilverDragon from opening the manual queue placement prompt.", level = 1 },
                 { text = "Renamed addon waypoint adoption list internals and wording to Allowlist/Blocklist.", level = 1 },
                 { text = "Fixed update detection for lettered hotfix versions such as 4.0.0a to 4.0.0b.", level = 1 },
-            }},
-        },
-    },
-    {
-        version = "4.0.0a",
-        sections = {
-            { title = "Compatibility fixes", entries = {
-                { text = "Fixed the native world overlay failing to load when Zygor Guides Viewer is disabled or unavailable.", level = 1 },
-                { text = "Removed an accidental hard dependency on Zygor guide-resolver helpers from the shared world overlay presentation layer.", level = 1 },
-                { text = "Added safe fallback helpers for overlay text normalization, coordinate subtext, guide-goal visibility, quest IDs, goal coordinates, and goal actions.", level = 1 },
-                { text = "Guarded Zygor canonical-goal handling so APR, WoWPro, manual routing, queues, and non-Zygor routing backends can initialize normally without Zygor.", level = 1 },
             }},
         },
     },
