@@ -27,6 +27,7 @@ local HEADER_TEXT           = "Zygor Guides"
 local module    -- the actual Frame instance
 local attached  -- whether we're currently registered with the manager
 local attachSucceededCallback
+local attachRequested
 
 -- Late-bound accessor used by tracker_controls/tracker_render for the few
 -- spots that need the live module frame (context menu parent, block parent).
@@ -99,6 +100,53 @@ end
 --   - module:OnBlockHeaderClick fires for header clicks via the standard
 --     wiring, so right-click on a block opens our context menu
 
+local function FinishKTHeader(header, parentModule)
+    if not Host.IsKTLoaded() or not header then return end
+
+    -- KT 8.7.x adds this texture at runtime for its built-in modules, but its
+    -- hooked SetCollapsed assumes the field already exists during OnLoad.
+    -- AWP is not in KT's built-in module list, so provide it before applying
+    -- the final KT header mixin and manually invoking that mixin's OnLoad.
+    if not header.Icon and type(header.CreateTexture) == "function" then
+        local icon = header:CreateTexture(nil, "ARTWORK")
+        icon:SetSize(16, 16)
+        icon:SetTexture("Interface\\AddOns\\!KalielsTracker\\Media\\UI-KT-HeaderButtons")
+        icon:SetTexCoord(0.5, 1, 0.75, 1)
+        icon:SetPoint("LEFT", -6, 2)
+        header.Icon = icon
+    end
+
+    local headerMixin = rawget(_G, "KT_ObjectiveTrackerModuleHeaderMixin")
+    if type(_G.Mixin) == "function" and type(headerMixin) == "table" then
+        _G.Mixin(header, headerMixin)
+        if type(header.OnLoad) == "function" then
+            pcall(header.OnLoad, header)
+        end
+    end
+
+    if header.Text then
+        local fontObject = rawget(_G, "KT_ObjectiveTrackerHeaderFont")
+        if fontObject and type(header.Text.SetFontObject) == "function" then
+            pcall(header.Text.SetFontObject, header.Text, fontObject)
+        end
+        header.Text:ClearAllPoints()
+        header.Text:SetPoint("LEFT", 10, 1)
+    end
+
+    -- KT hides the small Blizzard minimize button and makes the header itself
+    -- the collapse target. Keep that behavior without writing AWP into KT's
+    -- private module settings table.
+    if header.MinimizeButton then
+        header.MinimizeButton:Hide()
+    end
+    header:EnableMouse(true)
+    header:SetScript("OnMouseUp", function(_, mouseButton)
+        if mouseButton == "LeftButton" and type(parentModule.ToggleCollapsed) == "function" then
+            parentModule:ToggleCollapsed()
+        end
+    end)
+end
+
 local function CreateModuleFrame()
     if module then return module end
 
@@ -123,7 +171,9 @@ local function CreateModuleFrame()
         return nil
     end
 
-    -- Build Header from the active tracker stack's standard header template.
+    -- The host returns Blizzard's complete structural header template for both
+    -- hosts. Under KT, finish it only after CreateFrame returns so Header.Icon
+    -- exists before KT's hooked SetCollapsed can run.
     local headerOk, header = pcall(CreateFrame, "Frame", nil, frame, Host.GetHeaderTemplate())
     if not headerOk or not header then
         -- Fallback: minimal header so the module still works without the
@@ -134,6 +184,10 @@ local function CreateModuleFrame()
         local txt = header:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
         txt:SetPoint("LEFT", header, "LEFT", 2, 0)
         header.Text = txt
+    end
+    if headerOk and header and Host.IsKTLoaded() then
+        header:SetWidth(260)
+        FinishKTHeader(header, frame)
     end
     header:SetPoint("TOPLEFT")
     frame.Header = header
@@ -375,6 +429,50 @@ local function NotifyAttachSucceeded()
 end
 
 local attachRetryTicker
+local ktReadyRetryTicker
+
+local function CancelKTReadyRetries()
+    if not ktReadyRetryTicker then return end
+    pcall(ktReadyRetryTicker.Cancel, ktReadyRetryTicker)
+    ktReadyRetryTicker = nil
+end
+
+local function ResumePendingKTAttach()
+    if not attachRequested then return end
+    local attachedNow = TM.Attach()
+    if attachedNow then
+        NotifyAttachSucceeded()
+    end
+end
+
+local function ScheduleKTReadyRetries()
+    if ktReadyRetryTicker then return end
+    if type(C_Timer) ~= "table" or type(C_Timer.NewTicker) ~= "function" then return end
+
+    local retries = 0
+    local maxRetries = 60
+    ktReadyRetryTicker = C_Timer.NewTicker(0.5, function(ticker)
+        retries = retries + 1
+        if not attachRequested or not Host.IsKTLoaded() then
+            ticker:Cancel()
+            ktReadyRetryTicker = nil
+            return
+        end
+        if type(Host.IsKTReady) ~= "function" or Host.IsKTReady() then
+            ticker:Cancel()
+            ktReadyRetryTicker = nil
+            ResumePendingKTAttach()
+            return
+        end
+        if retries >= maxRetries then
+            ticker:Cancel()
+            ktReadyRetryTicker = nil
+            if type(NS.Msg) == "function" then
+                NS.Msg("Tracker dock: Kaliel's Tracker initialization timed out.")
+            end
+        end
+    end)
+end
 
 local function ScheduleAttachRetries()
     if attachRetryTicker then return end
@@ -429,6 +527,17 @@ local function ScheduleAttachRetries()
 end
 
 function TM.Attach()
+    attachRequested = true
+
+    if Host.IsKTLoaded()
+        and type(Host.IsKTReady) == "function"
+        and not Host.IsKTReady()
+    then
+        ScheduleKTReadyRetries()
+        return false, true
+    end
+    CancelKTReadyRetries()
+
     if attached then
         -- If we think we're attached but the manager disagrees (e.g. addon
         -- reload that wiped state but kept the module Frame around somehow),
@@ -473,12 +582,18 @@ function TM.Attach()
 end
 
 function TM.Detach()
+    attachRequested = false
+    CancelKTReadyRetries()
+
     if attachRetryTicker then
         pcall(attachRetryTicker.Cancel, attachRetryTicker)
         attachRetryTicker = nil
     end
 
-    if not attached or not module then return end
+    if not attached or not module then
+        attached = false
+        return
+    end
 
     if type(module.Hide) == "function" then
         pcall(module.Hide, module)
@@ -522,4 +637,8 @@ end
 
 function TM.SetAttachSucceededCallback(callback)
     attachSucceededCallback = type(callback) == "function" and callback or nil
+end
+
+if type(Host.RegisterKTReadyCallback) == "function" then
+    Host.RegisterKTReadyCallback(ResumePendingKTAttach)
 end

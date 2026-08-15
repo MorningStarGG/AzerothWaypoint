@@ -2,6 +2,16 @@ local NS = _G.AzerothWaypointNS
 
 NS.CHANGELOG_DATA = {
     {
+        version = "4.1.0d",
+        sections = {
+            { title = "Kaliel's Tracker compatibility", entries = {
+                { text = "Fixed a Kaliel's Tracker 8.7.x error when Tracker Viewer attached and the tracker attempted to collapse its header before the expected header icon existed.", level = 1 },
+                { text = "Tracker Viewer now creates the Kaliel-compatible header structure before applying Kaliel's header behavior, preserving its styling and click-to-collapse interaction without writing into Kaliel's private module settings.", level = 1 },
+                { text = "Tracker Viewer now waits for Kaliel's deferred initialization to finish before attaching, including late-load and reload handling.", level = 1 },
+            }},
+        },
+    },
+    {
         version = "4.1.0c",
         sections = {
             { title = "Patch 12.1 Compatibility", entries = {

@@ -1,5 +1,11 @@
 # Changelog
 
+## 4.1.0d
+- **Kaliel's Tracker compatibility**
+  - Fixed a Kaliel's Tracker 8.7.x error when Tracker Viewer attached and the tracker attempted to collapse its header before the expected header icon existed.
+  - Tracker Viewer now creates the Kaliel-compatible header structure before applying Kaliel's header behavior, preserving its styling and click-to-collapse interaction without writing into Kaliel's private module settings.
+  - Tracker Viewer now waits for Kaliel's deferred initialization to finish before attaching, including late-load and reload handling.
+
 ## 4.1.0c
 - **Patch 12.1 Compatibility**
   - Bumped TOC to patch 12.1.0.

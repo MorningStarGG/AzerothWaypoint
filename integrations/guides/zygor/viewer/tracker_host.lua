@@ -15,13 +15,17 @@ Shared.TrackerHost = Host
 -- and module-registration helpers.
 -- ============================================================
 --
--- Use the active tracker stack's standard templates.
+-- Use the active tracker stack's standard block and line templates.
 -- Blizzard and Kaliel expose similar APIs, but Kaliel forks the mixins.
+-- Module headers are constructed from Blizzard's structural template and
+-- finished with KT's header mixin in tracker_module.lua. KT 8.7.x hooks its
+-- header template's OnLoad path and expects a runtime-created Icon that the
+-- template itself does not provide, so that template cannot be instantiated
+-- safely by third-party modules.
 local BLIZZ_BLOCK_TEMPLATE  = "ObjectiveTrackerAnimBlockTemplate"
 local BLIZZ_HEADER_TEMPLATE = "ObjectiveTrackerModuleHeaderTemplate"
 local BLIZZ_LINE_TEMPLATE   = "QuestObjectiveLineTemplate"
 local KT_BLOCK_TEMPLATE     = "KT_ObjectiveTrackerAnimBlockTemplate"
-local KT_HEADER_TEMPLATE    = "KT_ObjectiveTrackerModuleHeaderTemplate"
 local KT_LINE_TEMPLATE      = "KT_ObjectiveTrackerLineTemplate"
 
 local function GetKalielsTrackerFrame()
@@ -32,6 +36,65 @@ end
 -- When KT is loaded we MUST register with KT's tracker, not Blizzard's.
 local function IsKTLoaded()
     return GetKalielsTrackerFrame() ~= nil
+end
+
+local ktInitObserved = false
+local ktReadyCallbacks = {}
+
+-- The INIT signal is the primary readiness boundary. This structural check is
+-- only for late-loaded AWP copies that missed the one-shot signal: KT assigns
+-- its scroll child in the deferred tail of Init(), after SetHooks() has already
+-- installed and propagated all of its replacement mixin methods.
+local function IsKTLateInitComplete()
+    local tracker = rawget(_G, "!KalielsTrackerFrame")
+    local scroll = tracker and tracker.Scroll
+    local child = tracker and tracker.Child
+    if not scroll or not child or type(scroll.GetScrollChild) ~= "function" then
+        return false
+    end
+    local ok, current = pcall(scroll.GetScrollChild, scroll)
+    return ok and current == child
+end
+
+local function IsKTReady()
+    if not IsKTLoaded() then return true end
+    if ktInitObserved then return true end
+    if IsKTLateInitComplete() then
+        ktInitObserved = true
+        return true
+    end
+    return false
+end
+
+local function MarkKTReady()
+    if ktInitObserved then return end
+    ktInitObserved = true
+
+    local callbacks = ktReadyCallbacks
+    ktReadyCallbacks = {}
+    for _, callback in ipairs(callbacks) do
+        pcall(callback)
+    end
+end
+
+local function RegisterKTReadyCallback(callback)
+    if type(callback) ~= "function" then return false end
+    if IsKTReady() then
+        pcall(callback)
+        return true
+    end
+    ktReadyCallbacks[#ktReadyCallbacks + 1] = callback
+    return false
+end
+
+do
+    local registry = rawget(_G, "EventRegistry")
+    if IsKTLoaded() and registry and type(registry.RegisterCallback) == "function" then
+        local owner = {}
+        pcall(registry.RegisterCallback, registry, "!KalielsTracker.INIT", function()
+            MarkKTReady()
+        end, owner)
+    end
 end
 
 local function GetTrackerFrame()
@@ -49,7 +112,7 @@ local function GetModuleMixin()
 end
 
 local function GetHeaderTemplate()
-    return IsKTLoaded() and KT_HEADER_TEMPLATE or BLIZZ_HEADER_TEMPLATE
+    return BLIZZ_HEADER_TEMPLATE
 end
 
 local function GetBlockTemplate()
@@ -148,6 +211,8 @@ local function TryRegisterOnce(mgr, frame, container)
 end
 
 Host.IsKTLoaded = IsKTLoaded
+Host.IsKTReady = IsKTReady
+Host.RegisterKTReadyCallback = RegisterKTReadyCallback
 Host.GetTrackerFrame = GetTrackerFrame
 Host.GetModuleMixin = GetModuleMixin
 Host.GetHeaderTemplate = GetHeaderTemplate
