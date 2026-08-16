@@ -1131,6 +1131,17 @@ local function handleStatus()
             tracker.opacity or "unknown"
         )
     end
+    if type(NS.GetTrackerSecretShimStatus) == "function" then
+        local shim = NS.GetTrackerSecretShimStatus()
+        if shim then
+            NS.Msg(
+                "Tracker secret shim:",
+                shim.installed and "installed" or "not installed",
+                "aura fallback:",
+                shim.fallbackLatched and "latched" or "idle"
+            )
+        end
+    end
     if type(NS.GetMinimapButtonStatus) == "function" then
         NS.Msg("Minimap button:", NS.GetMinimapButtonStatus())
     end

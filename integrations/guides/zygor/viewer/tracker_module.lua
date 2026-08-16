@@ -16,6 +16,7 @@ local Controls = Shared.TrackerControls
 local HeaderStyle = Shared.TrackerHeaderStyle
 local Rows     = Shared.TrackerRows
 local Render   = Shared.TrackerRender
+local SecretShim = Shared.TrackerSecretShim
 
 local TM = {}
 Shared.TrackerModule = TM
@@ -533,6 +534,29 @@ local function ScheduleAttachRetries()
     end)
 end
 
+-- Being docked taints Blizzard's tracker update pass, which makes two Blizzard
+-- call sites raise on secret values. The shim wraps those for exactly as long
+-- as we are attached - see tracker_secret_shim.lua. Blizzard host only; under
+-- Kaliel's Tracker there is nothing to protect.
+local function ApplySecretShim(shouldInstall)
+    if type(SecretShim) ~= "table" then return end
+    if shouldInstall and not Host.IsKTLoaded() then
+        if type(SecretShim.Install) == "function" then
+            pcall(SecretShim.Install)
+        end
+    elseif type(SecretShim.Uninstall) == "function" then
+        pcall(SecretShim.Uninstall)
+    end
+end
+
+-- Every successful attach path funnels through here so the shim install and the
+-- initial layout stay in lockstep.
+local function FinishAttach()
+    ApplySecretShim(true)
+    TM.MarkDirty()
+    return true
+end
+
 function TM.Attach()
     attachRequested = true
 
@@ -559,14 +583,12 @@ function TM.Attach()
         end
         if not Host.IsActuallyRegistered(mgr, module, container) then
             if Host.TryRegisterOnce(mgr, module, container) then
-                TM.MarkDirty()
-                return true
+                return FinishAttach()
             end
             ScheduleAttachRetries()
             return false, attachRetryTicker ~= nil
         end
-        TM.MarkDirty()
-        return true
+        return FinishAttach()
     end
 
     local frame = CreateModuleFrame()
@@ -586,8 +608,7 @@ function TM.Attach()
     attached = true
 
     if Host.TryRegisterOnce(mgr, frame, container) then
-        TM.MarkDirty()
-        return true
+        return FinishAttach()
     else
         ScheduleAttachRetries()
         return false, attachRetryTicker ~= nil
@@ -597,6 +618,9 @@ end
 function TM.Detach()
     attachRequested = false
     CancelKTReadyRetries()
+    -- Restore Blizzard's originals on every detach path, including the early
+    -- return below, so a disabled Tracker Viewer leaves nothing of ours behind.
+    ApplySecretShim(false)
 
     if attachRetryTicker then
         pcall(attachRetryTicker.Cancel, attachRetryTicker)
@@ -634,12 +658,13 @@ end
 
 function TM.MarkDirty()
     if not module then return end
+    -- The module mixin's MarkDirty already flags the module and marks the parent
+    -- container, which the tracker flushes on its own schedule. Calling
+    -- mgr:UpdateAll() on top of that forced a second, synchronous, full-tracker
+    -- layout inside our own call stack on every goal-progress tick - redundant
+    -- work, and a second path for our taint to reach Blizzard's modules.
     if type(module.MarkDirty) == "function" then
         pcall(module.MarkDirty, module)
-    end
-    local mgr = Host.GetManager()
-    if mgr and type(mgr.UpdateAll) == "function" then
-        pcall(mgr.UpdateAll, mgr)
     end
 end
 

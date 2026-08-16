@@ -11,6 +11,13 @@
   - Failed or inaccessible backend state scans no longer fall through into unnecessary replans.
   - `/awp churn` now reports per-backend validation, coalescing, combat deferral, state-change, failure, stale-work, and dependency-check counts.
 
+- **Objective tracker freeze in scenario content**
+  - Fixed Blizzard's objective tracker locking up while the Tracker Viewer is docked into it. In delves, vaults, incursions and other scenario content, Blizzard's scenario tracker reads aura and spell-cooldown data that the 12.1 client withholds from addon-influenced code. When that read failed it aborted the tracker's module layout partway, so quests, world quests, campaign and achievement blocks all stopped updating.
+  - Tracker Viewer now wraps the two affected Blizzard entry points for exactly as long as it is docked, falling back to a safe result only when the original call actually fails, and restores Blizzard's originals the moment the viewer is disabled. Behavior is unchanged whenever the original call succeeds.
+
+- **Performance fixes**
+  - Guide step updates no longer force a second full objective tracker layout on every goal-progress tick.
+
 ## 4.1.0d
 - **Kaliel's Tracker compatibility**
   - Fixed a Kaliel's Tracker 8.7.x error when Tracker Viewer attached and the tracker attempted to collapse its header before the expected header icon existed.
