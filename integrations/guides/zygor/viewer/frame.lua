@@ -796,6 +796,9 @@ function M.ApplySettings()
     else
         M.Hide()
     end
+    if type(NS.RefreshZygorTrackerViewerHeaderStyle) == "function" then
+        NS.RefreshZygorTrackerViewerHeaderStyle()
+    end
 end
 
 function M.IsActive()

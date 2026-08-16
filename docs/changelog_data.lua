@@ -2,6 +2,21 @@ local NS = _G.AzerothWaypointNS
 
 NS.CHANGELOG_DATA = {
     {
+        version = "4.1.1",
+        sections = {
+            { title = "Kaliel's Tracker header styling", entries = {
+                { text = "Added five independent, opt-in settings to match Kaliel's header texture, background color, font, title/collapse-icon color, and AWP header-button color. Every setting defaults off and restores AWP's original appearance when disabled.", level = 1 },
+            }},
+            { title = "Mapzeroth and Farstrider routing performance", entries = {
+                { text = "Cooldown events no longer run backend capability scans or route planning during combat. Repeated combat events are combined into one validation after combat ends.", level = 1 },
+                { text = "Out-of-combat cooldown bursts are combined into one fixed validation window, while inventory, toy, spellbook, and hearthstone changes remain responsive.", level = 1 },
+                { text = "Accepted routes now retain numeric travel-action dependencies so selected spells and items can be checked separately from full route discovery.", level = 1 },
+                { text = "Failed or inaccessible backend state scans no longer fall through into unnecessary replans.", level = 1 },
+                { text = "`/awp churn` now reports per-backend validation, coalescing, combat deferral, state-change, failure, stale-work, and dependency-check counts.", level = 1 },
+            }},
+        },
+    },
+    {
         version = "4.1.0d",
         sections = {
             { title = "Kaliel's Tracker compatibility", entries = {
@@ -203,24 +218,6 @@ NS.CHANGELOG_DATA = {
                 { text = "Fixed registered external waypoint sources that publish both TomTom and Blizzard user-waypoint signals in one action, such as SilverDragon, from creating duplicate AWP route adoptions.", level = 1 },
                 { text = "Preserved named TomTom waypoint titles when a matching nameless Blizzard user-waypoint signal follows in the same external-addon publish burst.", level = 1 },
                 { text = "Fixed arrival auto-clear for transient external TomTom waypoint routes by validating active transient queues as well as persistent manual queues.", level = 1 },
-            }},
-        },
-    },
-    {
-        version = "4.0.0b",
-        sections = {
-            { title = "Routing and combat visibility", entries = {
-                { text = "Added Hide During Combat with options for Disabled, TomTom + Travel Button, World Overlay, and Both.", level = 1 },
-                { text = "TomTom combat hiding uses a secure visibility wrapper so the TomTom arrow and special travel button can be hidden during combat without protected-frame errors.", level = 1 },
-                { text = "Added player control lost/gained route refresh handling so taxi and flightpath start/end events replan the active route and recompute the TomTom carrier.", level = 1 },
-                { text = "Added separate Quick-Start Popup and What's New Popup settings, each with account-wide, per-character, and disabled modes. Quick-start defaults to per-character; What's New defaults to account-wide.", level = 1 },
-            }},
-            { title = "Compatibility fixes", entries = {
-                { text = "Added a WorldQuestTab click fallback for bonus objectives and other non-world-quest entries that have valid quest coordinates but do not emit Blizzard waypoint or supertrack signals.", level = 1 },
-                { text = "Added transparency, transparent, alpha, and visibility tags to the opacity options so searching transparency will find the opacity controls.", level = 1 },
-                { text = "Prevented transient external waypoint sources such as RareScanner and SilverDragon from opening the manual queue placement prompt.", level = 1 },
-                { text = "Renamed addon waypoint adoption list internals and wording to Allowlist/Blocklist.", level = 1 },
-                { text = "Fixed update detection for lettered hotfix versions such as 4.0.0a to 4.0.0b.", level = 1 },
             }},
         },
     },

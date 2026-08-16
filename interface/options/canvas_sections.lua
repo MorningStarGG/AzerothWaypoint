@@ -975,6 +975,12 @@ local function RenderZygor()
         end
     end
 
+    local function RefreshKalielHeaderStyle()
+        if type(NS.RefreshZygorTrackerViewerHeaderStyle) == "function" then
+            NS.RefreshZygorTrackerViewerHeaderStyle()
+        end
+    end
+
     SectionHeader("Zygor Guides Viewer")
     AddToggle("Show Only Guide Steps Until Mouseover",
         "Keeps the visible guide step rows on screen while fading out the rest of Zygor's guide frame until you mouse over it.",
@@ -1040,6 +1046,42 @@ local function RenderZygor()
             NS.SetZygorTrackerViewerSetting("textCustomColor", v)
         end,
         RefreshZygorTrackerViewer)
+
+    if type(NS.IsAddonLoaded) == "function"
+        and NS.IsAddonLoaded("!KalielsTracker")
+        and rawget(_G, "KT_ObjectiveTrackerFrame")
+    then
+        Spacer()
+        SectionHeader("Kaliel Header Styling")
+
+        local function AddKalielStyleToggle(label, description, settingKey, styleKey)
+            AddToggle(label, description,
+                function()
+                    local settings = NS.GetZygorTrackerViewerSettings()
+                    return settings.ktHeaderStyle and settings.ktHeaderStyle[styleKey] == true
+                end,
+                function(value)
+                    NS.SetZygorTrackerViewerSetting(settingKey, value)
+                    RefreshKalielHeaderStyle()
+                end)
+        end
+
+        AddKalielStyleToggle("Match Kaliel Header Texture",
+            "Uses Kaliel's selected module-header texture, including its no-background mode.",
+            "ktHeaderTexture", "texture")
+        AddKalielStyleToggle("Match Kaliel Header Background Color",
+            "Uses Kaliel's resolved shared, border, or class-colored header background.",
+            "ktHeaderBackgroundColor", "backgroundColor")
+        AddKalielStyleToggle("Match Kaliel Header Font",
+            "Uses Kaliel's resolved header font face, size, outline, and shadow.",
+            "ktHeaderFont", "font")
+        AddKalielStyleToggle("Match Kaliel Header Text/Icon Color",
+            "Uses Kaliel's header text color for the title and collapse indicator.",
+            "ktHeaderTextIconColor", "textIconColor")
+        AddKalielStyleToggle("Match Kaliel Header Button Color",
+            "Tints Tracker Viewer header buttons with Kaliel's resolved button color.",
+            "ktHeaderButtonColor", "buttonColor")
+    end
 
     Spacer()
     SectionHeader("Chat Step Display")

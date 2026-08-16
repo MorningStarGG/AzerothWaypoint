@@ -755,6 +755,8 @@ NS.HELP_PAGES = {
                     "- Enable Tracker Viewer: shows Zygor Guides within the native Blizzard tracker frame. This also supports Kaliel's Tracker.",
                     "- Tracker Viewer Progress Bar: choose square, rounded, or no progress bar.",
                     "- Tracker Viewer Text: use contextual tracker viewer text colors or make all step text a single selected color.",
+                    "",
+                    "When Kaliel's Tracker is active, Kaliel Header Styling adds five independent opt-in matches for header texture, background color, font, title/collapse-icon color, and AWP header-button color. Every match defaults off, and disabling one restores that part of AWP's normal appearance immediately.",
                 }),
             },
             {

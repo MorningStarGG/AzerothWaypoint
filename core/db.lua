@@ -56,6 +56,11 @@ local DB_DEFAULTS = {
     zygorTrackerViewerTextColorMode = C.WORLD_OVERLAY_COLOR_AUTO,
     zygorTrackerViewerTextCustomColor = DEFAULT_ZYGOR_TRACKER_VIEWER_TEXT_COLOR,
     zygorTrackerViewerProgressStyle = "rounded",
+    zygorTrackerViewerKTHeaderTexture = false,
+    zygorTrackerViewerKTHeaderBackgroundColor = false,
+    zygorTrackerViewerKTHeaderFont = false,
+    zygorTrackerViewerKTHeaderTextIconColor = false,
+    zygorTrackerViewerKTHeaderButtonColor = false,
     zygorStepChatOutputOnChange = false,
     zygorStepChatTextColorMode = C.WORLD_OVERLAY_COLOR_AUTO,
     zygorStepChatTextCustomColor = DEFAULT_ZYGOR_TRACKER_VIEWER_TEXT_COLOR,
@@ -953,6 +958,13 @@ function NS.GetZygorTrackerViewerSettings()
         progressStyle  = db.zygorTrackerViewerProgressStyle,
         textColorMode  = db.zygorTrackerViewerTextColorMode,
         textCustomColor = db.zygorTrackerViewerTextCustomColor,
+        ktHeaderStyle = {
+            texture = db.zygorTrackerViewerKTHeaderTexture == true,
+            backgroundColor = db.zygorTrackerViewerKTHeaderBackgroundColor == true,
+            font = db.zygorTrackerViewerKTHeaderFont == true,
+            textIconColor = db.zygorTrackerViewerKTHeaderTextIconColor == true,
+            buttonColor = db.zygorTrackerViewerKTHeaderButtonColor == true,
+        },
     }
 end
 
@@ -972,6 +984,16 @@ function NS.SetZygorTrackerViewerSetting(key, value)
         db.zygorTrackerViewerTextCustomColor = NormalizeOverlayColor(
             ZYGOR_TRACKER_VIEWER_TEXT_COLOR_DEF,
             value)
+    elseif key == "ktHeaderTexture" then
+        db.zygorTrackerViewerKTHeaderTexture = value and true or false
+    elseif key == "ktHeaderBackgroundColor" then
+        db.zygorTrackerViewerKTHeaderBackgroundColor = value and true or false
+    elseif key == "ktHeaderFont" then
+        db.zygorTrackerViewerKTHeaderFont = value and true or false
+    elseif key == "ktHeaderTextIconColor" then
+        db.zygorTrackerViewerKTHeaderTextIconColor = value and true or false
+    elseif key == "ktHeaderButtonColor" then
+        db.zygorTrackerViewerKTHeaderButtonColor = value and true or false
     elseif key == "position" then
         if type(value) == "table" and value.point then
             db.zygorTrackerViewerPosition = {

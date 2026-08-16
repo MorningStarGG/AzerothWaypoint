@@ -1,5 +1,16 @@
 # Changelog
 
+## 4.1.1
+- **Kaliel's Tracker header styling**
+  - Added five independent, opt-in settings to match Kaliel's header texture, background color, font, title/collapse-icon color, and AWP header-button color. Every setting defaults off and restores AWP's original appearance when disabled.
+
+- **Mapzeroth and Farstrider routing performance**
+  - Cooldown events no longer run backend capability scans or route planning during combat. Repeated combat events are combined into one validation after combat ends.
+  - Out-of-combat cooldown bursts are combined into one fixed validation window, while inventory, toy, spellbook, and hearthstone changes remain responsive.
+  - Accepted routes now retain numeric travel-action dependencies so selected spells and items can be checked separately from full route discovery.
+  - Failed or inaccessible backend state scans no longer fall through into unnecessary replans.
+  - `/awp churn` now reports per-backend validation, coalescing, combat deferral, state-change, failure, stale-work, and dependency-check counts.
+
 ## 4.1.0d
 - **Kaliel's Tracker compatibility**
   - Fixed a Kaliel's Tracker 8.7.x error when Tracker Viewer attached and the tracker attempted to collapse its header before the expected header icon existed.

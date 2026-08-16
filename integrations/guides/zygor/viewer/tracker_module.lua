@@ -13,6 +13,7 @@ local Shared = NS.Internal.ZygorTrackerViewer
 local Util     = Shared.TrackerUtil
 local Host     = Shared.TrackerHost
 local Controls = Shared.TrackerControls
+local HeaderStyle = Shared.TrackerHeaderStyle
 local Rows     = Shared.TrackerRows
 local Render   = Shared.TrackerRender
 
@@ -263,6 +264,12 @@ local function CreateModuleFrame()
     end
 
     Controls.CreateHeaderControls(module)
+    if HeaderStyle and type(HeaderStyle.CaptureBaseline) == "function" then
+        HeaderStyle.CaptureBaseline(module)
+    end
+    if HeaderStyle and type(HeaderStyle.Refresh) == "function" then
+        HeaderStyle.Refresh(module)
+    end
 
     -- ============================================================
     -- Reload-visibility overrides
@@ -539,6 +546,9 @@ function TM.Attach()
     CancelKTReadyRetries()
 
     if attached then
+        if type(NS.RefreshZygorTrackerViewerHeaderStyle) == "function" then
+            NS.RefreshZygorTrackerViewerHeaderStyle()
+        end
         -- If we think we're attached but the manager disagrees (e.g. addon
         -- reload that wiped state but kept the module Frame around somehow),
         -- re-verify and reattach if needed.
@@ -561,6 +571,9 @@ function TM.Attach()
 
     local frame = CreateModuleFrame()
     if not frame then return false end
+    if type(NS.RefreshZygorTrackerViewerHeaderStyle) == "function" then
+        NS.RefreshZygorTrackerViewerHeaderStyle()
+    end
 
     local mgr = Host.GetManager()
     if not mgr or type(mgr.SetModuleContainer) ~= "function" then return false end

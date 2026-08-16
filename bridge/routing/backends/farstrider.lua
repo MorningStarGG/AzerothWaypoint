@@ -24,14 +24,6 @@ local FARSTRIDER_INVALIDATION_EVENTS = {
     TOYS_UPDATED = true,
 }
 
-local FARSTRIDER_ABILITY_INVALIDATION_EVENTS = {
-    BAG_UPDATE_DELAYED = true,
-    HEARTHSTONE_BOUND = true,
-    SPELL_UPDATE_COOLDOWN = true,
-    SPELLS_CHANGED = true,
-    TOYS_UPDATED = true,
-}
-
 local EdgeType = {
     TRAVEL     = 1000,
     FLIGHTPATH = 1001,
@@ -131,23 +123,16 @@ local function RememberTravelStateFingerprint(record, refresh)
         return nil
     end
     local fingerprint = GetFarstriderTravelStateFingerprint(refresh)
-    record._farstriderTravelStateFingerprint = fingerprint
+    record._routeBackendStateFingerprint = fingerprint
     return fingerprint
 end
 
-local function GetActiveFarstriderRecord()
-    local routing = NS.State and NS.State.routing or nil
-    local record = routing and routing.manualAuthority or nil
-    if not record then
-        local guideState = routing and routing.guideRouteState or nil
-        if guideState and guideState.target and not guideState.suppressed then
-            record = guideState
-        end
+local function ValidateTravelState()
+    local fingerprint = GetFarstriderTravelStateFingerprint(true)
+    if type(fingerprint) ~= "string" then
+        return false, nil
     end
-    if type(record) == "table" and record.backend == "farstrider" then
-        return record
-    end
-    return nil
+    return true, fingerprint
 end
 
 local function IsFarstriderWizardsSanctumNode(node)
@@ -527,19 +512,11 @@ local function IsUsableItemID(itemID)
         end
     end
 
-    local duration
-    if type(C_Item) == "table" and type(C_Item.GetItemCooldown) == "function" then
-        local ok, _, cooldownDuration = pcall(C_Item.GetItemCooldown, itemID)
-        if ok then
-            duration = cooldownDuration
-        end
-    elseif type(C_Container) == "table" and type(C_Container.GetItemCooldown) == "function" then
-        local ok, _, cooldownDuration = pcall(C_Container.GetItemCooldown, itemID)
-        if ok then
-            duration = cooldownDuration
-        end
+    if type(NS.ProbeRouteTravelDependency) == "function" then
+        local readiness = NS.ProbeRouteTravelDependency(nil, { kind = "item", id = itemID })
+        return readiness ~= "unavailable"
     end
-    return type(duration) ~= "number" or duration <= 0
+    return true
 end
 
 local function SelectFarstriderAction(actionOptions)
@@ -611,7 +588,7 @@ local function BuildOptimizedEdges(edges, path)
     return optimizedEdges
 end
 
-local function BuildSpecialAction(semanticKind, secureType, securePayload, name, destinationName)
+local function BuildSpecialAction(semanticKind, secureType, securePayload, name, destinationName, dependencyID)
     return {
         semanticKind          = semanticKind,
         secureType            = secureType,
@@ -623,6 +600,10 @@ local function BuildSpecialAction(semanticKind, secureType, securePayload, name,
         activationCoords      = nil,
         activationRadiusYards = 15,
         sourceBackend         = "farstrider",
+        routeDependency       = type(dependencyID) == "number" and {
+            kind = secureType,
+            id = dependencyID,
+        } or nil,
     }
 end
 
@@ -674,7 +655,7 @@ local function StepToLeg(step, edge, isLast, destinationTitle)
             if type(itemID) == "number" then
                 local sk = IsFarstriderHearthstoneAction(action, edge) and "hearth" or "item"
                 local actionTitle, destinationName = ResolveActionPresentation(step, edge, ResolveItemName(itemID))
-                specialAction = BuildSpecialAction(sk, "item", itemID, actionTitle, destinationName)
+                specialAction = BuildSpecialAction(sk, "item", itemID, actionTitle, destinationName, itemID)
                 routeTravelType = sk == "hearth" and "hearth" or nil
                 kind = sk
             end
@@ -684,7 +665,7 @@ local function StepToLeg(step, edge, isLast, destinationTitle)
                 local spellName = ResolveSpellName(spellID) or tostring(spellID)
                 local sk = SpellLooksLikePortal(spellName) and "portal" or "spell"
                 local actionTitle, destinationName = ResolveActionPresentation(step, edge, spellName)
-                specialAction = BuildSpecialAction(sk, "spell", spellName, actionTitle, destinationName)
+                specialAction = BuildSpecialAction(sk, "spell", spellName, actionTitle, destinationName, spellID)
                 routeTravelType = sk == "portal" and "portal" or nil
                 kind = sk
             end
@@ -696,7 +677,7 @@ local function StepToLeg(step, edge, isLast, destinationTitle)
         if type(itemID) ~= "number" then return nil end
         local sk                           = IsFarstriderHearthstoneAction(action, edge) and "hearth" or "item"
         local actionTitle, destinationName = ResolveActionPresentation(step, edge, ResolveItemName(itemID))
-        specialAction                      = BuildSpecialAction(sk, "item", itemID, actionTitle, destinationName)
+        specialAction                      = BuildSpecialAction(sk, "item", itemID, actionTitle, destinationName, itemID)
         routeTravelType                    = sk == "hearth" and "hearth" or nil
         kind                               = sk
         mapID, x, y                        = ReadLocCoords(step.loc)
@@ -711,7 +692,7 @@ local function StepToLeg(step, edge, isLast, destinationTitle)
         local spellName                    = ResolveSpellName(spellID) or tostring(spellID)
         local sk                           = SpellLooksLikePortal(spellName) and "portal" or "spell"
         local actionTitle, destinationName = ResolveActionPresentation(step, edge, spellName)
-        specialAction                      = BuildSpecialAction(sk, "spell", spellName, actionTitle, destinationName)
+        specialAction                      = BuildSpecialAction(sk, "spell", spellName, actionTitle, destinationName, spellID)
         routeTravelType                    = sk == "portal" and "portal" or nil
         kind                               = sk
         mapID, x, y                        = ReadLocCoords(step.loc)
@@ -886,9 +867,7 @@ function backend.Clear(record)
     record._farstriderLastEdgeCount = nil
     record._farstriderLastOptimizedEdgeCount = nil
     record._farstriderLastCorrelationMismatch = nil
-    record._farstriderTravelStateFingerprint = nil
-    record._farstriderLastInvalidationSkipped = nil
-    record._farstriderLastInvalidationSkippedAt = nil
+    record._routeBackendStateFingerprint = nil
     record.legs = nil
     record.currentLegIndex = nil
     record.currentLeg = nil
@@ -904,23 +883,18 @@ function backend.Clear(record)
     record.routeOutcome = nil
     record.routeOutcomeReason = nil
     record.routeOutcomeAt = nil
+    if type(NS.ClearRouteTravelDependencies) == "function" then
+        NS.ClearRouteTravelDependencies(record)
+    end
 end
 
 function backend.OnPlanInvalidated(reason)
-    local record = GetActiveFarstriderRecord()
-    if FARSTRIDER_ABILITY_INVALIDATION_EVENTS[reason] and type(record) == "table" then
-        local fingerprint = GetFarstriderTravelStateFingerprint(true)
-        if type(fingerprint) == "string" then
-            if record._farstriderTravelStateFingerprint == fingerprint then
-                record._farstriderLastInvalidationSkipped = reason
-                record._farstriderLastInvalidationSkippedAt = type(GetTime) == "function" and GetTime() or nil
-                return false
-            end
-            record._farstriderTravelStateFingerprint = fingerprint
-        end
-    end
-    if type(NS.NoteRouteBackendInvalidated) == "function" then
-        return NS.NoteRouteBackendInvalidated("farstrider", reason or "farstrider_invalidated")
+    if type(NS.RequestRouteBackendStateValidation) == "function" then
+        local requestClass = reason == "SPELL_UPDATE_COOLDOWN" and "cooldown" or "structural"
+        return NS.RequestRouteBackendStateValidation(
+            "farstrider",
+            reason or "farstrider_invalidated",
+            requestClass)
     end
     return false
 end
@@ -932,6 +906,12 @@ function backend.Initialize()
 
     local frame = CreateFrame("Frame")
     backend._eventFrame = frame
+    if type(NS.RegisterRouteBackendStateValidator) == "function" then
+        NS.RegisterRouteBackendStateValidator(
+            "farstrider",
+            ValidateTravelState,
+            NS.ProbeRouteTravelDependency)
+    end
     for event in pairs(FARSTRIDER_INVALIDATION_EVENTS) do
         frame:RegisterEvent(event)
     end

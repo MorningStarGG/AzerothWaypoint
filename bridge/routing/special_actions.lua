@@ -32,6 +32,7 @@ state.routing = state.routing or {
     specialActionCastSeq       = 0,      -- monotonic seq, scopes safety-timer callbacks to a single click
     specialActionCastGUID      = nil,    -- castGUID captured at UNIT_SPELLCAST_START, scopes cast-end matching
     specialActionCastStartSeen = false,  -- true once UNIT_SPELLCAST_START fired for the current freeze
+    specialActionCastDependency = nil,   -- numeric backend dependency associated with the clicked travel action
     lastPushedOverlaySig = nil,
     lastPushedCarrierUID = nil,
 
@@ -102,19 +103,47 @@ end
 local function ReleaseSpecialActionCastFreeze(reason)
     local routing = state.routing
     if not routing.specialActionCasting then return end
+    local dependency = routing.specialActionCastDependency
     routing.specialActionCasting = false
     routing.specialActionCastGUID = nil
     routing.specialActionCastStartSeen = false
-    if type(NS.ScheduleActiveRouteRefresh) == "function" then
+    routing.specialActionCastDependency = nil
+    local requested = false
+    if reason == "post_cast" and dependency and type(NS.NotifyRouteTravelActionUsed) == "function" then
+        requested = NS.NotifyRouteTravelActionUsed(dependency, "awp_travel_action_succeeded") == true
+    end
+    if not requested and type(NS.RequestRouteBackendStateValidation) == "function" then
+        local record = routing.manualAuthority
+        if not record then
+            local guideState = type(NS.GetActiveGuideRouteState) == "function"
+                and NS.GetActiveGuideRouteState()
+                or routing.guideRouteState
+            if guideState and guideState.target and not guideState.suppressed then
+                record = guideState
+            end
+        end
+        local backendID = type(record) == "table" and record.backend or nil
+        if backendID == "mapzeroth" or backendID == "farstrider" then
+            requested = NS.RequestRouteBackendStateValidation(
+                backendID,
+                reason or "post_cast",
+                dependency and "selected_action" or "structural") == true
+        end
+    end
+    if type(NS.FlushDeferredRouteBackendStateValidations) == "function" then
+        NS.FlushDeferredRouteBackendStateValidations()
+    end
+    if not requested and type(NS.ScheduleActiveRouteRefresh) == "function" then
         NS.ScheduleActiveRouteRefresh(reason or "post_cast")
     end
 end
 
-local function EngageSpecialActionCastFreeze()
+local function EngageSpecialActionCastFreeze(dependency)
     local routing = state.routing
     routing.specialActionCasting = true
     routing.specialActionCastGUID = nil
     routing.specialActionCastStartSeen = false
+    routing.specialActionCastDependency = dependency
     routing.specialActionCastSeq = (routing.specialActionCastSeq or 0) + 1
     local seq = routing.specialActionCastSeq
 
@@ -257,7 +286,8 @@ local function GetOrCreateSecureButton()
     -- the backend's cooldown-driven replan.
     secureButton:HookScript("OnClick", function(_, button, _)
         if button == "LeftButton" and state.routing.specialActionPresented == true then
-            EngageSpecialActionCastFreeze()
+            local action = state.routing.specialActionState
+            EngageSpecialActionCastFreeze(type(action) == "table" and action.routeDependency or nil)
         end
     end)
 
@@ -817,7 +847,7 @@ combatFrame:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
 combatFrame:RegisterUnitEvent("UNIT_SPELLCAST_INTERRUPTED", "player")
 combatFrame:RegisterUnitEvent("UNIT_SPELLCAST_FAILED", "player")
 combatFrame:RegisterUnitEvent("UNIT_SPELLCAST_FAILED_QUIET", "player")
-combatFrame:SetScript("OnEvent", function(_, event, unit, castGUID)
+combatFrame:SetScript("OnEvent", function(_, event, unit, castGUID, spellID)
     if event == "PLAYER_REGEN_ENABLED" then
         local pending = state.routing.pendingSpecialAction
         if pending then
@@ -834,11 +864,21 @@ combatFrame:SetScript("OnEvent", function(_, event, unit, castGUID)
                 NS.RecomputeCarrier()
             end
         end
+        if type(NS.FlushDeferredRouteBackendStateValidations) == "function" then
+            NS.FlushDeferredRouteBackendStateValidations()
+        end
         return
     end
 
     if unit ~= "player" then return end
     local routing = state.routing
+    if event == "UNIT_SPELLCAST_SUCCEEDED"
+        and not routing.specialActionCasting
+        and type(spellID) == "number"
+        and type(NS.NotifyRouteTravelSpellUsed) == "function"
+    then
+        NS.NotifyRouteTravelSpellUsed(spellID)
+    end
     if not routing.specialActionCasting then return end
 
     if event == "UNIT_SPELLCAST_START" or event == "UNIT_SPELLCAST_CHANNEL_START" then
@@ -856,7 +896,7 @@ combatFrame:SetScript("OnEvent", function(_, event, unit, castGUID)
         -- cachedGUID == nil handles instant casts where SUCCEEDED fires
         -- without a preceding START (e.g. an instant teleport spell or toy).
         if cachedGUID == nil or cachedGUID == castGUID then
-            ReleaseSpecialActionCastFreeze("post_cast")
+            ReleaseSpecialActionCastFreeze(event == "UNIT_SPELLCAST_SUCCEEDED" and "post_cast" or "cast_ended")
         end
     end
 end)

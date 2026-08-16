@@ -5,8 +5,15 @@ local SafeCall = NS.SafeCall
 local Signature = NS.Signature
 local ROUTE_COORD_TOLERANCE = 0.00005
 local ROUTE_REPLAN_DEBOUNCE_SECONDS = 0.35
+local ROUTE_VALIDATION_COOLDOWN_WINDOW_SECONDS = 0.5
 local DEFAULT_ACTION_RADIUS_YARDS = 15
 local DEFAULT_MOVEMENT_RADIUS_YARDS = 55
+
+local ROUTE_VALIDATION_PRIORITY = {
+    cooldown = 1,
+    structural = 2,
+    selected_action = 3,
+}
 
 local NOISY_ACTION_INVALIDATION_REASON = {
     SPELL_UPDATE_COOLDOWN = true,
@@ -186,6 +193,20 @@ local function ResolveAuthorityDestination(record)
     return record.mapID, record.x, record.y, record.title
 end
 
+local function GetActiveRouteRecord()
+    local routing = state.routing
+    local record = routing and routing.manualAuthority or nil
+    if not record then
+        local guideState = type(NS.GetActiveGuideRouteState) == "function"
+            and NS.GetActiveGuideRouteState()
+            or routing and routing.guideRouteState
+        if guideState and guideState.target and not guideState.suppressed then
+            record = guideState
+        end
+    end
+    return type(record) == "table" and record or nil
+end
+
 local function IsValidLeg(leg)
     return type(leg) == "table"
         and type(leg.mapID) == "number"
@@ -227,6 +248,137 @@ local function SanitizeSpecialAction(action)
         return action
     end
     return nil
+end
+
+local ROUTE_DEPENDENCY_KIND = {
+    spell = true,
+    item = true,
+    toy = true,
+}
+
+local function CanAccessRouteValue(value)
+    local isSecret = rawget(_G, "issecretvalue")
+    if type(isSecret) == "function" then
+        local ok, secret = pcall(isSecret, value)
+        if not ok or secret == true then return false end
+    end
+    local canAccess = rawget(_G, "canaccessvalue")
+    if type(canAccess) == "function" then
+        local ok, accessible = pcall(canAccess, value)
+        if not ok or accessible ~= true then return false end
+    end
+    return true
+end
+
+local function NormalizeRouteDependency(value)
+    if type(value) ~= "table" then
+        return nil
+    end
+    local kind = value.kind
+    if not CanAccessRouteValue(kind) or type(kind) ~= "string" or not ROUTE_DEPENDENCY_KIND[kind] then
+        return nil
+    end
+    if not CanAccessRouteValue(value.id) then return nil end
+    local converted, id = pcall(tonumber, value.id)
+    if not converted or not CanAccessRouteValue(id) then return nil end
+    local compared, valid = pcall(function() return type(id) == "number" and id > 0 end)
+    if not compared or not valid then
+        return nil
+    end
+    return kind, id
+end
+
+local function RouteDependencyKey(kind, id)
+    return tostring(kind) .. ":" .. tostring(id)
+end
+
+local function RefreshRouteTravelDependencies(record)
+    if type(record) ~= "table" then return end
+
+    local previousStates = type(record._routeTravelDependencyStates) == "table"
+        and record._routeTravelDependencyStates
+        or nil
+    local dependencies = {}
+    local states = {}
+    local seen = {}
+    local legs = record.legs
+    local firstLeg = math.max(1, tonumber(record.currentLegIndex) or 1)
+
+    if type(legs) == "table" then
+        for index = firstLeg, #legs do
+            local action = type(legs[index]) == "table" and legs[index].specialAction or nil
+            local kind, id = NormalizeRouteDependency(type(action) == "table" and action.routeDependency or nil)
+            if kind and id then
+                local key = RouteDependencyKey(kind, id)
+                if not seen[key] then
+                    seen[key] = true
+                    dependencies[#dependencies + 1] = { kind = kind, id = id, key = key }
+                    states[key] = previousStates and previousStates[key] or "ready"
+                end
+            end
+        end
+    end
+
+    record._routeTravelDependencies = dependencies
+    record._routeTravelDependencyStates = states
+end
+
+local function ClearRouteTravelDependencies(record)
+    if type(record) ~= "table" then return end
+    record._routeTravelDependencies = nil
+    record._routeTravelDependencyStates = nil
+end
+
+NS.ClearRouteTravelDependencies = ClearRouteTravelDependencies
+
+local function ProbeSpellRouteDependency(spellID)
+    if type(C_Spell) ~= "table" or type(C_Spell.GetSpellCooldown) ~= "function" then
+        return "unknown"
+    end
+    local ok, cooldownInfo = pcall(C_Spell.GetSpellCooldown, spellID)
+    if not ok or type(cooldownInfo) ~= "table" then return "unknown" end
+    local startTime = cooldownInfo.startTime
+    local duration = cooldownInfo.duration
+    if not CanAccessRouteValue(startTime) or not CanAccessRouteValue(duration) then
+        return "unknown"
+    end
+    local compared, unavailable = pcall(function()
+        return type(startTime) == "number" and type(duration) == "number"
+            and startTime > 0 and duration > 1.5
+    end)
+    if not compared then return "unknown" end
+    return unavailable and "unavailable" or "ready"
+end
+
+local function ProbeItemRouteDependency(itemID)
+    local cooldownFn = type(C_Item) == "table" and C_Item.GetItemCooldown
+        or rawget(_G, "GetItemCooldown")
+        or nil
+    if type(cooldownFn) ~= "function" then return "unknown" end
+    local ok, startTime, duration = pcall(cooldownFn, itemID)
+    if not ok or not CanAccessRouteValue(startTime) or not CanAccessRouteValue(duration) then
+        return "unknown"
+    end
+    local compared, unavailable = pcall(function()
+        return type(startTime) == "number" and type(duration) == "number"
+            and startTime > 0 and duration > 0
+    end)
+    if not compared then return "unknown" end
+    return unavailable and "unavailable" or "ready"
+end
+
+function NS.ProbeRouteTravelDependency(_, dependency)
+    if type(InCombatLockdown) == "function" and InCombatLockdown() == true then
+        return "unknown"
+    end
+    if type(dependency) ~= "table" or type(dependency.id) ~= "number" then return "unknown" end
+    if dependency.kind == "spell" then
+        return ProbeSpellRouteDependency(dependency.id)
+    end
+    if dependency.kind == "item" or dependency.kind == "toy" then
+        return ProbeItemRouteDependency(dependency.id)
+    end
+    return "unknown"
 end
 
 local function IsNoisyActionInvalidation(reason)
@@ -758,6 +910,7 @@ local function ClearRecordPlan(record)
     if type(record) ~= "table" then
         return
     end
+    ClearRouteTravelDependencies(record)
     record.legs = nil
     record.currentLegIndex = nil
     record.currentLeg = nil
@@ -765,6 +918,7 @@ local function ClearRecordPlan(record)
     record._corePlanning = nil
     record._coreRoutePending = nil
     record.planFingerprint = nil
+    record._routeBackendStateFingerprint = nil
     record.lastPlanSkippedAt = nil
     record.lastPlanSkipReason = nil
     record.lastPlanSkipStatus = nil
@@ -821,6 +975,7 @@ local function FingerprintSpecialAction(action)
     if type(action) ~= "table" then
         return "-"
     end
+    local dependencyKind, dependencyID = NormalizeRouteDependency(action.routeDependency)
     return table.concat({
         tostring(action.semanticKind or "-"),
         tostring(action.secureType or "-"),
@@ -828,6 +983,8 @@ local function FingerprintSpecialAction(action)
         tostring(action.destinationName or "-"),
         tostring(action.activationMode or "-"),
         FingerprintCoords(action.activationCoords),
+        tostring(dependencyKind or "-"),
+        tostring(dependencyID or "-"),
     }, "/")
 end
 
@@ -957,6 +1114,7 @@ function NS.AcceptBackendPlan(record, backendID, legs, reason, serial)
     record.legs = acceptedLegs
     record.planSerial = serial or record.planSerial
     record.planFingerprint = planFingerprint
+    record._routeAcceptedPlanGeneration = (tonumber(record._routeAcceptedPlanGeneration) or 0) + 1
     record.planAcceptedAt = GetTimeSafe()
     local churn = state.churn
     if churn and churn.active then
@@ -982,6 +1140,7 @@ function NS.AcceptBackendPlan(record, backendID, legs, reason, serial)
             record.currentLegIndex = nil
         end
     end
+    RefreshRouteTravelDependencies(record)
     record.currentLeg = nil
     record.specialAction = nil
     record._corePlanning = nil
@@ -1223,6 +1382,7 @@ local function SetCoreLegIndex(record, index, reason)
     record.currentLegIndex = index
     record.currentLeg = leg
     record.specialAction = SanitizeSpecialAction(leg.specialAction)
+    RefreshRouteTravelDependencies(record)
 
     if previousIndex and previousIndex ~= index then
         record._coreLastAdvancedLegSig = GetLegSignature(previousLeg)
@@ -1656,6 +1816,334 @@ function NS.NoteRouteBackendInvalidated(backendID, reason)
     NS.ScheduleActiveRouteRefresh(reason or "backend_invalidated")
     NS.RecomputeCarrier()
     return true
+end
+
+-- ------------------------------------------------------------
+-- Backend-state validation coordinator
+-- ------------------------------------------------------------
+
+local routeBackendValidators = {}
+state.routing.routeBackendValidation = state.routing.routeBackendValidation or {
+    pending = {},
+    dirty = {},
+    castDeferred = {},
+    serial = 0,
+}
+local routeValidation = state.routing.routeBackendValidation
+routeValidation.pending = routeValidation.pending or {}
+routeValidation.dirty = routeValidation.dirty or {}
+routeValidation.castDeferred = routeValidation.castDeferred or {}
+routeValidation.serial = tonumber(routeValidation.serial) or 0
+
+local function IsCombatLocked()
+    return type(InCombatLockdown) == "function" and InCombatLockdown() == true
+end
+
+local function NoteRouteValidationChurn(backendID, key)
+    local churn = state.churn
+    if not churn or not churn.active then return end
+    churn.routeValidation = churn.routeValidation or {}
+    local counters = churn.routeValidation[backendID]
+    if type(counters) ~= "table" then
+        counters = {}
+        churn.routeValidation[backendID] = counters
+    end
+    counters[key] = (tonumber(counters[key]) or 0) + 1
+end
+
+local function BuildValidationDestinationSignature(record)
+    local mapID, x, y, title = ResolveAuthorityDestination(record)
+    return table.concat({
+        tostring(mapID or "-"),
+        FormatPlanCoord(x),
+        FormatPlanCoord(y),
+        tostring(title or "-"),
+        tostring(record and record.sig or "-"),
+    }, "/")
+end
+
+local function CaptureValidationRequest(record, backendID, reason, requestClass)
+    routeValidation.serial = (tonumber(routeValidation.serial) or 0) + 1
+    return {
+        serial = routeValidation.serial,
+        record = record,
+        backendID = backendID,
+        reason = reason,
+        requestClass = requestClass,
+        priority = ROUTE_VALIDATION_PRIORITY[requestClass] or ROUTE_VALIDATION_PRIORITY.structural,
+        destinationSignature = BuildValidationDestinationSignature(record),
+        planFingerprint = record.planFingerprint,
+        planGeneration = record._routeAcceptedPlanGeneration,
+    }
+end
+
+local function IsValidationRequestCurrent(request)
+    if type(request) ~= "table" then return false end
+    local record = GetActiveRouteRecord()
+    if not record or record ~= request.record then return false end
+    return record.backend == request.backendID
+        and record.planFingerprint == request.planFingerprint
+        and record._routeAcceptedPlanGeneration == request.planGeneration
+        and BuildValidationDestinationSignature(record) == request.destinationSignature
+end
+
+local function MergeValidationRequest(existing, incoming)
+    if incoming.priority > existing.priority then
+        existing.priority = incoming.priority
+        existing.requestClass = incoming.requestClass
+        existing.reason = incoming.reason
+    end
+    return existing
+end
+
+local function DeferValidationForCombat(request)
+    local backendID = request.backendID
+    local dirty = routeValidation.dirty[backendID]
+    if dirty then
+        MergeValidationRequest(dirty, request)
+        NoteRouteValidationChurn(backendID, "coalesced")
+    else
+        routeValidation.dirty[backendID] = request
+    end
+    NoteRouteValidationChurn(backendID, "combatDeferred")
+end
+
+local function DeferValidationForCast(request)
+    local backendID = request.backendID
+    local deferred = routeValidation.castDeferred[backendID]
+    if deferred then
+        MergeValidationRequest(deferred, request)
+        NoteRouteValidationChurn(backendID, "coalesced")
+    else
+        routeValidation.castDeferred[backendID] = request
+    end
+end
+
+local function ExecuteRouteBackendStateValidation(request)
+    local backendID = request.backendID
+    if IsCombatLocked() then
+        DeferValidationForCombat(request)
+        return
+    end
+    if state.routing.specialActionCasting then
+        DeferValidationForCast(request)
+        return
+    end
+    if not IsValidationRequestCurrent(request) then
+        NoteRouteValidationChurn(backendID, "stale")
+        return
+    end
+
+    local registration = routeBackendValidators[backendID]
+    if type(registration) ~= "table" or type(registration.validator) ~= "function" then
+        NoteRouteValidationChurn(backendID, "failed")
+        return
+    end
+
+    NoteRouteValidationChurn(backendID, "executed")
+    local callOK, scanOK, fingerprint = pcall(
+        registration.validator,
+        request.record,
+        request.reason,
+        request.requestClass)
+    if not callOK or scanOK ~= true or type(fingerprint) ~= "string" then
+        NoteRouteValidationChurn(backendID, "failed")
+        request.record._coreLastBackendValidationError = callOK and tostring(fingerprint or "no_fingerprint") or tostring(scanOK)
+        request.record._coreLastBackendValidationErrorAt = GetTimeSafe()
+        return
+    end
+
+    local previous = request.record._routeBackendStateFingerprint
+    request.record._routeBackendStateFingerprint = fingerprint
+    request.record._coreLastBackendValidationError = nil
+    request.record._coreLastBackendValidationAt = GetTimeSafe()
+    request.record._coreLastBackendValidationReason = request.reason
+    if type(previous) ~= "string" or previous == fingerprint then
+        return
+    end
+
+    NoteRouteValidationChurn(backendID, "stateChanged")
+    NS.NoteRouteBackendInvalidated(backendID, backendID .. "_state_changed")
+end
+
+local function ScheduleValidationRequest(request, delay)
+    local backendID = request.backendID
+    routeValidation.pending[backendID] = request
+    NS.After(delay or 0, function()
+        if request.cancelled or routeValidation.pending[backendID] ~= request then
+            return
+        end
+        routeValidation.pending[backendID] = nil
+        ExecuteRouteBackendStateValidation(request)
+    end)
+end
+
+local function ProbeRouteDependencies(record, backendID)
+    local registration = routeBackendValidators[backendID]
+    local probe = type(registration) == "table" and registration.dependencyProbe or nil
+    local dependencies = type(record._routeTravelDependencies) == "table"
+        and record._routeTravelDependencies
+        or nil
+    if type(probe) ~= "function" or type(dependencies) ~= "table" or #dependencies == 0 then
+        return false
+    end
+
+    local states = type(record._routeTravelDependencyStates) == "table"
+        and record._routeTravelDependencyStates
+        or {}
+    record._routeTravelDependencyStates = states
+    local changed = false
+    for index = 1, #dependencies do
+        local dependency = dependencies[index]
+        NoteRouteValidationChurn(backendID, "dependencyChecked")
+        local ok, result = pcall(probe, record, dependency)
+        if not ok or (result ~= "ready" and result ~= "unavailable") then
+            NoteRouteValidationChurn(backendID, "dependencyUnknown")
+        else
+            local key = dependency.key or RouteDependencyKey(dependency.kind, dependency.id)
+            local previous = states[key]
+            states[key] = result
+            if previous and previous ~= result then
+                changed = true
+                NoteRouteValidationChurn(backendID, "dependencyChanged")
+            end
+        end
+    end
+    return changed
+end
+
+function NS.RegisterRouteBackendStateValidator(backendID, validator, dependencyProbe)
+    if type(backendID) ~= "string" or backendID == "" or type(validator) ~= "function" then
+        return false
+    end
+    routeBackendValidators[backendID] = {
+        validator = validator,
+        dependencyProbe = type(dependencyProbe) == "function" and dependencyProbe or nil,
+    }
+    return true
+end
+
+function NS.RequestRouteBackendStateValidation(backendID, reason, requestClass)
+    local record = GetActiveRouteRecord()
+    if type(record) ~= "table" or record.backend ~= backendID or not routeBackendValidators[backendID] then
+        return false
+    end
+
+    requestClass = ROUTE_VALIDATION_PRIORITY[requestClass] and requestClass or "structural"
+    NoteRouteValidationChurn(backendID, "requested")
+
+    local combatLocked = IsCombatLocked()
+    if requestClass == "cooldown" and not combatLocked and not state.routing.specialActionCasting then
+        if ProbeRouteDependencies(record, backendID) then
+            requestClass = "selected_action"
+        end
+    end
+
+    local incoming = CaptureValidationRequest(record, backendID, reason or "backend_state", requestClass)
+    local castDeferred = routeValidation.castDeferred[backendID]
+    if castDeferred then
+        routeValidation.castDeferred[backendID] = nil
+        MergeValidationRequest(incoming, castDeferred)
+        NoteRouteValidationChurn(backendID, "coalesced")
+    end
+
+    if combatLocked then
+        local pending = routeValidation.pending[backendID]
+        if pending then
+            pending.cancelled = true
+            routeValidation.pending[backendID] = nil
+            MergeValidationRequest(incoming, pending)
+            NoteRouteValidationChurn(backendID, "coalesced")
+        end
+        DeferValidationForCombat(incoming)
+        return true
+    end
+
+    if state.routing.specialActionCasting then
+        local pending = routeValidation.pending[backendID]
+        if pending then
+            pending.cancelled = true
+            routeValidation.pending[backendID] = nil
+            MergeValidationRequest(incoming, pending)
+            NoteRouteValidationChurn(backendID, "coalesced")
+        end
+        DeferValidationForCast(incoming)
+        return true
+    end
+
+    local dirty = routeValidation.dirty[backendID]
+    if dirty then
+        routeValidation.dirty[backendID] = nil
+        MergeValidationRequest(incoming, dirty)
+        NoteRouteValidationChurn(backendID, "coalesced")
+    end
+
+    local pending = routeValidation.pending[backendID]
+    if pending then
+        NoteRouteValidationChurn(backendID, "coalesced")
+        if incoming.priority <= pending.priority then
+            return true
+        end
+        pending.cancelled = true
+        routeValidation.pending[backendID] = nil
+    end
+
+    local delay = incoming.requestClass == "cooldown" and ROUTE_VALIDATION_COOLDOWN_WINDOW_SECONDS or 0
+    ScheduleValidationRequest(incoming, delay)
+    return true
+end
+
+function NS.FlushDeferredRouteBackendStateValidations()
+    if IsCombatLocked() or state.routing.specialActionCasting then return false end
+    local flushed = false
+    local function flushRequests(requests)
+        local companion = requests == routeValidation.dirty
+            and routeValidation.castDeferred
+            or routeValidation.dirty
+        for backendID, request in pairs(requests) do
+            requests[backendID] = nil
+            local other = companion[backendID]
+            if other then
+                companion[backendID] = nil
+                MergeValidationRequest(request, other)
+                NoteRouteValidationChurn(backendID, "coalesced")
+            end
+            local pending = routeValidation.pending[backendID]
+            if pending then
+                pending.cancelled = true
+                routeValidation.pending[backendID] = nil
+                MergeValidationRequest(request, pending)
+                NoteRouteValidationChurn(backendID, "coalesced")
+            end
+            ScheduleValidationRequest(request, 0)
+            flushed = true
+        end
+    end
+    flushRequests(routeValidation.dirty)
+    flushRequests(routeValidation.castDeferred)
+    return flushed
+end
+
+function NS.NotifyRouteTravelActionUsed(dependency, reason)
+    local record = GetActiveRouteRecord()
+    local kind, id = NormalizeRouteDependency(dependency)
+    if not record or not kind or not id then return false end
+    local dependencies = record._routeTravelDependencies
+    if type(dependencies) ~= "table" then return false end
+    local key = RouteDependencyKey(kind, id)
+    for index = 1, #dependencies do
+        if dependencies[index].key == key then
+            return NS.RequestRouteBackendStateValidation(
+                record.backend,
+                reason or "selected_travel_action",
+                "selected_action")
+        end
+    end
+    return false
+end
+
+function NS.NotifyRouteTravelSpellUsed(spellID)
+    return NS.NotifyRouteTravelActionUsed({ kind = "spell", id = spellID }, "travel_spell_succeeded")
 end
 
 local function ScheduleRefreshAfterAdvance(record)

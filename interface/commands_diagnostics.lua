@@ -2244,6 +2244,10 @@ local function resetChurnCounters(churn)
         churn[key .. "Peak"] = 0
         churn[key .. "Count"] = 0
     end
+    churn.routeValidation = {
+        mapzeroth = {},
+        farstrider = {},
+    }
 end
 
 local function formatRate(count, seconds)
@@ -2255,6 +2259,23 @@ end
 
 local function formatCount(count)
     return tostring(tonumber(count) or 0)
+end
+
+local function formatRouteValidation(churn, backendID)
+    local all = type(churn.routeValidation) == "table" and churn.routeValidation or nil
+    local counters = all and type(all[backendID]) == "table" and all[backendID] or {}
+    return string.format(
+        "requested=%s coalesced=%s combatDeferred=%s executed=%s changed=%s failed=%s stale=%s depChecked=%s depChanged=%s depUnknown=%s",
+        formatCount(counters.requested),
+        formatCount(counters.coalesced),
+        formatCount(counters.combatDeferred),
+        formatCount(counters.executed),
+        formatCount(counters.stateChanged),
+        formatCount(counters.failed),
+        formatCount(counters.stale),
+        formatCount(counters.dependencyChecked),
+        formatCount(counters.dependencyChanged),
+        formatCount(counters.dependencyUnknown))
 end
 
 local function formatPhaseKB(churn, key)
@@ -2430,6 +2451,8 @@ local function handleChurn(rest)
             formatRate(churn.routePlanSkip, actualSeconds),
             formatRate(churn.routeBackendInvalidation, actualSeconds),
             formatRate(churn.routeBackendInvalidationSkip, actualSeconds)))
+        NS.Msg("[CHURN] Validation Mapzeroth " .. formatRouteValidation(churn, "mapzeroth"))
+        NS.Msg("[CHURN] Validation Farstrider " .. formatRouteValidation(churn, "farstrider"))
         NS.Msg(string.format("[CHURN] Driver total=%s  hidden=%s  visuals=%s  worldOverlayUpdate=%s",
             formatRate(churn.driverUpdate, actualSeconds),
             formatRate(churn.driverUpdateHidden, actualSeconds),

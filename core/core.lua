@@ -64,6 +64,7 @@ NS.State.churn = NS.State.churn or {
     routePlanSkip = 0,
     routeBackendInvalidation = 0,
     routeBackendInvalidationSkip = 0,
+    routeValidation = {},
     ensureHost = 0,
     resolveSettableTarget = 0,
     trySetHost = 0,

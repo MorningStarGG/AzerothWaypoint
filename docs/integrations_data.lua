@@ -170,6 +170,7 @@ local INTEGRATIONS = {
             "Shows AWP's Zygor Tracker Viewer guide steps inside Kaliel's Tracker instead of Blizzard's default tracker.",
             "Keeps guide steps, sticky steps, grouped long tips, and the header buttons in Kaliel's tracker.",
             "Follows Kaliel's own show/hide, collapse, and fade settings.",
+            "Can optionally match Kaliel's header texture, background color, font, title/icon color, and button color with five independent settings.",
             "Supports Kaliel's auto watch and tracking behavior where available.",
         },
     },

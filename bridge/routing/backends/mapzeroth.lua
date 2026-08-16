@@ -12,20 +12,6 @@ backend.id = "mapzeroth"
 
 local MOVEMENT_ADVANCE_YARDS = 55
 local INSTANCE_NODE_COORD_EPSILON = 0.025
-local ABILITY_INVALIDATION_EVENTS = {
-    BAG_UPDATE_DELAYED = true,
-    HEARTHSTONE_BOUND = true,
-    SPELL_UPDATE_COOLDOWN = true,
-    SPELLS_CHANGED = true,
-    TOYS_UPDATED = true,
-}
-local VOLATILE_ABILITY_FIELDS = {
-    cooldownRemaining = true,
-    duration = true,
-    enable = true,
-    remaining = true,
-    startTime = true,
-}
 local MOVEMENT_METHOD = {
     walk = true,
     fly = true,
@@ -249,38 +235,64 @@ local function BuildAbilityIndex(abilities)
     return index
 end
 
-local function SerializeAbilityValue(value, depth)
-    depth = tonumber(depth) or 0
+local function SemanticValue(value)
     local valueType = type(value)
-    if valueType == "nil" then
-        return "-"
+    if valueType == "string" or valueType == "number" or valueType == "boolean" then
+        local text = tostring(value)
+        return valueType .. "#" .. tostring(#text) .. ":" .. text
     end
-    if valueType == "number" or valueType == "boolean" or valueType == "string" then
-        return tostring(value)
-    end
-    if valueType ~= "table" then
-        return valueType
-    end
-    if depth >= 3 then
-        return "{...}"
-    end
+    return "-"
+end
 
+local function FingerprintOrderedDestinations(destinations)
+    if type(destinations) ~= "table" then return "-" end
+    local parts = {}
+    for index = 1, #destinations do
+        parts[#parts + 1] = SemanticValue(destinations[index])
+    end
+    return table.concat(parts, ",")
+end
+
+local function FingerprintPhaseDestinations(destinationsByArtID)
+    if type(destinationsByArtID) ~= "table" then return "-" end
     local keys = {}
-    for key, child in pairs(value) do
-        if not VOLATILE_ABILITY_FIELDS[key] and type(child) ~= "function" then
-            keys[#keys + 1] = key
-        end
+    for key in pairs(destinationsByArtID) do
+        keys[#keys + 1] = key
     end
-    table.sort(keys, function(a, b)
-        return tostring(a) < tostring(b)
-    end)
-
+    table.sort(keys, function(a, b) return tostring(a) < tostring(b) end)
     local parts = {}
     for index = 1, #keys do
         local key = keys[index]
-        parts[#parts + 1] = tostring(key) .. "=" .. SerializeAbilityValue(value[key], depth + 1)
+        parts[#parts + 1] = SemanticValue(key) .. "=" .. SemanticValue(destinationsByArtID[key])
     end
-    return "{" .. table.concat(parts, ",") .. "}"
+    return table.concat(parts, ",")
+end
+
+local function FingerprintHearthstone(hearthstone)
+    if type(hearthstone) ~= "table" then return "-" end
+    return table.concat({
+        SemanticValue(hearthstone.locationName),
+        SemanticValue(hearthstone.mapID),
+        type(hearthstone.x) == "number" and string.format("%.6f", hearthstone.x) or "-",
+        type(hearthstone.y) == "number" and string.format("%.6f", hearthstone.y) or "-",
+    }, "/")
+end
+
+local function FingerprintAbility(ability)
+    return table.concat({
+        SemanticValue(ability.id),
+        SemanticValue(ability.name),
+        SemanticValue(ability.spellID),
+        SemanticValue(ability.itemID),
+        SemanticValue(ability.type),
+        SemanticValue(ability.castTime),
+        SemanticValue(ability.cooldown),
+        SemanticValue(ability.destination),
+        FingerprintOrderedDestinations(ability.destinations),
+        FingerprintPhaseDestinations(ability.destinationsByArtID),
+        SemanticValue(ability.isHearthstone),
+        FingerprintHearthstone(ability.hearthstone),
+    }, ":")
 end
 
 local function BuildTravelAbilitiesFingerprint(abilities)
@@ -292,7 +304,7 @@ local function BuildTravelAbilitiesFingerprint(abilities)
     for index = 1, #abilities do
         local ability = abilities[index]
         if type(ability) == "table" then
-            parts[#parts + 1] = SerializeAbilityValue(ability, 0)
+            parts[#parts + 1] = FingerprintAbility(ability)
         end
     end
     table.sort(parts)
@@ -308,8 +320,17 @@ end
 
 local function RememberTravelAbilitiesFingerprint(record, abilities)
     if type(record) == "table" then
-        record._mapzerothTravelAbilitiesFingerprint = BuildTravelAbilitiesFingerprint(abilities)
+        local fingerprint = BuildTravelAbilitiesFingerprint(abilities)
+        record._routeBackendStateFingerprint = fingerprint
     end
+end
+
+local function ValidateTravelAbilityState()
+    local ok, abilities = FetchTravelAbilities(GetMapzeroth())
+    if not ok or type(abilities) ~= "table" then
+        return false, nil
+    end
+    return true, BuildTravelAbilitiesFingerprint(abilities)
 end
 
 local function ResolveAbilityForStep(step, abilityIndex)
@@ -429,6 +450,11 @@ end
 local function StepToSpecialAction(step, abilityIndex, activationMode, activationCoords)
     local semanticKind, secureType, securePayload = ClassifyStepAction(step, abilityIndex)
     if not semanticKind or not secureType or securePayload == nil or securePayload == "" then return nil end
+    local dependencyID = secureType == "spell" and step.spellID or step.itemID
+    local routeDependency = type(dependencyID) == "number" and {
+        kind = secureType,
+        id = dependencyID,
+    } or nil
     if activationMode == "portable" then
         activationCoords = nil
     else
@@ -445,6 +471,7 @@ local function StepToSpecialAction(step, abilityIndex, activationMode, activatio
         activationCoords = activationCoords,
         activationRadiusYards = 15,
         sourceBackend = "mapzeroth",
+        routeDependency = routeDependency,
     }
 end
 
@@ -762,42 +789,19 @@ function backend.Clear(record)
     record.routeOutcome = nil
     record.routeOutcomeReason = nil
     record.routeOutcomeAt = nil
-    record._mapzerothTravelAbilitiesFingerprint = nil
-    record._mapzerothLastInvalidationSkipped = nil
-    record._mapzerothLastInvalidationSkippedAt = nil
-end
-
-local function GetActiveMapzerothRecord()
-    local routing = NS.State and NS.State.routing or nil
-    local record = routing and routing.manualAuthority or nil
-    if not record then
-        local guideState = routing and routing.guideRouteState or nil
-        if guideState and guideState.target and not guideState.suppressed then
-            record = guideState
-        end
+    record._routeBackendStateFingerprint = nil
+    if type(NS.ClearRouteTravelDependencies) == "function" then
+        NS.ClearRouteTravelDependencies(record)
     end
-    if type(record) == "table" and record.backend == "mapzeroth" then
-        return record
-    end
-    return nil
 end
 
 function backend.OnPlanInvalidated(reason)
-    local record = GetActiveMapzerothRecord()
-    if ABILITY_INVALIDATION_EVENTS[reason] and type(record) == "table" then
-        local okAbilities, abilities = FetchTravelAbilities(GetMapzeroth())
-        if okAbilities then
-            local fingerprint = BuildTravelAbilitiesFingerprint(abilities)
-            if record._mapzerothTravelAbilitiesFingerprint == fingerprint then
-                record._mapzerothLastInvalidationSkipped = reason
-                record._mapzerothLastInvalidationSkippedAt = type(GetTime) == "function" and GetTime() or nil
-                return false
-            end
-            record._mapzerothTravelAbilitiesFingerprint = fingerprint
-        end
-    end
-    if type(NS.NoteRouteBackendInvalidated) == "function" then
-        return NS.NoteRouteBackendInvalidated("mapzeroth", reason or "mapzeroth_invalidated")
+    if type(NS.RequestRouteBackendStateValidation) == "function" then
+        local requestClass = reason == "SPELL_UPDATE_COOLDOWN" and "cooldown" or "structural"
+        return NS.RequestRouteBackendStateValidation(
+            "mapzeroth",
+            reason or "mapzeroth_invalidated",
+            requestClass)
     end
     return false
 end
@@ -808,6 +812,12 @@ function backend.Initialize()
     end
     local frame = CreateFrame("Frame")
     backend._eventFrame = frame
+    if type(NS.RegisterRouteBackendStateValidator) == "function" then
+        NS.RegisterRouteBackendStateValidator(
+            "mapzeroth",
+            ValidateTravelAbilityState,
+            NS.ProbeRouteTravelDependency)
+    end
     frame:RegisterEvent("BAG_UPDATE_DELAYED")
     frame:RegisterEvent("HEARTHSTONE_BOUND")
     frame:RegisterEvent("SPELL_UPDATE_COOLDOWN")

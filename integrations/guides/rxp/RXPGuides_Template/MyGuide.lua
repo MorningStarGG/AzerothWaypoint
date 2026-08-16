@@ -1,4 +1,7 @@
-﻿RXPGuides.RegisterGuide("Tommysalami Gnome-Dwarf Route",[[
+local RXPGuides = rawget(_G, "RXPGuides")
+if type(RXPGuides) ~= "table" or type(RXPGuides.RegisterGuide) ~= "function" then return end
+
+RXPGuides.RegisterGuide("Tommysalami Gnome-Dwarf Route",[[
 << Gnome Warrior/Gnome Mage/Dwarf Warrior/Dwarf Paladin/Dwarf Priest	--This guide will only load for those classes
 
 --You can use a exclamation mark, for instance !Dwarf Paladin will return true for all paladins that are not Dwarf

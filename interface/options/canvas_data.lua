@@ -205,6 +205,26 @@ Data.OPTION_PREVIEWS = {
         image = MEDIA_HELP .. "TrackerAutoColor.tga",
         desc = "Use contextual Tracker Viewer text colors or force all step text one selected color.",
     },
+    ["Match Kaliel Header Texture"] = {
+        image = MEDIA_HELP .. "TrackerViewer.tga",
+        desc = "Optionally matches Kaliel's selected module-header texture, including hidden backgrounds.",
+    },
+    ["Match Kaliel Header Background Color"] = {
+        image = MEDIA_HELP .. "TrackerViewer.tga",
+        desc = "Optionally matches Kaliel's resolved shared, border, or class header color.",
+    },
+    ["Match Kaliel Header Font"] = {
+        image = MEDIA_HELP .. "TrackerViewer.tga",
+        desc = "Optionally matches Kaliel's resolved header font and shadow.",
+    },
+    ["Match Kaliel Header Text/Icon Color"] = {
+        image = MEDIA_HELP .. "TrackerViewer.tga",
+        desc = "Optionally matches Kaliel's title and collapse-indicator color.",
+    },
+    ["Match Kaliel Header Button Color"] = {
+        image = MEDIA_HELP .. "TrackerViewer.tga",
+        desc = "Optionally matches Kaliel's header-button color for AWP-owned controls.",
+    },
     ["Show Step in Chat on Step Change"] = {
         image = MEDIA_HELP .. "ChatCountTitles.tga",
         desc =
@@ -496,6 +516,11 @@ Data.OPTIONS = {
     { key = "zygor",        label = "Hide Zygor's Native Frame",                 desc = "Hide Zygor's full-size viewer while keeping guide state, waypoints, guide picker, and settings menus available.",                                          added = "4.1.0",                                                                                                                                                                      tags = "tracker viewer hide native guide zygor frame viewer window fullsize big main visual cloak hidden minimap menu" },
     { key = "zygor",        label = "Tracker Viewer Progress Bar",               desc = "Choose square, rounded border, or hidden progress bar for the tracker viewer.",                                                                            added = "4.1.0",                                                                                                                                                                      tags = "tracker viewer progress bar style square rounded none hidden objective tracker header steps percentage percent step completion" },
     { key = "zygor",        label = "Tracker Viewer Text",                       desc = "Use contextual Tracker Viewer text colors or force all step text to one selected color.",                                                                  added = "4.1.0",                                                                                                                                                                      tags = "tracker viewer text color colors tint semantic contextual zygor inline guide step steps" },
+    { key = "zygor",        label = "Match Kaliel Header Texture",               desc = "Optionally match Kaliel's module-header texture or hidden-background mode.",                                                                                added = "4.1.1",                                                                                                                                                                      tags = "tracker viewer kaliel kt header style texture background skin two lines hidden" },
+    { key = "zygor",        label = "Match Kaliel Header Background Color",      desc = "Optionally match Kaliel's shared, border, or class-colored header background.",                                                                            added = "4.1.1",                                                                                                                                                                      tags = "tracker viewer kaliel kt header style background color class shared border" },
+    { key = "zygor",        label = "Match Kaliel Header Font",                  desc = "Optionally match Kaliel's header font face, size, outline, and shadow.",                                                                                     added = "4.1.1",                                                                                                                                                                      tags = "tracker viewer kaliel kt header style font text outline shadow" },
+    { key = "zygor",        label = "Match Kaliel Header Text/Icon Color",       desc = "Optionally match Kaliel's title and collapse-indicator color.",                                                                                              added = "4.1.1",                                                                                                                                                                      tags = "tracker viewer kaliel kt header style text icon collapse color class" },
+    { key = "zygor",        label = "Match Kaliel Header Button Color",          desc = "Optionally tint AWP's tracker header buttons with Kaliel's resolved button color.",                                                                         added = "4.1.1",                                                                                                                                                                      tags = "tracker viewer kaliel kt header style button controls color tint" },
     { key = "zygor",        label = "Show Step in Chat on Step Change",          desc = "Show the current Zygor step in your own chat when Zygor changes steps.",                                                                                   added = "4.1.0",                                                                                                                                                                      tags = "zygor chat step display message show announce macro colors command guide tracker viewer goals steps automatic auto on step change" },
     { key = "zygor",        label = "Chat Step Text",                            desc = "Use contextual colors or force displayed Zygor step text one selected color.",                                                                             added = "4.1.0",                                                                                                                                                                      tags = "zygor chat step text color colors tint semantic show guide command contextual output message steps" },
     { key = "zygor",        label = "Chat Sticky Summary",                       desc = "Choose whether the chat step display includes active sticky step count or titles.",                                                                        added = "4.1.0",                                                                                                                                                                      tags = "zygor chat step sticky stickies summary count titles names none off output guide extra display show info command" },
