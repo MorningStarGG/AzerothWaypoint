@@ -10,12 +10,17 @@ local Shared = NS.Internal.ZygorTrackerViewer
 local Host = {}
 Shared.TrackerHost = Host
 
+Host.NATIVE_DOCK_WARNING = "Blizzard native Tracker Viewer docking is experimental and has a known WoW 12.1 taint issue. It may produce protected-action or secret-value errors, may stop working entirely after a future WoW patch, and may be removed from AWP in favor of Kaliel's Tracker-only docking. Kaliel's Tracker is the recommended tracker."
+Host.KALIEL_DOCK_STATUS = "Kaliel's Tracker is active and is AWP's recommended Tracker Viewer. It avoids the known Blizzard shared Objective Tracker and World Map taint boundary."
+
 -- ============================================================
 -- Objective tracker host detection (Blizzard vs Kaliel's Tracker)
 -- and module-registration helpers.
 -- ============================================================
 --
--- Use the active tracker stack's standard block and line templates.
+-- Use each active tracker stack's standard block and line templates. The
+-- Blizzard path remains native registration; Kaliel uses its addon-owned
+-- templates and container.
 -- Blizzard and Kaliel expose similar APIs, but Kaliel forks the mixins.
 -- Module headers are constructed from Blizzard's structural template and
 -- finished with KT's header mixin in tracker_module.lua. KT 8.7.x hooks its
@@ -36,6 +41,13 @@ end
 -- When KT is loaded we MUST register with KT's tracker, not Blizzard's.
 local function IsKTLoaded()
     return GetKalielsTrackerFrame() ~= nil
+end
+
+local function GetDockingSupportStatus()
+    if IsKTLoaded() then
+        return "kaliel", Host.KALIEL_DOCK_STATUS, false
+    end
+    return "blizzard", Host.NATIVE_DOCK_WARNING, true
 end
 
 local ktInitObserved = false
@@ -211,6 +223,7 @@ local function TryRegisterOnce(mgr, frame, container)
 end
 
 Host.IsKTLoaded = IsKTLoaded
+Host.GetDockingSupportStatus = GetDockingSupportStatus
 Host.IsKTReady = IsKTReady
 Host.RegisterKTReadyCallback = RegisterKTReadyCallback
 Host.GetTrackerFrame = GetTrackerFrame

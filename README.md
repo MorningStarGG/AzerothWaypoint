@@ -390,8 +390,8 @@ When Zygor is installed, AWP can show the active Zygor guide inside the objectiv
 
 Tracker Viewer supports:
 
-- Blizzard's default Objective Tracker
-- Kaliel's Tracker
+- Kaliel's Tracker, the recommended and automatically preferred docking host when installed
+- Blizzard's default Objective Tracker as an experimental fallback
 - current guide title and step rows
 - previous, next, and skip controls
 - guide switching and guide picker access
@@ -401,6 +401,12 @@ Tracker Viewer supports:
 - long tip-block grouping so large guide steps do not overflow the tracker
 - square, rounded, or hidden progress bar styles
 - contextual tracker text colors for common Zygor goal types
+
+Blizzard native docking has a confirmed WoW 12.1 taint boundary in Blizzard's shared Objective Tracker and World Map code. It can produce protected-action or secret-value errors after otherwise normal tracker and map use. It may stop working entirely after a future WoW patch and may be removed from AWP in favor of Kaliel's Tracker-only docking. The combat quest-click proxy reduces one reproducible failure, but it does not make native docking taint-free.
+
+When Tracker Viewer attaches to Blizzard's tracker, AWP shows this warning after login or reload. **Okay, remind me later** repeats it next session; **Don't remind me again** disables the popup account-wide. It can be restored with **Zygor > Tracker Viewer > Show Native Docking Warning Popup**.
+
+Kaliel's Tracker is the recommended long-term host because it keeps AWP inside an addon-owned tracker path and avoids this specific Blizzard boundary. AWP selects it automatically when it is installed and loaded.
 
 You can also hide Zygor's native viewer while keeping Zygor's guide engine, active waypoints, guide picker, settings, and guide navigation available through AWP.
 
@@ -457,7 +463,7 @@ AWP includes an in-game **Integrations** tab in `/awp options` and a matching He
 
 | Addon | What AWP Uses It For |
 |---|---|
-| **Kaliel's Tracker** | Optional objective tracker host for AWP's Zygor Tracker Viewer, including Zygor guide rows, sticky steps, long-tip grouping, and header controls. |
+| **Kaliel's Tracker** | Recommended and automatically preferred objective tracker host for AWP's Zygor Tracker Viewer, avoiding the known Blizzard native tracker/map taint boundary. |
 
 ### Map and POI Addons
 
@@ -991,13 +997,17 @@ Check:
 - Blizzard's Objective Tracker or Kaliel's Tracker is visible.
 - The tracker is not being hidden or made transparent by another addon.
 
+Kaliel's Tracker is the recommended host. Blizzard native docking remains available as an experimental fallback, but its known WoW 12.1 taint can cause protected-action or secret-value errors and may make native docking unusable after a future patch. Native docking may eventually be removed in favor of Kaliel's Tracker-only docking.
+
+The native-docking warning popup can be enabled or restored under **Zygor > Tracker Viewer > Show Native Docking Warning Popup**.
+
 Use:
 
 ```text
 /awp status
 ```
 
-AWP reports which objective tracker host it detected and whether the tracker appears hidden or transparent.
+AWP reports which objective tracker host it detected, its support status, and whether the tracker appears hidden or transparent.
 
 ### Unknown addon waypoints are being ignored
 

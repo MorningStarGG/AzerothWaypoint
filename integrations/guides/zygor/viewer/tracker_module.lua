@@ -16,7 +16,7 @@ local Controls = Shared.TrackerControls
 local HeaderStyle = Shared.TrackerHeaderStyle
 local Rows     = Shared.TrackerRows
 local Render   = Shared.TrackerRender
-local SecretShim = Shared.TrackerSecretShim
+local CombatProxy = Shared.TrackerCombatProxy
 
 local TM = {}
 Shared.TrackerModule = TM
@@ -92,12 +92,9 @@ end
 -- Module construction
 -- ============================================================
 --
---   - Plain Frame (no inherited template, no race with template scripts)
---   - Mixin the active tracker module mixin to get the standard
---     tracker-module behavior (Update, BeginLayout, EndLayout, GetBlock,
---     LayoutBlock, MarkDirty, etc.)
---   - Header from the active tracker header template.
---   - ContentsFrame as a plain Frame anchored under the header.
+--   - Plain Frame plus the active host's module mixin.
+--   - Structural header and contents children built explicitly so KT can add
+--     Header.Icon before its hooked header mixin runs.
 --   - blockTemplate set to the active tracker stack's anim block template.
 --   - module:OnBlockHeaderClick fires for header clicks via the standard
 --     wiring, so right-click on a block opens our context menu
@@ -149,23 +146,39 @@ local function FinishKTHeader(header, parentModule)
     end)
 end
 
+local function ApplyModuleMixin(frame, mixinSource, usingKT)
+    if type(mixinSource) ~= "table" then return false end
+
+    if usingKT then
+        if type(_G.Mixin) ~= "function" then return false end
+        _G.Mixin(frame, mixinSource)
+        return true
+    end
+
+    -- Keep hasDisplayPriority untouched on the Blizzard host. The copied
+    -- module behavior remains addon-owned; test.md records why native-template
+    -- construction alone cannot isolate its dynamic layout.
+    for key, value in pairs(mixinSource) do
+        if key ~= "hasDisplayPriority" then
+            frame[key] = value
+        end
+    end
+    return true
+end
+
 local function CreateModuleFrame()
     if module then return module end
 
     local container = Host.GetTrackerFrame()
     if not container then return nil end
+    local usingKT = Host.IsKTLoaded()
 
-    -- Plain frame, hidden by default so no OnShow race during creation.
     local frame = CreateFrame("Frame", MODULE_NAME, container)
     frame:Hide()
-    frame:SetSize(Host.IsKTLoaded() and 260 or 240, 10)
+    frame:SetSize(usingKT and 260 or 240, 10)
     frame:SetPoint("TOP")
 
-    -- Apply the active tracker stack's standard module mixin.
-    local mixinSource = Host.GetModuleMixin()
-    if type(_G.Mixin) == "function" and type(mixinSource) == "table" then
-        _G.Mixin(frame, mixinSource)
-    else
+    if not ApplyModuleMixin(frame, Host.GetModuleMixin(), usingKT) then
         if type(NS.Msg) == "function" then
             NS.Msg("Objective tracker module mixin unavailable; tracker dock cannot initialise.")
         end
@@ -173,28 +186,23 @@ local function CreateModuleFrame()
         return nil
     end
 
-    -- The host returns Blizzard's complete structural header template for both
-    -- hosts. Under KT, finish it only after CreateFrame returns so Header.Icon
-    -- exists before KT's hooked SetCollapsed can run.
+    -- The host returns Blizzard's structural header for both paths. KT is
+    -- finished only after CreateFrame so Header.Icon exists before its mixin.
     local headerOk, header = pcall(CreateFrame, "Frame", nil, frame, Host.GetHeaderTemplate())
     if not headerOk or not header then
-        -- Fallback: minimal header so the module still works without the
-        -- inherited template. It won't look pretty but the
-        -- click wiring on the inherited template is what we'd lose.
         header = CreateFrame("Frame", nil, frame)
-        header:SetSize(Host.IsKTLoaded() and 260 or 240, 22)
+        header:SetSize(usingKT and 260 or 240, 22)
         local txt = header:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
         txt:SetPoint("LEFT", header, "LEFT", 2, 0)
         header.Text = txt
     end
-    if headerOk and header and Host.IsKTLoaded() then
+    if headerOk and header and usingKT then
         header:SetWidth(260)
         FinishKTHeader(header, frame)
     end
     header:SetPoint("TOPLEFT")
     frame.Header = header
 
-    -- ContentsFrame for blocks to live in.
     local contentsFrame = CreateFrame("Frame", nil, frame)
     contentsFrame:SetPoint("TOP", header, "BOTTOM")
     contentsFrame:SetPoint("LEFT")
@@ -210,13 +218,16 @@ local function CreateModuleFrame()
     module.lineTemplate          = Host.GetLineTemplate()
     module.blockTemplate         = Host.GetBlockTemplate()
     module.rightEdgeFrameSpacing = 2
-    module.uiOrder               = 0
-    module.hasDisplayPriority    = true
 
-    -- Initialize the tables the standard module mixin expects. With an XML
-    -- template these would come from <KeyValues> or the template's OnLoad.
-    -- Pure Lua creation skips that, so they need to exist before BeginLayout
-    -- runs (otherwise MarkBlocksUnused crashes on `pairs(nil)`).
+    -- uiOrder 2 is the configured visual position. Leave hasDisplayPriority
+    -- untouched on Blizzard so it remains secure nil. KT is fully addon-owned
+    -- and retains its explicit non-priority value.
+    module.uiOrder = 2
+    if usingKT then
+        module.hasDisplayPriority = false
+    end
+
+    -- Pure Lua construction skips the module template's setup.
     module.usedBlocks               = module.usedBlocks               or {}
     module.cachedBlocks             = module.cachedBlocks             or {}
     module.cachedBlocksByTemplate   = module.cachedBlocksByTemplate   or {}
@@ -229,8 +240,6 @@ local function CreateModuleFrame()
     module.cachedOrderList          = module.cachedOrderList          or {}
     module.numCachedBlocks          = module.numCachedBlocks          or 0
 
-    -- Mirror what the XML template's <OnLoad method="OnLoad"/> would do —
-    -- call the mixin's own OnLoad if it provides one. Harmless if it doesn't.
     if type(module.OnLoad) == "function" then
         pcall(module.OnLoad, module)
     end
@@ -271,10 +280,6 @@ local function CreateModuleFrame()
     if HeaderStyle and type(HeaderStyle.Refresh) == "function" then
         HeaderStyle.Refresh(module)
     end
-
-    -- ============================================================
-    -- Reload-visibility overrides
-    -- ============================================================
 
     do
         local originalUpdate = module.Update
@@ -534,25 +539,29 @@ local function ScheduleAttachRetries()
     end)
 end
 
--- Being docked taints Blizzard's tracker update pass, which makes two Blizzard
--- call sites raise on secret values. The shim wraps those for exactly as long
--- as we are attached - see tracker_secret_shim.lua. Blizzard host only; under
--- Kaliel's Tracker there is nothing to protect.
-local function ApplySecretShim(shouldInstall)
-    if type(SecretShim) ~= "table" then return end
+local function ApplyCombatProxy(shouldInstall)
+    if type(CombatProxy) ~= "table" then return end
     if shouldInstall and not Host.IsKTLoaded() then
-        if type(SecretShim.Install) == "function" then
-            pcall(SecretShim.Install)
+        if type(CombatProxy.Install) == "function" then
+            pcall(CombatProxy.Install)
         end
-    elseif type(SecretShim.Uninstall) == "function" then
-        pcall(SecretShim.Uninstall)
+    elseif type(CombatProxy.Uninstall) == "function" then
+        pcall(CombatProxy.Uninstall)
     end
 end
 
--- Every successful attach path funnels through here so the shim install and the
--- initial layout stay in lockstep.
+local function RequestNativeDockWarningPopup()
+    if Host.IsKTLoaded() then return end
+    if type(NS.MaybeShowNativeTrackerWarningPopup) == "function" then
+        NS.MaybeShowNativeTrackerWarningPopup(1)
+    end
+end
+
+-- Every successful attach path funnels through here so the Blizzard-only
+-- combat-click mitigation, startup warning, and initial layout stay aligned.
 local function FinishAttach()
-    ApplySecretShim(true)
+    ApplyCombatProxy(true)
+    RequestNativeDockWarningPopup()
     TM.MarkDirty()
     return true
 end
@@ -618,9 +627,9 @@ end
 function TM.Detach()
     attachRequested = false
     CancelKTReadyRetries()
-    -- Restore Blizzard's originals on every detach path, including the early
-    -- return below, so a disabled Tracker Viewer leaves nothing of ours behind.
-    ApplySecretShim(false)
+    -- Remove the Blizzard-only click overlays on every detach path, including
+    -- the early return below. No native tracker or map function is replaced.
+    ApplyCombatProxy(false)
 
     if attachRetryTicker then
         pcall(attachRetryTicker.Cancel, attachRetryTicker)
@@ -658,11 +667,8 @@ end
 
 function TM.MarkDirty()
     if not module then return end
-    -- The module mixin's MarkDirty already flags the module and marks the parent
-    -- container, which the tracker flushes on its own schedule. Calling
-    -- mgr:UpdateAll() on top of that forced a second, synchronous, full-tracker
-    -- layout inside our own call stack on every goal-progress tick - redundant
-    -- work, and a second path for our taint to reach Blizzard's modules.
+    -- The module mixin flags this module and lets its active tracker host
+    -- schedule the corresponding container layout.
     if type(module.MarkDirty) == "function" then
         pcall(module.MarkDirty, module)
     end

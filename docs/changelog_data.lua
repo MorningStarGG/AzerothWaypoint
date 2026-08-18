@@ -2,6 +2,26 @@ local NS = _G.AzerothWaypointNS
 
 NS.CHANGELOG_DATA = {
     {
+        version = "4.1.2",
+        sections = {
+            { title = "Native Tracker Viewer support status", entries = {
+                { text = "Blizzard native docking remains available at order 2, but is now explicitly experimental because WoW 12.1's shared Objective Tracker and World Map execution can retain AWP taint and later report protected-action or secret-value errors.", level = 1 },
+                { text = "Native docking may stop working entirely after a future WoW patch and may be removed from AWP in favor of Kaliel's Tracker-only docking. Kaliel's Tracker is the recommended tracker viewer and is selected automatically whenever it is installed and loaded.", level = 1 },
+                { text = "Tracker Viewer settings, help, and `/awp status` now report the active tracker viewer and its support status.", level = 1 },
+                { text = "Added a startup warning when Tracker Viewer attaches to Blizzard's native tracker. **Okay, remind me later** repeats it next login/reload, **Don't remind me again** disables it account-wide, and the Tracker Viewer settings can restore it.", level = 1 },
+            }},
+            { title = "Blizzard quest tracker taint cleanup and mitigation", entries = {
+                { text = "Removed the Scenario aura/cooldown replacement shims completely. AWP no longer replaces `ShouldShowMawBuffs` or `ScenarioSpellButtonMixin.UpdateCooldown`.", level = 1 },
+                { text = "Retained the two narrow risk reductions that tested cleanly: AWP stays at order 2 without assigning Blizzard's `hasDisplayPriority` field, and guide refreshes no longer force a redundant synchronous full-tracker update.", level = 1 },
+                { text = "Retained the Blizzard-only combat proxy for tracked Quest and Campaign Quest headers. It reports that the action is unavailable in combat and leaves Blizzard's normal click behavior untouched outside combat.", level = 1 },
+            }},
+            { title = "Known Blizzard native quest tracker limitation", entries = {
+                { text = "Clicking a native tracked quest out of combat can still transfer AWP taint into reusable `WorldMapFrame.mapID` and `mapArtID` state. A later map open during combat may report `SetPassThroughButtons` or `SetPropagateMouseClicks` even though the keybind for world map still opens the map.", level = 1 },
+                { text = "The combat proxy mitigates the tracker-click path only while combat-locked, it does not make Blizzard native docking taint-free. No map-pin, quest-handler, World Map, or Blizzard container functions are patched.", level = 1 },
+            }},
+        },
+    },
+    {
         version = "4.1.1",
         sections = {
             { title = "Kaliel's Tracker header styling", entries = {
@@ -15,10 +35,11 @@ NS.CHANGELOG_DATA = {
                 { text = "`/awp churn` now reports per-backend validation, coalescing, combat deferral, state-change, failure, stale-work, and dependency-check counts.", level = 1 },
             }},
             { title = "Objective tracker freeze in scenario content", entries = {
-                { text = "Fixed Blizzard's objective tracker locking up while the Tracker Viewer is docked into it. In delves, vaults, incursions and other scenario content, Blizzard's scenario tracker reads aura and spell-cooldown data that the 12.1 client withholds from addon-influenced code. When that read failed it aborted the tracker's module layout partway, so quests, world quests, campaign and achievement blocks all stopped updating. Entries already on screen kept working, which is why the tracker looked half-alive rather than broken.", level = 1 },
+                { text = "Fixed Blizzard's objective tracker locking up while the Tracker Viewer is docked into it. In delves, vaults, incursions and other scenario content, Blizzard's scenario tracker reads aura and spell-cooldown data that the 12.1 client withholds from addon-influenced code. When that read failed it aborted the tracker's module layout partway, so quests, world quests, campaign and achievement blocks all stopped updating.", level = 1 },
                 { text = "Tracker Viewer now wraps the two affected Blizzard entry points for exactly as long as it is docked, falling back to a safe result only when the original call actually fails, and restores Blizzard's originals the moment the viewer is disabled. Behavior is unchanged whenever the original call succeeds.", level = 1 },
+            }},
+            { title = "Performance fixes", entries = {
                 { text = "Guide step updates no longer force a second full objective tracker layout on every goal-progress tick.", level = 1 },
-                { text = "Kaliel's Tracker users were never affected: Kaliel's replaces Blizzard's tracker outright and already avoids the aura read.", level = 1 },
             }},
         },
     },
@@ -83,7 +104,7 @@ NS.CHANGELOG_DATA = {
             }},
             { title = "Native minimap button", entries = {
                 { text = "Added an AzerothWaypoint minimap button.", level = 1 },
-                { text = "Left-click opens the AWP quick menu; right-click opens AWP settings; dragging supports minimap-edge snapping near the minimap and free-floating placement when pulled away.", level = 1 },
+                { text = "Left-click opens the AWP quick menu, right-click opens AWP settings, dragging supports minimap-edge snapping near the minimap and free-floating placement when pulled away.", level = 1 },
                 { text = "Minimap button position and visibility can be controlled with `/awp minimap show|hide|toggle|reset|status`.", level = 1 },
                 { text = "Added addon compartment support with the same quick menu, tooltip, and settings access so users can still reach the same AWP menu when the minimap button is hidden.", level = 1 },
                 { text = "The minimap quick menu includes Tracker Viewer toggle, Zygor native viewer toggle, Zygor guide controls, Open AWP Settings, Open Help, Open Queue, reset position, and hide button actions.", level = 1 },
@@ -106,7 +127,7 @@ NS.CHANGELOG_DATA = {
             }},
             { title = "Objective tracker diagnostics", entries = {
                 { text = "Added objective tracker visibility diagnostics that prefer Kaliel's Tracker when present and fall back to Blizzard's ObjectiveTrackerFrame.", level = 1 },
-                { text = "`/awp status` now reports the objective tracker host, hard-hidden state, opacity state, Tracker Viewer state, Zygor native viewer state, local chat-frame step-display state, Flight Map Assist and Taxi List state, and minimap button state.", level = 1 },
+                { text = "`/awp status` now reports the objective tracker viewer, hard-hidden state, opacity state, Tracker Viewer state, Zygor native viewer state, local chat-frame step-display state, Flight Map Assist and Taxi List state, and minimap button state.", level = 1 },
                 { text = "AWP now warns after login or reload when Tracker Viewer is enabled but the active objective tracker is hard-hidden, or when it appears transparent due to tracker opacity or mouseover behavior.", level = 1 },
             }},
             { title = "Options and help", entries = {
@@ -200,7 +221,7 @@ NS.CHANGELOG_DATA = {
                 { text = "Replaced the secure-parent host approach with a root-frame alpha cloak so TomTom's full crazy arrow stack (textures and text) hides together without calling protected hide/show paths.", level = 1 },
                 { text = "Disabled mouse input on the cloaked arrow, skipping the call when the arrow is protected during combat lockdown to avoid blocked-action errors.", level = 1 },
                 { text = "Restored the arrow through TomTom's own `ShowHideCrazyArrow()` path after combat ends.", level = 1 },
-                { text = "Kept `[combat] hide; show` secure visibility scoped to the special travel button only.", level = 1 },
+                { text = "Kept `[combat] hide, show` secure visibility scoped to the special travel button only.", level = 1 },
                 { text = "Fixed Hide During Combat's disabled state so it no longer creates or briefly reparents TomTom's arrow into the secure combat visibility host.", level = 1 },
             }},
             { title = "TomTom arrow-skin protected-call safety", entries = {
@@ -234,7 +255,7 @@ NS.CHANGELOG_DATA = {
                 { text = "Added Hide During Combat with options for Disabled, TomTom + Travel Button, World Overlay, and Both.", level = 1 },
                 { text = "TomTom combat hiding uses a secure visibility wrapper so the TomTom arrow and special travel button can be hidden during combat without protected-frame errors.", level = 1 },
                 { text = "Added player control lost/gained route refresh handling so taxi and flightpath start/end events replan the active route and recompute the TomTom carrier.", level = 1 },
-                { text = "Added separate Quick-Start Popup and What's New Popup settings, each with account-wide, per-character, and disabled modes. Quick-start defaults to per-character; What's New defaults to account-wide.", level = 1 },
+                { text = "Added separate Quick-Start Popup and What's New Popup settings, each with account-wide, per-character, and disabled modes. Quick-start defaults to per-character, What's New defaults to account-wide.", level = 1 },
             }},
             { title = "Compatibility fixes", entries = {
                 { text = "Added a WorldQuestTab click fallback for bonus objectives and other non-world-quest entries that have valid quest coordinates but do not emit Blizzard waypoint or supertrack signals.", level = 1 },
@@ -348,7 +369,7 @@ NS.CHANGELOG_DATA = {
                 { text = "Presentation: shared title, subtext, icon hint, semantic kind, and route leg display data.", level = 2 },
                 { text = "Persistent active-route source now survives reload/login when possible.", level = 1 },
                 { text = "Route environment tracking captures zone, real zone, subzone, minimap zone, indoor state, and route gate matching.", level = 1 },
-                { text = "The v3 TickUpdate heartbeat is no longer the primary route driver; v4 routing reacts through explicit evaluator and invalidation paths. Cleaner and more efficient.", level = 1 },
+                { text = "The v3 TickUpdate heartbeat is no longer the primary route driver, v4 routing reacts through explicit evaluator and invalidation paths. Cleaner and more efficient.", level = 1 },
                 { text = "Improved TomTom carrier synchronization, external clear detection, route invalidation, and guide visibility hooks.", level = 1 },
             }},
             { title = "Special travel actions", entries = {

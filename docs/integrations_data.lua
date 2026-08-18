@@ -165,9 +165,10 @@ local INTEGRATIONS = {
         name = "Kaliel's Tracker",
         addons = { "!KalielsTracker" },
         url = "https://www.curseforge.com/wow/addons/kaliels-tracker",
-        summary = "If you use Kaliel's Tracker instead of the Blizzard objective tracker, AWP's Zygor Tracker Viewer guide display can show inside it.",
+        summary = "Kaliel's Tracker is AWP's recommended and automatically preferred Tracker Viewer. It avoids the known taint boundary in Blizzard's shared Objective Tracker and World Map path.",
         bullets = {
             "Shows AWP's Zygor Tracker Viewer guide steps inside Kaliel's Tracker instead of Blizzard's default tracker.",
+            "Provides the recommended long-term docking path. Blizzard native docking is experimental, may stop working after a WoW patch, and may eventually be removed.",
             "Keeps guide steps, sticky steps, grouped long tips, and the header buttons in Kaliel's tracker.",
             "Follows Kaliel's own show/hide, collapse, and fade settings.",
             "Can optionally match Kaliel's header texture, background color, font, title/icon color, and button color with five independent settings.",

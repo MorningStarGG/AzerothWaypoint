@@ -350,6 +350,9 @@ function NS.GetObjectiveTrackerVisibilityStatus()
     local frame, host = GetTrackerFrame()
     local status = {
         host = host,
+        support = host == "Kaliel's Tracker"
+            and "recommended"
+            or "experimental, known taint risk",
         frame = frame,
         exists = frame ~= nil,
         shown = false,

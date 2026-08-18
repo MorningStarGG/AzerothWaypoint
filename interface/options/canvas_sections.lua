@@ -1009,7 +1009,7 @@ local function RenderZygor()
     Spacer()
     SectionHeader("Tracker Viewer")
     AddToggle("Enable Tracker Viewer",
-        "Shows Zygor guide steps inside the objective tracker. Supports Blizzard's Objective Tracker and Kaliel's Tracker.",
+        "Shows Zygor guide steps inside the active objective tracker. Kaliel's Tracker is recommended; Blizzard native docking is experimental and has known taint risk.",
         function()
             local s = NS.GetZygorTrackerViewerSettings()
             return s.enabled
@@ -1018,6 +1018,40 @@ local function RenderZygor()
             NS.SetZygorTrackerViewerSetting("enabled", v)
             RefreshZygorTrackerViewer()
         end)
+
+    do
+        local trackerHost = NS.Internal
+            and NS.Internal.ZygorTrackerViewer
+            and NS.Internal.ZygorTrackerViewer.TrackerHost
+        local _, supportText, isWarning
+        if trackerHost and type(trackerHost.GetDockingSupportStatus) == "function" then
+            _, supportText, isWarning = trackerHost.GetDockingSupportStatus()
+        elseif rawget(_G, "KT_ObjectiveTrackerFrame") then
+            supportText = "Kaliel's Tracker is active and is AWP's recommended Tracker Viewer."
+            isWarning = false
+        else
+            supportText = "Blizzard native Tracker Viewer docking is experimental and has known taint risk. Kaliel's Tracker is recommended."
+            isWarning = true
+        end
+        AddText(
+            supportText,
+            "GameFontNormal",
+            isWarning and { 1.00, 0.45, 0.25, 1 } or { 0.35, 0.90, 0.45, 1 },
+            0,
+            12
+        )
+    end
+
+    AddToggle("Show Native Docking Warning Popup",
+        "Shows the experimental-support warning after login or reload when Tracker Viewer attaches to Blizzard's native tracker. This setting has no effect under Kaliel's Tracker.",
+        function()
+            local s = NS.GetZygorTrackerViewerSettings()
+            return s.nativeDockWarningPopup ~= false
+        end,
+        function(v)
+            NS.SetZygorTrackerViewerSetting("nativeDockWarningPopup", v)
+        end)
+
     AddDropdown("Tracker Viewer Progress Bar",
         "Controls whether the Tracker Viewer progress bar is square, rounded border, or hidden.",
         opts.CreateZygorTrackerViewerProgressStyleOptions,

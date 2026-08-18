@@ -10,6 +10,7 @@ local TWITCH_COPY_POPUP = "AWP_COPY_TWITCH_URL"
 local RELOAD_RECOMMENDED_POPUP = "AWP_RELOAD_RECOMMENDED"
 local WAYPOINT_UI_RECOMMEND_POPUP = "AWP_RECOMMEND_NATIVE_OVERLAY"
 local WAYPOINT_UI_ADDON_NAME = "WaypointUI"
+local NATIVE_TRACKER_WARNING_POPUP = "AWP_NATIVE_TRACKER_WARNING"
 local ZYGOR_CONFLICT_POPUP = "AWP_ZYGOR_CONFLICT"
 local ZYGOR_WAYPOINT_ADDON_NAME = "ZygorWaypoint"
 local ZYGOR_ARROW_RECOMMEND_POPUP = "AWP_RECOMMEND_ZYGOR_ARROW"
@@ -35,6 +36,7 @@ end
 
 local STARTUP_NOTICE_POPUPS = {
     WAYPOINT_UI_RECOMMEND_POPUP,
+    NATIVE_TRACKER_WARNING_POPUP,
     ZYGOR_CONFLICT_POPUP,
     ZYGOR_ARROW_RECOMMEND_POPUP,
 }
@@ -486,6 +488,83 @@ local function CreateGuideStepBackgroundHoverOptions()
     container:Add(C.GUIDE_STEP_BACKGROUND_MODE_BG_GOAL, "Hide Step Backgrounds + Line Colors")
     container:Add(C.GUIDE_STEP_BACKGROUND_MODE_NONE, "Disabled")
     return container:GetData()
+end
+
+local nativeTrackerWarningHandledThisSession = false
+
+local function GetTrackerViewerHostObjects()
+    local shared = NS.Internal and NS.Internal.ZygorTrackerViewer
+    return shared and shared.TrackerHost, shared and shared.TrackerModule
+end
+
+local function IsNativeTrackerWarningRelevant()
+    if nativeTrackerWarningHandledThisSession then return false end
+
+    local settings = type(NS.GetZygorTrackerViewerSettings) == "function"
+        and NS.GetZygorTrackerViewerSettings()
+        or nil
+    if not settings or settings.enabled ~= true or settings.nativeDockWarningPopup == false then
+        return false
+    end
+
+    local host, trackerModule = GetTrackerViewerHostObjects()
+    if not host or type(host.IsKTLoaded) ~= "function" or host.IsKTLoaded() then
+        return false
+    end
+    return trackerModule
+        and type(trackerModule.IsAttached) == "function"
+        and trackerModule.IsAttached() == true
+end
+
+local function EnsureNativeTrackerWarningPopup()
+    if StaticPopupDialogs[NATIVE_TRACKER_WARNING_POPUP] then return end
+
+    StaticPopupDialogs[NATIVE_TRACKER_WARNING_POPUP] = {
+        text = table.concat({
+            "|cffffcc00Blizzard Native Tracker Docking Warning|r",
+            "",
+            "AzerothWaypoint's Tracker Viewer is currently docked into Blizzard's native Objective Tracker.",
+            "",
+            "This path is experimental because WoW 12.1 can carry addon taint from the shared tracker into the World Map. It may produce protected-action or secret-value errors, may stop working after a future WoW patch, and may eventually be removed from AWP.",
+            "",
+            "The combat quest-click proxy prevents one direct error path, but it does not make native docking taint-free. Kaliel's Tracker is recommended and avoids this specific Blizzard boundary.",
+        }, "\n"),
+        button1 = "Okay, remind me later",
+        button2 = "Don't remind me again",
+        timeout = 0,
+        whileDead = 1,
+        hideOnEscape = 0,
+        showAlert = 1,
+        preferredIndex = GetStaticPopupPreferredIndex(),
+        OnCancel = function(_, _, reason)
+            if reason ~= "clicked" then return end
+            if type(NS.SetZygorTrackerViewerSetting) == "function" then
+                NS.SetZygorTrackerViewerSetting("nativeDockWarningPopup", false)
+            end
+            if type(NS.Msg) == "function" then
+                NS.Msg("Blizzard native Tracker Viewer popup disabled. It can be restored in Zygor > Tracker Viewer settings.")
+            end
+        end,
+    }
+end
+
+function NS.MaybeShowNativeTrackerWarningPopup(attempt)
+    if not IsNativeTrackerWarningRelevant() then return false end
+    if StaticPopup_Visible(NATIVE_TRACKER_WARNING_POPUP) then
+        nativeTrackerWarningHandledThisSession = true
+        return true
+    end
+    if ShouldDeferStartupPopup(NATIVE_TRACKER_WARNING_POPUP) then
+        return RetryStartupPopup(NS.MaybeShowNativeTrackerWarningPopup, attempt)
+    end
+
+    EnsureNativeTrackerWarningPopup()
+    local dialog = StaticPopup_Show(NATIVE_TRACKER_WARNING_POPUP)
+    if dialog then
+        nativeTrackerWarningHandledThisSession = true
+        return true
+    end
+    return RetryStartupPopup(NS.MaybeShowNativeTrackerWarningPopup, attempt)
 end
 
 local function CreateZygorTrackerViewerProgressStyleOptions()

@@ -56,6 +56,7 @@ local DB_DEFAULTS = {
     zygorTrackerViewerTextColorMode = C.WORLD_OVERLAY_COLOR_AUTO,
     zygorTrackerViewerTextCustomColor = DEFAULT_ZYGOR_TRACKER_VIEWER_TEXT_COLOR,
     zygorTrackerViewerProgressStyle = "rounded",
+    zygorTrackerViewerNativeWarningPopup = true,
     zygorTrackerViewerKTHeaderTexture = false,
     zygorTrackerViewerKTHeaderBackgroundColor = false,
     zygorTrackerViewerKTHeaderFont = false,
@@ -956,6 +957,7 @@ function NS.GetZygorTrackerViewerSettings()
         hideZygorFrame = db.zygorTrackerViewerHideNative == true,
         position       = type(db.zygorTrackerViewerPosition) == "table" and db.zygorTrackerViewerPosition or nil,
         progressStyle  = db.zygorTrackerViewerProgressStyle,
+        nativeDockWarningPopup = db.zygorTrackerViewerNativeWarningPopup ~= false,
         textColorMode  = db.zygorTrackerViewerTextColorMode,
         textCustomColor = db.zygorTrackerViewerTextCustomColor,
         ktHeaderStyle = {
@@ -978,6 +980,8 @@ function NS.SetZygorTrackerViewerSetting(key, value)
         db.zygorTrackerViewerHideNative = value and true or false
     elseif key == "progressStyle" then
         db.zygorTrackerViewerProgressStyle = NormalizeZygorTrackerViewerProgressStyle(value)
+    elseif key == "nativeDockWarningPopup" then
+        db.zygorTrackerViewerNativeWarningPopup = value and true or false
     elseif key == "textColorMode" then
         db.zygorTrackerViewerTextColorMode = NormalizeZygorTrackerViewerTextColorMode(value)
     elseif key == "textCustomColor" then

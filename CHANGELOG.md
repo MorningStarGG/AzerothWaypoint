@@ -1,5 +1,21 @@
 # Changelog
 
+## 4.1.2
+- **Native Tracker Viewer support status**
+  - Blizzard native docking remains available at order 2, but is now explicitly experimental because WoW 12.1's shared Objective Tracker and World Map execution can retain AWP taint and later report protected-action or secret-value errors.
+  - Native docking may stop working entirely after a future WoW patch and may be removed from AWP in favor of Kaliel's Tracker-only docking. Kaliel's Tracker is the recommended tracker viewer and is selected automatically whenever it is installed and loaded.
+  - Tracker Viewer settings, help, and `/awp status` now report the active tracker viewer and its support status.
+  - Added a startup warning when Tracker Viewer attaches to Blizzard's native tracker. **Okay, remind me later** repeats it next login/reload, **Don't remind me again** disables it account-wide, and the Tracker Viewer settings can restore it.
+
+- **Blizzard quest tracker taint cleanup and mitigation**
+  - Removed the Scenario aura/cooldown replacement shims completely. AWP no longer replaces `ShouldShowMawBuffs` or `ScenarioSpellButtonMixin.UpdateCooldown`.
+  - Retained the two narrow risk reductions that tested cleanly: AWP stays at order 2 without assigning Blizzard's `hasDisplayPriority` field, and guide refreshes no longer force a redundant synchronous full-tracker update.
+  - Retained the Blizzard-only combat proxy for tracked Quest and Campaign Quest headers. It reports that the action is unavailable in combat and leaves Blizzard's normal click behavior untouched outside combat.
+
+- **Known Blizzard native quest tracker limitation**
+  - Clicking a native tracked quest out of combat can still transfer AWP taint into reusable `WorldMapFrame.mapID` and `mapArtID` state. A later map open during combat may report `SetPassThroughButtons` or `SetPropagateMouseClicks` even though the keybind for world map still opens the map.
+  - The combat proxy mitigates the tracker-click path only while combat-locked, it does not make Blizzard native docking taint-free. No map-pin, quest-handler, World Map, or Blizzard container functions are patched.
+
 ## 4.1.1
 - **Kaliel's Tracker header styling**
   - Added five independent, opt-in settings to match Kaliel's header texture, background color, font, title/collapse-icon color, and AWP header-button color. Every setting defaults off and restores AWP's original appearance when disabled.
@@ -61,7 +77,7 @@
 
 - **Native minimap button**
   - Added an AzerothWaypoint minimap button.
-  - Left-click opens the AWP quick menu; right-click opens AWP settings; dragging supports minimap-edge snapping near the minimap and free-floating placement when pulled away.
+  - Left-click opens the AWP quick menu, right-click opens AWP settings, dragging supports minimap-edge snapping near the minimap and free-floating placement when pulled away.
   - Minimap button position and visibility can be controlled with `/awp minimap show|hide|toggle|reset|status`.
   - Added addon compartment support with the same quick menu, tooltip, and settings access so users can still reach the same AWP menu when the minimap button is hidden.
   - The minimap quick menu includes Tracker Viewer toggle, Zygor native viewer toggle, Zygor guide controls, Open AWP Settings, Open Help, Open Queue, reset position, and hide button actions.
@@ -84,7 +100,7 @@
 
 - **Objective tracker diagnostics**
   - Added objective tracker visibility diagnostics that prefer Kaliel's Tracker when present and fall back to Blizzard's ObjectiveTrackerFrame.
-  - `/awp status` now reports the objective tracker host, hard-hidden state, opacity state, Tracker Viewer state, Zygor native viewer state, local chat-frame step-display state, Flight Map Assist and Taxi List state, and minimap button state.
+  - `/awp status` now reports the objective tracker viewer, hard-hidden state, opacity state, Tracker Viewer state, Zygor native viewer state, local chat-frame step-display state, Flight Map Assist and Taxi List state, and minimap button state.
   - AWP now warns after login or reload when Tracker Viewer is enabled but the active objective tracker is hard-hidden, or when it appears transparent due to tracker opacity or mouseover behavior.
 
 - **Options and help**
@@ -162,7 +178,7 @@
   - Replaced the secure-parent host approach with a root-frame alpha cloak so TomTom's full crazy arrow stack (textures and text) hides together without calling protected hide/show paths.
   - Disabled mouse input on the cloaked arrow, skipping the call when the arrow is protected during combat lockdown to avoid blocked-action errors.
   - Restored the arrow through TomTom's own `ShowHideCrazyArrow()` path after combat ends.
-  - Kept `[combat] hide; show` secure visibility scoped to the special travel button only.
+  - Kept `[combat] hide, show` secure visibility scoped to the special travel button only.
   - Fixed Hide During Combat's disabled state so it no longer creates or briefly reparents TomTom's arrow into the secure combat visibility host.
 
 - **TomTom arrow-skin protected-call safety**
@@ -188,7 +204,7 @@
   - Added Hide During Combat with options for Disabled, TomTom + Travel Button, World Overlay, and Both.
   - TomTom combat hiding uses a secure visibility wrapper so the TomTom arrow and special travel button can be hidden during combat without protected-frame errors.
   - Added player control lost/gained route refresh handling so taxi and flightpath start/end events replan the active route and recompute the TomTom carrier.
-  - Added separate Quick-Start Popup and What's New Popup settings, each with account-wide, per-character, and disabled modes. Quick-start defaults to per-character; What's New defaults to account-wide.
+  - Added separate Quick-Start Popup and What's New Popup settings, each with account-wide, per-character, and disabled modes. Quick-start defaults to per-character, What's New defaults to account-wide.
 
 - **Compatibility fixes**
   - Added a WorldQuestTab click fallback for bonus objectives and other non-world-quest entries that have valid quest coordinates but do not emit Blizzard waypoint or supertrack signals.
@@ -296,7 +312,7 @@
     - Presentation: shared title, subtext, icon hint, semantic kind, and route leg display data.
   - Persistent active-route source now survives reload/login when possible.
   - Route environment tracking captures zone, real zone, subzone, minimap zone, indoor state, and route gate matching.
-  - The v3 TickUpdate heartbeat is no longer the primary route driver; v4 routing reacts through explicit evaluator and invalidation paths. Cleaner and more efficient.
+  - The v3 TickUpdate heartbeat is no longer the primary route driver, v4 routing reacts through explicit evaluator and invalidation paths. Cleaner and more efficient.
   - Improved TomTom carrier synchronization, external clear detection, route invalidation, and guide visibility hooks.
 
 - **Special travel actions**

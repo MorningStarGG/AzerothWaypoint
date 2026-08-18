@@ -1108,7 +1108,9 @@ local function handleStatus()
             "Tracker Viewer:",
             trackerSettings.enabled and "on" or "off",
             "Zygor native viewer:",
-            trackerSettings.hideZygorFrame and "hidden" or "shown"
+            trackerSettings.hideZygorFrame and "hidden" or "shown",
+            "native warning popup:",
+            trackerSettings.nativeDockWarningPopup ~= false and "on" or "off"
         )
     end
     if type(NS.GetZygorStepChatSettings) == "function" then
@@ -1125,22 +1127,13 @@ local function handleStatus()
         NS.Msg(
             "Objective tracker:",
             tracker.host or "unknown",
+            "support:",
+            tracker.support or "unknown",
             "visibility:",
             tracker.visibility or "unknown",
             "opacity:",
             tracker.opacity or "unknown"
         )
-    end
-    if type(NS.GetTrackerSecretShimStatus) == "function" then
-        local shim = NS.GetTrackerSecretShimStatus()
-        if shim then
-            NS.Msg(
-                "Tracker secret shim:",
-                shim.installed and "installed" or "not installed",
-                "aura fallback:",
-                shim.fallbackLatched and "latched" or "idle"
-            )
-        end
     end
     if type(NS.GetMinimapButtonStatus) == "function" then
         NS.Msg("Minimap button:", NS.GetMinimapButtonStatus())

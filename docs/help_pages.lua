@@ -714,7 +714,9 @@ NS.HELP_PAGES = {
                 text = JoinLines({
                     "Tracker Viewer is for players who want Zygor guide steps in the objective tracker instead of using Zygor's full-size guide window.",
                     "",
-                    "It mirrors the active Zygor guide step, keeps Zygor guide state and waypoints alive, and works with the native Blizzard objective tracker or Kaliel's Tracker.",
+                    "It mirrors the active Zygor guide step, keeps Zygor guide state and waypoints alive, and can dock into Kaliel's Tracker or the native Blizzard objective tracker.",
+                    "",
+                    "Kaliel's Tracker is the recommended tracker and is selected automatically when installed. Blizzard native docking remains available as an experimental fallback.",
                     "",
                     "Long Zygor tip blocks are collapsed by section when a step has many tips. Hover the section row to read the collapsed tips without letting one step overflow the tracker.",
                     "",
@@ -723,8 +725,11 @@ NS.HELP_PAGES = {
             },
             {
                 type = "note",
-                text =
-                "Tracker Viewer depends on Zygor being loaded. It replaces the guide display, not Zygor's guide engine, guide picker, options menu, routing data, or waypoints.",
+                text = JoinLines({
+                    "Tracker Viewer depends on Zygor being loaded. It replaces the guide display, not Zygor's guide engine, guide picker, options menu, routing data, or waypoints.",
+                    "",
+                    "Blizzard native docking has a confirmed WoW 12.1 taint issue. It can produce protected-action or secret-value errors, may stop working entirely after a future patch, and may be removed from AWP in favor of Kaliel's Tracker-only docking. The combat quest-click proxy mitigates one path but does not make native docking taint-free.",
+                }),
             },
             {
                 type = "heading",
@@ -752,11 +757,14 @@ NS.HELP_PAGES = {
                 text = JoinLines({
                     "Open /awp options, then go to Zygor > Tracker Viewer.",
                     "",
-                    "- Enable Tracker Viewer: shows Zygor Guides within the native Blizzard tracker frame. This also supports Kaliel's Tracker.",
+                    "- Enable Tracker Viewer: shows Zygor Guides in Kaliel's Tracker when available; otherwise it uses the experimental Blizzard native docking path.",
+                    "- Show Native Docking Warning Popup: controls the login/reload warning shown only when Tracker Viewer attaches to Blizzard's native tracker.",
                     "- Tracker Viewer Progress Bar: choose square, rounded, or no progress bar.",
                     "- Tracker Viewer Text: use contextual tracker viewer text colors or make all step text a single selected color.",
                     "",
                     "When Kaliel's Tracker is active, Kaliel Header Styling adds five independent opt-in matches for header texture, background color, font, title/collapse-icon color, and AWP header-button color. Every match defaults off, and disabling one restores that part of AWP's normal appearance immediately.",
+                    "",
+                    "The native warning's Okay, remind me later button repeats it next login/reload. Don't remind me again disables it account-wide; turn Show Native Docking Warning Popup back on to restore it.",
                 }),
             },
             {
@@ -1464,6 +1472,8 @@ NS.HELP_PAGES = {
                     "- The objective tracker the Tracker Viewer docks into is actually visible.",
                     "",
                     "The Tracker Viewer is not its own window. It docks into the objective tracker - Kaliel's Tracker if it is installed, otherwise Blizzard's. If that tracker is hidden, collapsed, or see-through, the Tracker Viewer goes with it.",
+                    "",
+                    "Kaliel's Tracker is recommended and selected automatically. Blizzard native docking is experimental: its known WoW 12.1 taint can produce protected-action or secret-value errors, may stop working after a future patch, and may eventually be removed in favor of Kaliel's Tracker-only docking.",
                 }),
             },
             {
@@ -1480,7 +1490,7 @@ NS.HELP_PAGES = {
             {
                 type = "text",
                 text = JoinLines({
-                    "/awp status reports the detected objective tracker host and whether it is hard-hidden or transparent. AWP also warns after login or /reload when the Tracker Viewer is on but the tracker is hidden or see-through.",
+                    "/awp status reports the detected objective tracker host, its support status, the native-warning preference, and whether it is hard-hidden or transparent. AWP also warns after login or /reload when the Tracker Viewer is on but the tracker is hidden or see-through. Native Blizzard attachment shows the experimental-support popup unless that reminder has been disabled.",
                     "",
                     "If you changed tracker addons or Zygor's load state, try /reload.",
                 }),
