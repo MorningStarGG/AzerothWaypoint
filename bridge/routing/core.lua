@@ -164,7 +164,7 @@ local function ResolveEffectiveBackend(opts)
         if fallback and fallback.IsAvailable() then return fallback end
     end
 
-    -- direct is the floor â€” should never miss, but defensive return.
+    -- direct is the floor, should never miss, but defensive return.
     return NS.RoutingBackend_Direct
 end
 
@@ -231,12 +231,25 @@ local function IsSecureSpecialAction(action)
         and action.securePayload ~= ""
 end
 
+local function IsEquipmentSpecialAction(action)
+    return type(action) == "table"
+        and action.executionType == "equip"
+        and type(action.itemID) == "number"
+        and action.itemID > 0
+end
+
+local function IsExecutableSpecialAction(action)
+    return IsSecureSpecialAction(action) or IsEquipmentSpecialAction(action)
+end
+
 local function GetSpecialActionIdentity(action)
-    if not IsSecureSpecialAction(action) then
+    if not IsExecutableSpecialAction(action) then
         return nil
     end
     return table.concat({
         tostring(action.semanticKind or "-"),
+        tostring(action.executionType or "secure"),
+        tostring(action.itemID or "-"),
         tostring(action.secureType or "-"),
         tostring(action.securePayload or "-"),
         tostring(action.destinationName or "-"),
@@ -244,11 +257,14 @@ local function GetSpecialActionIdentity(action)
 end
 
 local function SanitizeSpecialAction(action)
-    if IsSecureSpecialAction(action) then
+    if IsExecutableSpecialAction(action) then
         return action
     end
     return nil
 end
+
+
+NS.GetRouteSpecialActionIdentity = GetSpecialActionIdentity
 
 local ROUTE_DEPENDENCY_KIND = {
     spell = true,
@@ -742,7 +758,7 @@ local function PreservePreviousSpecialActionLeg(legs, previousLeg)
         if IsValidLeg(leg)
             and GetLegSignature(leg) == previousSig
             and ArrivalGateMatches(leg)
-            and not IsSecureSpecialAction(leg.specialAction)
+            and not IsExecutableSpecialAction(leg.specialAction)
         then
             leg.specialAction = previousLeg.specialAction
             leg.activationCoords = leg.activationCoords or previousLeg.activationCoords
@@ -799,6 +815,9 @@ local function LegRequiresHardTransition(leg)
     if type(leg) ~= "table" then
         return false
     end
+    if IsEquipmentSpecialAction(leg.specialAction) then
+        return true
+    end
     if type(leg.arrivalGate) == "table" then
         return true
     end
@@ -821,7 +840,7 @@ local function PlanRequiresHardTransition(legs)
 end
 
 local function LegRequiresExplicitTransition(leg)
-    return LegRequiresHardTransition(leg) or IsSecureSpecialAction(type(leg) == "table" and leg.specialAction or nil)
+    return LegRequiresHardTransition(leg) or IsExecutableSpecialAction(type(leg) == "table" and leg.specialAction or nil)
 end
 
 local function PlanRequiresExplicitTransition(legs)
@@ -910,6 +929,9 @@ local function ClearRecordPlan(record)
     if type(record) ~= "table" then
         return
     end
+    if type(NS.CancelRouteEquipmentTransaction) == "function" then
+        NS.CancelRouteEquipmentTransaction(record, "clear_record_plan")
+    end
     ClearRouteTravelDependencies(record)
     record.legs = nil
     record.currentLegIndex = nil
@@ -978,6 +1000,8 @@ local function FingerprintSpecialAction(action)
     local dependencyKind, dependencyID = NormalizeRouteDependency(action.routeDependency)
     return table.concat({
         tostring(action.semanticKind or "-"),
+        tostring(action.executionType or "-"),
+        tostring(action.itemID or "-"),
         tostring(action.secureType or "-"),
         tostring(action.securePayload or "-"),
         tostring(action.destinationName or "-"),
@@ -1139,6 +1163,10 @@ function NS.AcceptBackendPlan(record, backendID, legs, reason, serial)
         if not ArrivalGateMatches(acceptedLegs[record.currentLegIndex]) then
             record.currentLegIndex = nil
         end
+    end
+    if type(NS.SyncRouteEquipmentTransaction) == "function" then
+        local retainedLeg = record.currentLegIndex and acceptedLegs[record.currentLegIndex] or nil
+        NS.SyncRouteEquipmentTransaction(record, retainedLeg and retainedLeg.specialAction or nil)
     end
     RefreshRouteTravelDependencies(record)
     record.currentLeg = nil
@@ -1383,6 +1411,9 @@ local function SetCoreLegIndex(record, index, reason)
     record.currentLeg = leg
     record.specialAction = SanitizeSpecialAction(leg.specialAction)
     RefreshRouteTravelDependencies(record)
+    if type(NS.SyncRouteEquipmentTransaction) == "function" then
+        NS.SyncRouteEquipmentTransaction(record, record.specialAction)
+    end
 
     if previousIndex and previousIndex ~= index then
         record._coreLastAdvancedLegSig = GetLegSignature(previousLeg)
@@ -1390,6 +1421,19 @@ local function SetCoreLegIndex(record, index, reason)
         record._coreLastAdvanceAt = GetTimeSafe()
     end
     return previousIndex ~= index
+end
+
+function NS.AdvanceActiveRouteAction(expectedIdentity, expectedGeneration, reason)
+    local record = GetActiveRouteRecord()
+    if type(record) ~= "table" or type(record.legs) ~= "table" then return false end
+    if expectedGeneration ~= nil and record._routeAcceptedPlanGeneration ~= expectedGeneration then return false end
+    local index = tonumber(record.currentLegIndex) or 1
+    local leg = record.legs[index]
+    if type(leg) ~= "table" or GetSpecialActionIdentity(leg.specialAction) ~= expectedIdentity then return false end
+    if index >= #record.legs then return false end
+    local advanced = SetCoreLegIndex(record, index + 1, reason or "action_complete")
+    if advanced and type(NS.RecomputeCarrier) == "function" then NS.RecomputeCarrier() end
+    return advanced
 end
 
 local function EnsureCoreLeg(record)
@@ -1434,7 +1478,7 @@ local function IsDistanceAdvanceLeg(leg)
     if not IsValidLeg(leg) then
         return false
     end
-    if IsSecureSpecialAction(leg.specialAction) then
+    if IsExecutableSpecialAction(leg.specialAction) then
         return false
     end
     return DISTANCE_ADVANCE_KIND[leg.kind] == true
@@ -1680,12 +1724,20 @@ local function ReplanAuthority(record, reason)
     return true
 end
 
+local function IsRouteActionTransactionLocked()
+    return state.routing.specialActionCasting == true
+        or (type(NS.IsRouteEquipmentTransactionActive) == "function" and NS.IsRouteEquipmentTransactionActive())
+end
+
 function NS.RefreshActiveRoutePlans(reason)
     local routing = state.routing
     -- Defense in depth: if the cast-freeze flipped on after a refresh
     -- was already scheduled but before the debounce timer fired, drop
     -- the pending replan rather than racing the cast.
-    if routing.specialActionCasting then
+    if IsRouteActionTransactionLocked() then
+        if type(NS.IsRouteEquipmentTransactionActive) == "function" and NS.IsRouteEquipmentTransactionActive() then
+            routing._routeRefreshAfterEquipment = reason or routing._routeRefreshAfterEquipment or "equipment_complete"
+        end
         return false
     end
     local record = routing.manualAuthority
@@ -1711,7 +1763,10 @@ function NS.ScheduleActiveRouteRefresh(reason)
     -- the route to an alternative leg mid-cast. The cast-end handler
     -- in bridge/routing/special_actions.lua drops the flag and triggers a
     -- single post_cast refresh.
-    if routing.specialActionCasting then
+    if IsRouteActionTransactionLocked() then
+        if type(NS.IsRouteEquipmentTransactionActive) == "function" and NS.IsRouteEquipmentTransactionActive() then
+            routing._routeRefreshAfterEquipment = reason or routing._routeRefreshAfterEquipment or "equipment_complete"
+        end
         return
     end
 
@@ -1742,6 +1797,16 @@ function NS.ScheduleActiveRouteRefresh(reason)
         NS.RefreshActiveRoutePlans(routing._routeRefreshReason or "scheduled")
         routing._routeRefreshReason = nil
     end)
+end
+
+function NS.FlushDeferredRouteActionRefresh()
+    local routing = state.routing
+    if IsRouteActionTransactionLocked() then return false end
+    local reason = routing._routeRefreshAfterEquipment
+    routing._routeRefreshAfterEquipment = nil
+    if not reason then return false end
+    NS.ScheduleActiveRouteRefresh(reason)
+    return true
 end
 
 function NS.NoteRouteEnvironmentChanged(reason)
@@ -1925,7 +1990,7 @@ local function ExecuteRouteBackendStateValidation(request)
         DeferValidationForCombat(request)
         return
     end
-    if state.routing.specialActionCasting then
+    if IsRouteActionTransactionLocked() then
         DeferValidationForCast(request)
         return
     end
@@ -2033,7 +2098,7 @@ function NS.RequestRouteBackendStateValidation(backendID, reason, requestClass)
     NoteRouteValidationChurn(backendID, "requested")
 
     local combatLocked = IsCombatLocked()
-    if requestClass == "cooldown" and not combatLocked and not state.routing.specialActionCasting then
+    if requestClass == "cooldown" and not combatLocked and not IsRouteActionTransactionLocked() then
         if ProbeRouteDependencies(record, backendID) then
             requestClass = "selected_action"
         end
@@ -2059,7 +2124,7 @@ function NS.RequestRouteBackendStateValidation(backendID, reason, requestClass)
         return true
     end
 
-    if state.routing.specialActionCasting then
+    if IsRouteActionTransactionLocked() then
         local pending = routeValidation.pending[backendID]
         if pending then
             pending.cancelled = true
@@ -2094,7 +2159,7 @@ function NS.RequestRouteBackendStateValidation(backendID, reason, requestClass)
 end
 
 function NS.FlushDeferredRouteBackendStateValidations()
-    if IsCombatLocked() or state.routing.specialActionCasting then return false end
+    if IsCombatLocked() or IsRouteActionTransactionLocked() then return false end
     local flushed = false
     local function flushRequests(requests)
         local companion = requests == routeValidation.dirty

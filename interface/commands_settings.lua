@@ -316,7 +316,10 @@ local function handleBackend(arg)
     local db = NS.GetDB()
     if arg == "direct" or arg == "zygor" or arg == "mapzeroth" or arg == "farstrider" then
         if not IsBackendAvailable(arg) then
-            NS.Msg("Backend unavailable:", FormatBackendName(arg))
+            local backend = arg == "mapzeroth" and NS.RoutingBackend_Mapzeroth or nil
+            local status = type(backend) == "table" and type(backend.GetCompatibilityStatus) == "function"
+                and backend.GetCompatibilityStatus() or nil
+            NS.Msg("Backend unavailable:", FormatBackendName(arg), status and status.reason or "")
             return
         end
         if type(NS.SetBackend) == "function" and NS.SetBackend(arg) then

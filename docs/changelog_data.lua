@@ -2,6 +2,20 @@ local NS = _G.AzerothWaypointNS
 
 NS.CHANGELOG_DATA = {
     {
+        version = "4.1.3",
+        sections = {
+            { title = "Mapzeroth 2.x compatibility", entries = {
+                { text = "Updated the existing routing backend for Mapzeroth 2.x", level = 1 },
+                { text = "Added complete Mapzeroth 2.x `equip` route support through equip, confirm, use, and restore transaction.", level = 1 },
+                { text = "AWP restores prior main-hand and offhand equipment only when its own teleport item is still equipped, defers restoration through combat, and never overwrites a later manual gear change.", level = 1 },
+                { text = "Route validation and same-target replanning remain held through the equip/use sequence so an item's equip cooldown cannot discard the selected route before use.", level = 1 },
+            }},
+            { title = "InFlight integration updates", entries = {
+                { text = "InFlight timing now uses the current combined `SpeedFactor` API, including Frequent Flier exactly once.", level = 1 },
+            }},
+        },
+    },
+    {
         version = "4.1.2",
         sections = {
             { title = "Native Tracker Viewer support status", entries = {

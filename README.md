@@ -88,7 +88,7 @@ Optional integrations provide richer route planning and guide data.
 |---|---|
 | **TomTom Direct** | Simple direct waypoint navigation. Always available. |
 | **Farstrider** | Travel-aware routing with flights, portals, transports, items, spells, and travel nodes. |
-| **Mapzeroth** | Mapzeroth travel routing with flights, portals, transports, items, spells, and travel nodes. |
+| **Mapzeroth** | Travel routing with flights, portals, transports, spells, toys, and wearable teleport items. |
 | **Zygor** | Zygor users who want LibRover travel routing, travel actions, search data, and transport support. |
 
 5. Open the waypoint queue UI from the world map side tab or with:
@@ -156,7 +156,7 @@ AWP can route the same destination through different backends:
 |---|---|
 | **TomTom Direct** | Single-leg direct fallback. Always available. |
 | **Farstrider** | Uses FarstriderLib and FarstriderLibData when available. |
-| **Mapzeroth** | Uses Mapzeroth when available. |
+| **Mapzeroth** | Uses capability-checked private integration code inside its backend and follows the normal available-backend fallback if Mapzeroth's unsupported private surface changes. |
 | **Zygor** | Uses Zygor and LibRover when Zygor is available. |
 
 Unavailable backend selections fall back safely.
@@ -336,7 +336,7 @@ The button can snap around the minimap edge or be dragged away as a free-floatin
 When the active route uses a flight path, AWP can mark the intended destination on the retail flight map.
 
 - Exact Zygor/LibRover taxi destinations can be matched by Blizzard taxi node ID.
-- Mapzeroth and Farstrider routes can use strict coordinate/name matches where the visible flight-map data is clear enough.
+- Mapzeroth routes carry numeric taxi-node metadata when available. Mapzeroth and Farstrider can also use strict visible coordinate/name matches.
 - The marker is visual-only; it does not create routes or supertrack taxi nodes.
 - Optional `Auto Take Flight Paths` is disabled by default and pressing `Alt` suppresses it for the current flight-map interaction.
 - The optional taxi list adds a searchable AWP side panel with the route destination at the top, favorites, recent flights, current-zone flights, and reachable destinations grouped by zone.
@@ -451,7 +451,7 @@ AWP includes an in-game **Integrations** tab in `/awp options` and a matching He
 |---|---|
 | **Zygor / LibRover** | Travel-aware routing with rich Zygor route data, including exact taxi node matches where LibRover exposes them. |
 | **FarstriderLib / FarstriderLibData** | Travel-aware route planning with flights, portals, transports, items, spells, and travel nodes when available. |
-| **Mapzeroth** | Travel-aware route planning with Mapzeroth pathfinding data when available. |
+| **Mapzeroth** | Travel-aware planning through its existing backend, including exact destinations, instance entrances, numeric taxi nodes, and wearable teleport-item equip/use/restore. |
 
 ### Flight Map
 
@@ -1031,7 +1031,7 @@ Try opening the quest log, changing tracking, or waiting for the next quest upda
 - Some Blizzard quest/objective data is not immediately available at login or right after a quest state changes.
 - Some guide addons expose richer metadata than others. AWP uses addon data first where reliable, then falls back to Blizzard APIs.
 - The overlay's dynamic text sizing is limited by Blizzard font behavior and may not animate perfectly smoothly.
-- Farstrider (needs FarstriderLibData), Mapzeroth, and Zygor routing depend on their addon being installed and enabled.
+- Farstrider (needs FarstriderLibData), Mapzeroth 2, and Zygor routing depend on their addon being installed and enabled. Mapzeroth has no supported integration API, so `/awp status` reports its compatibility details and AWP follows the normal available-backend fallback if its private capabilities change.
 
 ---
 

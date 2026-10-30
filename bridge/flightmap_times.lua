@@ -100,26 +100,16 @@ local function GetDestinationTable(addon, sourceNodeID)
     return ReadIndexed(factionTable, sourceNodeID)
 end
 
-local function CallNumberMethod(addon, methodName, defaultValue, ...)
-    local fn = addon and addon[methodName]
-    if type(fn) ~= "function" then
-        return defaultValue
-    end
-    local ok, value = pcall(fn, addon, ...)
-    if ok and type(value) == "number" then
-        return value
-    end
-    return defaultValue
-end
-
-local function ApplyInFlightFactors(addon, seconds, destinationNodeID)
+local function ApplyInFlightFactor(addon, seconds, destinationNodeID)
     seconds = tonumber(seconds)
     if not seconds or seconds <= 0 then
         return nil
     end
-    local khazFactor = CallNumberMethod(addon, "KhazAlgarFlightMasterFactor", 1, destinationNodeID)
-    local rideFactor = CallNumberMethod(addon, "RideLikeTheWindFactor", 1)
-    return seconds * khazFactor * rideFactor
+    local speedFactor = type(addon) == "table" and addon.SpeedFactor or nil
+    if type(speedFactor) ~= "function" then return nil end
+    local ok, factor = pcall(speedFactor, addon, destinationNodeID)
+    if not ok or type(factor) ~= "number" or factor <= 0 then return nil end
+    return seconds * factor
 end
 
 local function LookupInFlightDirect(sourceNodeID, destinationNodeID)
@@ -136,7 +126,7 @@ local function LookupInFlightDirect(sourceNodeID, destinationNodeID)
 
     local destinationTable = GetDestinationTable(addon, sourceNodeID)
     local seconds = ReadIndexed(destinationTable, destinationNodeID)
-    return ApplyInFlightFactors(addon, seconds, destinationNodeID)
+    return ApplyInFlightFactor(addon, seconds, destinationNodeID)
 end
 
 local function BuildTaxiSlotNodeLookup()

@@ -1,5 +1,15 @@
 # Changelog
 
+## 4.1.3
+- **Mapzeroth 2.x compatibility**
+  - Updated the existing routing backend for Mapzeroth 2.x
+  - Added complete Mapzeroth 2.x `equip` route support through equip, confirm, use, and restore transaction.
+  - AWP restores prior main-hand and offhand equipment only when its own teleport item is still equipped, defers restoration through combat, and never overwrites a later manual gear change.
+  - Route validation and same-target replanning remain held through the equip/use sequence so an item's equip cooldown cannot discard the selected route before use.
+
+- **InFlight integration updates**
+  - InFlight timing now uses the current combined `SpeedFactor` API, including Frequent Flier exactly once.
+
 ## 4.1.2
 - **Native Tracker Viewer support status**
   - Blizzard native docking remains available at order 2, but is now explicitly experimental because WoW 12.1's shared Objective Tracker and World Map execution can retain AWP taint and later report protected-action or secret-value errors.

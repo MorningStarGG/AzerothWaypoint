@@ -74,7 +74,7 @@ end
 
 function NS.IsMapzerothLoaded()
     if not NS.IsAddonLoaded("Mapzeroth") then return false end
-    return rawget(_G, "Mapzeroth") ~= nil
+    return type(rawget(_G, "MapzerothAddon")) == "table"
 end
 
 function NS.IsFarstriderLoaded()

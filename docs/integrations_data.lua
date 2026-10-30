@@ -135,7 +135,8 @@ local INTEGRATIONS = {
         url = "https://www.curseforge.com/wow/addons/mapzeroth",
         summary = "Another route planner that builds smart travel routes without needing Zygor, using Mapzeroth's pathfinding. This one is good but might not be as accurate.",
         bullets = {
-            "Plans travel-aware routes from Mapzeroth's data when it's available.",
+            "Plans routes using flights, portals, transports, teleports, hearthstones, from Mapzeroth's travel data.",
+            "Supports wearable teleport items with an equip, use, and gear-restore.",
             "Can mark the matching flight path on the flight map when enough route data is available.",
         },
     },

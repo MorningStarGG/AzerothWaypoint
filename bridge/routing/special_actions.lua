@@ -91,6 +91,15 @@ local TOMTOM_STATUS_FIELDS = { "status", "tta", "eta" }
 
 local CAST_NO_START_TIMEOUT_SECONDS = 2.0
 local CAST_MAX_DURATION_SECONDS     = 30.0
+local OFFHAND_SLOT                  = 17
+local EQUIPMENT_SLOTS = {
+    INVTYPE_HEAD = 1, INVTYPE_NECK = 2, INVTYPE_SHOULDER = 3, INVTYPE_BODY = 4,
+    INVTYPE_CHEST = 5, INVTYPE_ROBE = 5, INVTYPE_WAIST = 6, INVTYPE_LEGS = 7,
+    INVTYPE_FEET = 8, INVTYPE_WRIST = 9, INVTYPE_HAND = 10, INVTYPE_FINGER = 11,
+    INVTYPE_TRINKET = 13, INVTYPE_CLOAK = 15, INVTYPE_WEAPON = 16,
+    INVTYPE_2HWEAPON = 16, INVTYPE_WEAPONMAINHAND = 16, INVTYPE_WEAPONOFFHAND = 17,
+    INVTYPE_SHIELD = 17, INVTYPE_HOLDABLE = 17, INVTYPE_TABARD = 19,
+}
 
 local function ScheduleAfter(delay, fn)
     if type(NS.After) == "function" then
@@ -98,6 +107,15 @@ local function ScheduleAfter(delay, fn)
     elseif type(C_Timer) == "table" and type(C_Timer.After) == "function" then
         C_Timer.After(delay, fn)
     end
+end
+
+local function IsNormalizedActionClick(isDown)
+    local useDown = false
+    if type(C_CVar) == "table" and type(C_CVar.GetCVarBool) == "function" then
+        local ok, value = pcall(C_CVar.GetCVarBool, "ActionButtonUseKeyDown")
+        useDown = ok and value == true
+    end
+    return (isDown == true) == useDown
 end
 
 local function ReleaseSpecialActionCastFreeze(reason)
@@ -255,6 +273,167 @@ local function ApplySpecialActionCombatStateDriver(btn)
     end
 end
 
+local function EquipmentLocation(itemID)
+    local fn = type(C_Item) == "table" and C_Item.GetItemInfoInstant or rawget(_G, "GetItemInfoInstant")
+    if type(fn) ~= "function" then return nil end
+    local ok, _, _, _, location = pcall(fn, itemID)
+    return ok and type(location) == "string" and location or nil
+end
+
+local function EquipmentSlot(itemID)
+    return EQUIPMENT_SLOTS[EquipmentLocation(itemID) or ""]
+end
+
+function NS.CanExecuteRouteEquipmentItem(itemID)
+    itemID = tonumber(itemID)
+    if not itemID or not EquipmentSlot(itemID) then return false end
+    local equip = type(C_Item) == "table" and C_Item.EquipItemByName or rawget(_G, "EquipItemByName")
+    return type(equip) == "function"
+end
+
+local function EquippedItemID(slot)
+    local fn = rawget(_G, "GetInventoryItemID")
+    if type(fn) ~= "function" then return nil end
+    local ok, itemID = pcall(fn, "player", slot)
+    return ok and tonumber(itemID) or nil
+end
+
+local function IsItemEquipped(itemID)
+    local fn = type(C_Item) == "table" and C_Item.IsEquippedItem or rawget(_G, "IsEquippedItem")
+    if type(fn) ~= "function" then return false end
+    local ok, equipped = pcall(fn, itemID)
+    return ok and equipped == true
+end
+
+local function EquipItem(itemID, slot)
+    local fn = type(C_Item) == "table" and C_Item.EquipItemByName or rawget(_G, "EquipItemByName")
+    if type(fn) ~= "function" then return false end
+    return pcall(fn, itemID, slot)
+end
+
+local function ClearEquipmentTransaction(transaction)
+    if state.routing.equipmentTransaction == transaction then
+        state.routing.equipmentTransaction = nil
+    end
+end
+
+local function FinishEquipmentTransaction(transaction)
+    ClearEquipmentTransaction(transaction)
+    if type(NS.FlushDeferredRouteBackendStateValidations) == "function" then
+        NS.FlushDeferredRouteBackendStateValidations()
+    end
+    if type(NS.FlushDeferredRouteActionRefresh) == "function" then
+        NS.FlushDeferredRouteActionRefresh()
+    end
+end
+
+local function RestoreEquipmentTransaction(transaction)
+    if type(transaction) ~= "table" or state.routing.equipmentTransaction ~= transaction then return true end
+    if IsCombatLocked() then
+        transaction.restorePending = true
+        return false
+    end
+    transaction.restorePending = nil
+    local equipped = EquippedItemID(transaction.slot)
+    if equipped ~= transaction.itemID then
+        -- The player replaced AWP's item themselves. Their new choice wins;
+        -- neither the main slot nor the offhand is ours to touch now.
+        FinishEquipmentTransaction(transaction)
+        return true
+    end
+    if transaction.previous then
+        EquipItem(transaction.previous, transaction.slot)
+    else
+        local pickup = rawget(_G, "PickupInventoryItem")
+        local backpack = rawget(_G, "PutItemInBackpack")
+        if type(pickup) == "function" and type(backpack) == "function" then
+            local ok = pcall(pickup, transaction.slot)
+            if ok then pcall(backpack) end
+        end
+    end
+    if transaction.twoHand and transaction.previousOffhand then
+        EquipItem(transaction.previousOffhand, OFFHAND_SLOT)
+    end
+    FinishEquipmentTransaction(transaction)
+    return true
+end
+
+function NS.IsRouteEquipmentTransactionActive()
+    return type(state.routing.equipmentTransaction) == "table"
+end
+
+local function ActionConcernsEquipmentItem(action, itemID)
+    if type(action) ~= "table" then return false end
+    if action.executionType == "equip" and tonumber(action.itemID) == itemID then return true end
+    local dependency = action.routeDependency
+    return type(dependency) == "table" and dependency.kind == "item" and tonumber(dependency.id) == itemID
+end
+
+function NS.SyncRouteEquipmentTransaction(record, action)
+    local transaction = state.routing.equipmentTransaction
+    if type(transaction) ~= "table" then return true end
+    if transaction.record == record and ActionConcernsEquipmentItem(action, transaction.itemID) then return false end
+    return RestoreEquipmentTransaction(transaction)
+end
+
+function NS.CancelRouteEquipmentTransaction(record, ...)
+    local transaction = state.routing.equipmentTransaction
+    if type(transaction) ~= "table" or (record and transaction.record ~= record) then return true end
+    return RestoreEquipmentTransaction(transaction)
+end
+
+local function ConfirmEquipmentTransaction(transaction)
+    if state.routing.equipmentTransaction ~= transaction or transaction.advancing then return end
+    if EquippedItemID(transaction.slot) ~= transaction.itemID then return end
+    transaction.confirmed = true
+    transaction.advancing = true
+    local advanced = type(NS.AdvanceActiveRouteAction) == "function"
+        and NS.AdvanceActiveRouteAction(transaction.actionIdentity, transaction.planGeneration, "equipment_action")
+    transaction.advancing = nil
+    if not advanced then RestoreEquipmentTransaction(transaction) end
+end
+
+local function ExecuteEquipmentAction(action)
+    if IsCombatLocked() or type(action) ~= "table" then return false end
+    local itemID, slot = tonumber(action.itemID), EquipmentSlot(action.itemID)
+    if not itemID or not slot then return false end
+    local record = type(NS.GetActiveAuthorityRecord) == "function" and NS.GetActiveAuthorityRecord() or nil
+    local identity = type(NS.GetRouteSpecialActionIdentity) == "function" and NS.GetRouteSpecialActionIdentity(action) or nil
+    if type(record) ~= "table" or type(identity) ~= "string" then return false end
+    local existing = state.routing.equipmentTransaction
+    if type(existing) == "table" then
+        if existing.record == record and existing.itemID == itemID and EquippedItemID(existing.slot) == itemID then
+            ConfirmEquipmentTransaction(existing)
+            return true
+        end
+        if not RestoreEquipmentTransaction(existing) then return false end
+    end
+    if IsItemEquipped(itemID) or EquippedItemID(slot) == itemID then
+        return NS.AdvanceActiveRouteAction(identity, record._routeAcceptedPlanGeneration, "equipment_already_equipped") == true
+    end
+    local location = EquipmentLocation(itemID)
+    local transaction = {
+        record = record, itemID = itemID, slot = slot,
+        previous = EquippedItemID(slot), twoHand = location == "INVTYPE_2HWEAPON",
+        previousOffhand = location == "INVTYPE_2HWEAPON" and EquippedItemID(OFFHAND_SLOT) or nil,
+        actionIdentity = identity, planGeneration = record._routeAcceptedPlanGeneration,
+    }
+    state.routing.equipmentTransaction = transaction
+    if not EquipItem(itemID, slot) then
+        FinishEquipmentTransaction(transaction)
+        return false
+    end
+    ScheduleAfter(0, function() ConfirmEquipmentTransaction(transaction) end)
+    ScheduleAfter(2, function()
+        if state.routing.equipmentTransaction == transaction and not transaction.confirmed
+            and EquippedItemID(transaction.slot) ~= transaction.itemID
+        then
+            FinishEquipmentTransaction(transaction)
+        end
+    end)
+    return true
+end
+
 local function GetOrCreateSecureButton()
     if secureButton then return secureButton end
     secureButton = CreateFrame("Button", "AWP_SpecialActionButton", UIParent, "SecureActionButtonTemplate")
@@ -284,10 +463,14 @@ local function GetOrCreateSecureButton()
     -- before SPELL_UPDATE_COOLDOWN / UNIT_SPELLCAST_START events for the
     -- triggered cast, which is exactly what we need to win the race against
     -- the backend's cooldown-driven replan.
-    secureButton:HookScript("OnClick", function(_, button, _)
-        if button == "LeftButton" and state.routing.specialActionPresented == true then
+    secureButton:HookScript("OnClick", function(_, button, isDown)
+        if button == "LeftButton" and state.routing.specialActionPresented == true and IsNormalizedActionClick(isDown) then
             local action = state.routing.specialActionState
-            EngageSpecialActionCastFreeze(type(action) == "table" and action.routeDependency or nil)
+            if type(action) == "table" and action.executionType == "equip" then
+                ExecuteEquipmentAction(action)
+            else
+                EngageSpecialActionCastFreeze(type(action) == "table" and action.routeDependency or nil)
+            end
         end
     end)
 
@@ -447,6 +630,8 @@ local function ResolveActionTexture(action)
     local itemID = nil
     if action.secureType == "item" or action.secureType == "toy" then
         itemID = tonumber(action.securePayload)
+    elseif action.executionType == "equip" then
+        itemID = tonumber(action.itemID)
     end
     if itemID and type(C_Item) == "table" and type(C_Item.GetItemIconByID) == "function" then
         local texture = C_Item.GetItemIconByID(itemID)
@@ -750,9 +935,12 @@ function NS.ApplySpecialAction(action)
         return
     end
 
+    local isEquipmentAction = action.executionType == "equip" and tonumber(action.itemID) ~= nil
     local isFunctionAction = action.secureType == "function" and type(action.securePayload) == "function"
     local payloadAttr = SECURE_PAYLOAD_ATTR[action.secureType]
-    if not isFunctionAction and (not payloadAttr or action.securePayload == nil or action.securePayload == "") then
+    if not isEquipmentAction and not isFunctionAction
+        and (not payloadAttr or action.securePayload == nil or action.securePayload == "")
+    then
         -- Defensive: secureType outside spell/item/toy/macro — treat as non-actionable.
         NS.DisarmSpecialActionButton()
         return
@@ -765,6 +953,11 @@ function NS.ApplySpecialAction(action)
     end
 
     local btn = GetOrCreateSecureButton()
+    if isEquipmentAction then
+        ClearSecureActionAttributes()
+        NS.SpecialActionShowActive(action)
+        return
+    end
     if isFunctionAction then
         if not ApplyFunctionActionAttributes(btn, action) then
             NS.DisarmSpecialActionButton()
@@ -839,6 +1032,8 @@ local CAST_END_EVENTS = {
 
 local combatFrame = CreateFrame("Frame")
 combatFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+combatFrame:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
+combatFrame:RegisterEvent("PLAYER_LOGOUT")
 combatFrame:RegisterUnitEvent("UNIT_SPELLCAST_START", "player")
 combatFrame:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_START", "player")
 combatFrame:RegisterUnitEvent("UNIT_SPELLCAST_STOP", "player")
@@ -849,6 +1044,10 @@ combatFrame:RegisterUnitEvent("UNIT_SPELLCAST_FAILED", "player")
 combatFrame:RegisterUnitEvent("UNIT_SPELLCAST_FAILED_QUIET", "player")
 combatFrame:SetScript("OnEvent", function(_, event, unit, castGUID, spellID)
     if event == "PLAYER_REGEN_ENABLED" then
+        local transaction = state.routing.equipmentTransaction
+        if type(transaction) == "table" and transaction.restorePending then
+            RestoreEquipmentTransaction(transaction)
+        end
         local pending = state.routing.pendingSpecialAction
         if pending then
             state.routing.pendingSpecialAction = nil
@@ -867,6 +1066,19 @@ combatFrame:SetScript("OnEvent", function(_, event, unit, castGUID, spellID)
         if type(NS.FlushDeferredRouteBackendStateValidations) == "function" then
             NS.FlushDeferredRouteBackendStateValidations()
         end
+        return
+    end
+
+    if event == "PLAYER_EQUIPMENT_CHANGED" then
+        local transaction = state.routing.equipmentTransaction
+        if type(transaction) == "table" and (tonumber(unit) == transaction.slot or tonumber(unit) == OFFHAND_SLOT) then
+            ScheduleAfter(0, function() ConfirmEquipmentTransaction(transaction) end)
+        end
+        return
+    end
+
+    if event == "PLAYER_LOGOUT" then
+        NS.CancelRouteEquipmentTransaction(nil, "logout")
         return
     end
 

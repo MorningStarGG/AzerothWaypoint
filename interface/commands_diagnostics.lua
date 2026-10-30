@@ -1879,7 +1879,13 @@ end
 -- ============================================================
 
 local function handleMem()
-    local backend = NS.GetWorldOverlayBackend()
+    local worldOverlayBackend = NS.GetWorldOverlayBackend()
+    local selectedRoutingBackend = type(NS.GetSelectedBackendID) == "function"
+        and NS.GetSelectedBackendID()
+        or "unknown"
+    local effectiveRoutingBackend = type(NS.GetEffectiveBackendID) == "function"
+        and NS.GetEffectiveBackendID()
+        or "unknown"
     local won = NS.State.WorldOverlay
     local wo = NS.State.worldOverlay
     local native = NS.Internal.WorldOverlay
@@ -1914,8 +1920,13 @@ local function handleMem()
     )
 
     NS.Msg(
-        "[MEM] Backend:", tostring(backend),
-        "OverlayBackendState:", tostring(wo and wo.backend or "nil"),
+        "[MEM] RoutingBackend:",
+        "selected=" .. tostring(selectedRoutingBackend),
+        "effective=" .. tostring(effectiveRoutingBackend)
+    )
+    NS.Msg(
+        "[MEM] WorldOverlayBackend:", tostring(worldOverlayBackend),
+        "State:", tostring(wo and wo.backend or "nil"),
         "NativeTarget:", tostring(won and won.target and won.target.active or false)
     )
 
