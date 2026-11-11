@@ -2,6 +2,33 @@ local NS = _G.AzerothWaypointNS
 
 NS.CHANGELOG_DATA = {
     {
+        version = "4.2.0",
+        sections = {
+            { title = "WoW Forever support", entries = {
+                { text = "Added WoW Forever to the same addon package as Retail, with shared SavedVariables names and capability-based feature checks.", level = 1 },
+                { text = "Added client-flavor detection that uses the bounded Forever interface range instead of project IDs.", level = 1 },
+                { text = "Updated quest-watch handling to the current `C_QuestLog.GetQuestWatchType` contract and removed the obsolete Mapzeroth `LEARNED_SPELL_IN_TAB` listener.", level = 1 },
+            }},
+            { title = "Support and diagnostics", entries = {
+                { text = "Added client flavor and Forever integration availability to `/awp status`, updated integration cards, and documented both installation paths and the client support matrix.", level = 1 },
+                { text = "Generalized the experimental Blizzard Tracker Viewer warning to the modern shared Objective Tracker and World Map taint boundary on both supported clients.", level = 1 },
+            }},
+            { title = "Options and help", entries = {
+                { text = "Updated and added search tags for options inside addon settings that were lacking or missing tags.", level = 1 },
+            }},
+        },
+    },
+    {
+        version = "4.1.4",
+        sections = {
+            { title = "TomTom 4.4 compatibility", entries = {
+                { text = "Updated AWP's carrier and queue waypoints to use TomTom 4.4's new `minimap`, `world`, and zero clear-distance options, removing obsolete waypoint fields.", level = 1 },
+                { text = "Arrow settings, theme, and target observation now use TomTom's public callbacks. Target changes retain AWP's next-frame skin refresh, while duplicate refresh requests are combined without changing arrival/navigation state tracking.", level = 1 },
+                { text = "`/awp repair` now restores TomTom's clear distance through `profile.persistence.cleardistance`.", level = 1 },
+            }},
+        },
+    },
+    {
         version = "4.1.3",
         sections = {
             { title = "Mapzeroth 2.x compatibility", entries = {

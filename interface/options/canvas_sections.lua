@@ -1009,7 +1009,7 @@ local function RenderZygor()
     Spacer()
     SectionHeader("Tracker Viewer")
     AddToggle("Enable Tracker Viewer",
-        "Shows Zygor guide steps inside the active objective tracker. Kaliel's Tracker is recommended; Blizzard native docking is experimental and has known taint risk.",
+        "Shows Zygor guide steps inside the active objective tracker. Kaliel's Tracker is recommended when available for the current client; Blizzard native docking is experimental and has known taint risk.",
         function()
             local s = NS.GetZygorTrackerViewerSettings()
             return s.enabled
@@ -1030,7 +1030,7 @@ local function RenderZygor()
             supportText = "Kaliel's Tracker is active and is AWP's recommended Tracker Viewer."
             isWarning = false
         else
-            supportText = "Blizzard native Tracker Viewer docking is experimental and has known taint risk. Kaliel's Tracker is recommended."
+            supportText = "Blizzard native Tracker Viewer docking is experimental and has known taint risk. Kaliel's Tracker is recommended when available for the current client."
             isWarning = true
         end
         AddText(

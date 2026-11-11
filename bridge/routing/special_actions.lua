@@ -62,7 +62,8 @@ local secureButtonHighlight = nil
 local secureButtonLabel = nil
 local activeSecureAttributeKeys = {}
 local tomTomArrowStatusSuppressed = false
-local tomTomStatusSuppressionHooked = false
+local tomTomStatusSuppressionSubscribed = false
+local tomTomCallbackOwner = {}
 local specialActionCombatHidden = false
 local specialActionCombatStateDriver = false
 
@@ -536,16 +537,16 @@ local function ApplyTomTomArrowStatusSuppression()
     end
 end
 
-local function HookTomTomStatusSuppression()
-    if tomTomStatusSuppressionHooked then
+local function SubscribeTomTomStatusSuppression()
+    if tomTomStatusSuppressionSubscribed then
         return
     end
     local tomtom = type(NS.GetTomTom) == "function" and NS.GetTomTom() or nil
-    if type(tomtom) ~= "table" or type(tomtom.ShowHideCrazyArrow) ~= "function" then
+    if type(tomtom) ~= "table" or type(tomtom.RegisterCallback) ~= "function" then
         return
     end
-    tomTomStatusSuppressionHooked = true
-    hooksecurefunc(tomtom, "ShowHideCrazyArrow", function()
+    tomTomStatusSuppressionSubscribed = true
+    tomtom.RegisterCallback(tomTomCallbackOwner, "ArrowSettingsApplied", function()
         if tomTomArrowStatusSuppressed then
             ScheduleAfter(0, ApplyTomTomArrowStatusSuppression)
         end
@@ -554,7 +555,7 @@ end
 
 local function SetTomTomArrowStatusVisible(visible)
     tomTomArrowStatusSuppressed = not visible
-    HookTomTomStatusSuppression()
+    SubscribeTomTomStatusSuppression()
     ApplyTomTomArrowStatusSuppression()
 end
 

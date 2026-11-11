@@ -124,7 +124,7 @@ CFG.ICON_SPECS                   = {
     portal                      = { atlas = "MagePortalAlliance", tint = { r = 0.812, g = 0.884, b = 0.873, a = 1 }, iconOffsetY = 2, iconSize = 28 },
     travel                      = { atlas = "poi-traveldirections-arrow2", tint = { r = 1, g = 1, b = 1, a = 1 }, iconOffsetY = -1, iconSize = 28 },
     guide                       = { atlas = "LevelUp-Icon-Book", tint = DEFAULT_TINT, iconOffsetY = 1, iconSize = 24 },
-    zygor_guide                 = { texture = "Interface\\AddOns\\ZygorGuidesViewer\\Skins\\addon-icon.tga", tint = { r = 0.996, g = 0.38, b = 0, a = 1 }, iconOffsetY = 1, iconSize = 24 },
+    zygor_guide                 = { texture = NS.GetZygorAssetPath("Skins\\addon-icon.tga"), tint = { r = 0.996, g = 0.38, b = 0, a = 1 }, iconOffsetY = 1, iconSize = 24 },
 
     -- WhoWhere NPC search results
     npc_auctioneer              = { atlas = "Auctioneer", tint = NPC_AUCTIONEER_TINT, iconOffsetY = 0.5 },

@@ -316,7 +316,7 @@ end
 NS.RegisterGuideTargetProvider(PROVIDER, {
     label = "Zygor",
     displayName = "Zygor",
-    icon = "Interface\\AddOns\\ZygorGuidesViewer\\Skins\\addon-icon.tga",
+    icon = NS.GetZygorAssetPath("Skins\\addon-icon.tga"),
     iconTint = { r = 0.996, g = 0.38, b = 0, a = 1 },
     iconSize = 16,
     isLoaded = IsLoaded,

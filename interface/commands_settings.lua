@@ -1005,8 +1005,9 @@ local function collectRepairChanges()
     end
 
     local tomtom = _G["TomTom"]
-    if tomtom and tomtom.db and tomtom.db.profile and tomtom.db.profile.arrow then
-        local a = tomtom.db.profile.arrow
+    local tomtomProfile = tomtom and tomtom.db and tomtom.db.profile or nil
+    if tomtomProfile and tomtomProfile.arrow then
+        local a = tomtomProfile.arrow
         if a.showtta ~= true then
             a.showtta = true
             fixed[#fixed + 1] = "TomTom: showtta restored to true"
@@ -1015,10 +1016,12 @@ local function collectRepairChanges()
             a.title_alpha = 1
             fixed[#fixed + 1] = "TomTom: title_alpha restored to 1"
         end
-        if a.cleardistance ~= 10 then
-            a.cleardistance = 10
-            fixed[#fixed + 1] = "TomTom: cleardistance restored to 10"
-        end
+    end
+    if tomtomProfile and tomtomProfile.persistence
+        and tomtomProfile.persistence.cleardistance ~= 10
+    then
+        tomtomProfile.persistence.cleardistance = 10
+        fixed[#fixed + 1] = "TomTom: cleardistance restored to 10"
     end
 
     -- Clean up stale AWP saved variable keys from previous versions
@@ -1059,8 +1062,20 @@ local function handleStatus()
     local tomtom = _G["TomTom"]
     local Z = NS.ZGV()
     local stepTitle = Z and Z.CurrentStep and Z.CurrentStep.title
+    local zygorAddonName = type(NS.GetZygorAddonName) == "function"
+        and NS.GetZygorAddonName()
+        or "ZygorGuidesViewer"
+    local clientFlavor = type(NS.GetClientFlavor) == "function" and NS.GetClientFlavor() or "retail"
+    local _, _, _, interfaceVersion = GetBuildInfo()
     NS.Msg(
-        "Status - Zygor:", Z and "found" or "missing",
+        "Client:", clientFlavor == "forever" and "WoW Forever" or "Retail",
+        "Interface:", tostring(interfaceVersion or "unknown")
+    )
+    if clientFlavor == "forever" then
+        NS.Msg("Forever integration availability: WorldQuestTab unavailable")
+    end
+    NS.Msg(
+        "Status - " .. zygorAddonName .. ":", Z and "found" or "missing",
         "Step:", stepTitle or "nil",
         "TomTom:", tomtom and "found" or "missing",
         "Routing:", NS.IsRoutingEnabled() and "on" or "off",

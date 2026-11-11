@@ -4,6 +4,10 @@ local function IsAddonLoaded(name)
     return type(NS.IsAddonLoaded) == "function" and NS.IsAddonLoaded(name) == true
 end
 
+local function IsWoWForever()
+    return type(NS.IsWoWForever) == "function" and NS.IsWoWForever() == true
+end
+
 local function IsAnyAddonLoaded(names)
     if type(names) ~= "table" then
         return false
@@ -103,7 +107,7 @@ local INTEGRATIONS = {
     {
         category = "Guide Addons",
         name = "Zygor Guides Viewer",
-        addons = { "ZygorGuidesViewer" },
+        addons = { "ZygorGuidesViewer", "ZygorGuidesViewerForever" },
         url = "https://zygorguides.com",
         summary = "If you use Zygor's leveling and quest guides, this is AWP's deepest guide integration. It can route Zygor guide steps, show them in the Tracker Viewer, and keep Zygor features available while using AWP presentation.",
         bullets = {
@@ -124,7 +128,7 @@ local INTEGRATIONS = {
         },
         summary = "A route planner for players who want smart travel routes without using Zygor. Requires both FarstriderLib and FarstriderLibData addons installed. This is a VERY close second to Zygor's LibRover.",
         bullets = {
-            "Plans routes using flights, portals, boats, items, and spells from Farstrider's travel data.",
+            "Plans routes using flights, portals, boats, zeppelins, items, spells, and hearthstones from Farstrider's travel data.",
             "Can mark the matching flight path on the flight map when enough route data is available.",
         },
     },
@@ -143,7 +147,7 @@ local INTEGRATIONS = {
     {
         category = "Route Backends",
         name = "Zygor / LibRover",
-        addons = { "ZygorGuidesViewer" },
+        addons = { "ZygorGuidesViewer", "ZygorGuidesViewerForever" },
         url = "https://zygorguides.com",
         summary = "A route planner that works out the fastest way to your destination, including flights, portals, and boats, using Zygor's travel data. This is the GOLD standard.",
         bullets = {
@@ -217,11 +221,14 @@ local INTEGRATIONS = {
         category = "Map, POI, and Rare Addons",
         name = "WorldQuestTab",
         addons = { "WorldQuestTab" },
+        unavailableOnForever = true,
+        unavailableReason = "Not available on WoW Forever",
         url = "https://www.curseforge.com/wow/addons/worldquesttab",
         summary = "If you use WorldQuestTab, clicking one of its world quests can hand the destination straight to AWP.",
         bullets = {
             "Turns a world quest click into a route, using the quest's details when WorldQuestTab shares them.",
             "Sends you to the world quest without wiping out the destinations you've already saved.",
+            "WorldQuestTab integration is currently available on Retail only.",
         },
     },
     {
@@ -260,6 +267,9 @@ function NS.GetIntegrationDisplayStatus(entry)
             return "Required, loaded", { 0.42, 1.00, 0.55, 1 }
         end
         return "Required, not loaded", { 1.00, 0.34, 0.28, 1 }
+    end
+    if entry.unavailableOnForever and IsWoWForever() then
+        return entry.unavailableReason or "Not available on WoW Forever", { 1.00, 0.34, 0.28, 1 }
     end
     if entry.builtin then
         return "Built in", { 1.00, 0.82, 0.00, 1 }

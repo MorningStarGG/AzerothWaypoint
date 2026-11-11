@@ -1892,9 +1892,12 @@ local function handleMem()
     local bridge = NS.State.bridge
 
     local addonName = NS.ADDON_NAME
+    local zygorAddonName = type(NS.GetZygorAddonName) == "function"
+        and NS.GetZygorAddonName()
+        or "ZygorGuidesViewer"
     local addonMem = getAddonMemoryKB(addonName)
     local tomtomMem = getAddonMemoryKB("TomTom")
-    local zygorMem = getAddonMemoryKB("ZygorGuidesViewer")
+    local zygorMem = getAddonMemoryKB(zygorAddonName)
     local waypointUIMem = getAddonMemoryKB("WaypointUI")
     local totalMem = getTotalAddonMemoryKB()
     local waypointUIEnabled = type(NS.IsAddonEnabledForCurrentCharacter) == "function"
@@ -1911,7 +1914,7 @@ local function handleMem()
     )
     NS.Msg(
         "[MEM] TomTom:", formatMemoryKB(tomtomMem), "(" .. formatPercent(tomtomMem, totalMem) .. ")",
-        "ZygorGuidesViewer:", formatMemoryKB(zygorMem), "(" .. formatPercent(zygorMem, totalMem) .. ")"
+        zygorAddonName .. ":", formatMemoryKB(zygorMem), "(" .. formatPercent(zygorMem, totalMem) .. ")"
     )
     NS.Msg(
         "[MEM] WaypointUI:", formatMemoryKB(waypointUIMem), "(" .. formatPercent(waypointUIMem, totalMem) .. ")",

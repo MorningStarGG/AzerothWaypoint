@@ -974,7 +974,7 @@ function M.OpenZygorViewerMenu(anchorFrame)
         }, "SETTINGS"),
     }
 
-    if Z.IsClassic or Z.IsClassicTBC or Z.IsClassicWOTLK then
+    if Z.IsClassic or Z.IsClassicTBC or Z.IsClassicWOTLK or Z.IsForever then
         table.insert(menu, 7, AddZygorMenuIcon({
             text = L.menu_ShowSkills or "Show Skills",
             func = function()

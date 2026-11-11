@@ -1,13 +1,13 @@
-## Interface: 120105
+## Interface: 120105, 16001
 ## Title: AzerothWaypoint
 ## Notes: A TomTom-powered navigation bridge, route planner selector, manual waypoint queue, and 3D world overlay for World of Warcraft
 ## Author: MorningStarGG
-## Version: 4.1.3
+## Version: 4.2.0
 ## IconTexture: Interface\AddOns\AzerothWaypoint\media\icon.png
 ## SavedVariables: AzerothWaypointDB
 ## SavedVariablesPerCharacter: AzerothWaypointCharDB
 ## RequiredDeps: TomTom
-## OptionalDeps: ZygorGuidesViewer, APR, WoWPro, Mapzeroth, FarstriderLib, FarstriderLibData, !KalielsTracker, WorldQuestTab, HandyNotes, HandyNotes_MapNotes, SilverDragon, RareScanner, InFlight
+## OptionalDeps: ZygorGuidesViewer, ZygorGuidesViewerForever, APR, WoWPro, Mapzeroth, FarstriderLib, FarstriderLibData, !KalielsTracker, WorldQuestTab, HandyNotes, HandyNotes_MapNotes, SilverDragon, RareScanner, InFlight
 ## AddonCompartmentFunc: AzerothWaypoint_OnAddonCompartmentClick
 ## AddonCompartmentFuncOnEnter: AzerothWaypoint_OnAddonCompartmentEnter
 ## AddonCompartmentFuncOnLeave: AzerothWaypoint_OnAddonCompartmentLeave

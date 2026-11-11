@@ -487,11 +487,11 @@ local function GetCurrentSuperTrackedQuestOfferID()
 end
 
 local function IsQuestWatched(questID)
-    if type(C_QuestLog) ~= "table" or type(C_QuestLog.IsQuestWatched) ~= "function" then
+    if type(C_QuestLog) ~= "table" or type(C_QuestLog.GetQuestWatchType) ~= "function" then
         return nil
     end
-    local ok, watched = pcall(C_QuestLog.IsQuestWatched, questID)
-    if ok then return watched == true end
+    local ok, watchType = pcall(C_QuestLog.GetQuestWatchType, questID)
+    if ok then return watchType ~= nil end
     return nil
 end
 

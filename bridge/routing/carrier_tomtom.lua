@@ -16,6 +16,11 @@ local Signature = NS.Signature
 local externalWaypointBuffer = {}
 local pendingRemovedTomTomUIDs = {}
 local pendingRemovedTomTomFlush = false
+local tomTomReloadGeneration = 0
+local pendingTomTomReloadGeneration = nil
+local tomTomReloadFlushPending = false
+local explicitRemoveAllGeneration = nil
+local tomTomCallbackOwner = {}
 
 local EXTERNAL_SOURCE_STACK_START = 3
 local EXTERNAL_SOURCE_STACK_COUNT = 12
@@ -370,16 +375,12 @@ local function BuildCarrierOpts(title, meta)
     opts.title           = title or "AWP Route"
     opts.arrowtitle      = opts.title
     opts.from            = "AzerothWaypoint:Carrier"
-    opts.cleartype       = true
-    opts.cleardistance   = -1
+    opts.cleardistance   = 0
     opts.arrivaldistance = 15
     opts.callbacks       = nil
     opts.persistent      = false
-    opts.onminimap       = "always"
-    opts.overworld       = true
-    opts.showonedge      = true
-    opts.findpath        = true
-    opts.errortext       = false
+    opts.minimap         = true
+    opts.world           = true
     opts.awpCarrier      = true
     -- Marker used by this carrier's TomTom hook so internal carrier
     -- writes are never adopted as external user waypoints.
@@ -482,11 +483,8 @@ local function PromoteQueueProjectionToCarrier(uid, opts)
     uid.cleardistance = opts.cleardistance
     uid.arrivaldistance = opts.arrivaldistance
     uid.persistent = opts.persistent
-    uid.findpath = opts.findpath
-    uid.errortext = opts.errortext
-    uid.showonedge = opts.showonedge
-    uid.onminimap = opts.onminimap
-    uid.overworld = opts.overworld
+    uid.minimap = opts.minimap
+    uid.world = opts.world
     return true
 end
 
@@ -578,13 +576,9 @@ local function BuildQueueProjectionOpts(entry)
         awpQueueEntryType = entry.entryType,
         persistent = false,
         crazy = false,
-        cleartype = true,
-        cleardistance = -1,
-        onminimap = "always",
-        overworld = true,
-        showonedge = true,
-        findpath = false,
-        errortext = false,
+        cleardistance = 0,
+        minimap = true,
+        world = true,
     }
     return opts
 end
@@ -718,7 +712,7 @@ local function BuildExternalTomTomCallbacks(opts)
     end
 
     local callbackOpts = CopyWaypointOptions(opts)
-    callbackOpts.cleardistance = -1
+    callbackOpts.cleardistance = 0
 
     local callbacks = tomtom:DefaultCallbacks(callbackOpts) or {}
     local externalCallbacks = type(opts) == "table" and opts.callbacks or nil
@@ -744,7 +738,7 @@ local function PrepareExternalTomTomAddOptions(mapID, x, y, opts)
         copied.awpSourceAddon = sourceAddon
     end
     copied.crazy = false
-    copied.cleardistance = -1
+    copied.cleardistance = 0
     copied.callbacks = BuildExternalTomTomCallbacks(copied)
     return copied
 end
@@ -959,14 +953,13 @@ end
 -- ------------------------------------------------------------
 --
 -- When the user right-clicks the TomTom arrow and chooses Remove, or
--- otherwise dismisses the waypoint via TomTom UI, tomtom.RemoveWaypoint
--- (or ClearWaypoint) fires. We add our own observer so AWP knows
--- to clear manualAuthority and stop the world overlay
--- from re-syncing the gone destination.
+-- otherwise dismisses the waypoint through TomTom, its public
+-- WaypointRemoved callback fires. AWP observes that callback so it can clear
+-- manualAuthority and stop the world overlay from re-syncing the destination.
 --
 -- We must NOT react when AWP itself removed the UID (during
 -- PushCarrierWaypoint's old-UID teardown, or ClearCarrierWaypoint).
--- A counter lets the hook ignore those self-initiated removes.
+-- A counter lets the callback ignore those self-initiated removes.
 
 local awpInitiatedRemove = 0
 
@@ -1110,52 +1103,131 @@ local function QueueTomTomWaypointRemoved(uid)
     end)
 end
 
+local function DiscardPendingTomTomWaypointRemovals()
+    for uid in pairs(pendingRemovedTomTomUIDs) do
+        pendingRemovedTomTomUIDs[uid] = nil
+    end
+end
+
+local function RebuildCarrierAfterTomTomReload()
+    local tomtom = GetTomTomAddon()
+    RebuildExternalTomTomWaypointIndex(tomtom)
+
+    local routing = state.routing
+    routing.carrierState = nil
+    routing.lastPushedCarrierUID = nil
+    routing.publishedQueueState = {
+        queueKey = nil,
+        signature = nil,
+        uidByEntryKey = {},
+    }
+
+    if type(NS.RecomputeCarrier) == "function" then
+        NS.RecomputeCarrier()
+    end
+end
+
+local function HandleExplicitTomTomRemoveAll()
+    RebuildExternalTomTomWaypointIndex(GetTomTomAddon())
+
+    local activeQueueKey = state.routing and state.routing.activeQueueKey or nil
+    local carrierState = state.routing and state.routing.carrierState or nil
+    local guideQueueActive = activeQueueKey == "guide"
+        or (type(activeQueueKey) == "string" and activeQueueKey:match("^guide:") ~= nil)
+        or (type(carrierState) == "table" and carrierState.source == "guide")
+
+    if guideQueueActive then
+        if not ReassertGuideCarrierAfterExternalClear("remove_all", true) then
+            ForgetExternalClearedCarrier(true)
+            if type(NS.RecomputeCarrier) == "function" then
+                NS.RecomputeCarrier()
+            end
+        end
+    elseif type(activeQueueKey) == "string" and type(NS.ClearQueueByID) == "function" then
+        NS.ClearQueueByID(activeQueueKey)
+    elseif type(NS.GetManualAuthority) == "function"
+        and NS.GetManualAuthority()
+        and type(NS.HandleExplicitManualAuthorityRemove) == "function"
+    then
+        NS.HandleExplicitManualAuthorityRemove()
+    else
+        ForgetExternalClearedCarrier(true)
+        ReassertGuideCarrierAfterExternalClear("remove_all", true)
+    end
+end
+
+local function FlushTomTomWaypointsReloaded(generation)
+    if generation ~= pendingTomTomReloadGeneration then
+        return
+    end
+    pendingTomTomReloadGeneration = nil
+
+    -- ReloadWaypoints replaces every UID. Its WaypointRemoved callbacks refer
+    -- to the discarded collection, not independent user removal requests.
+    DiscardPendingTomTomWaypointRemovals()
+
+    local explicitRemoveAll = explicitRemoveAllGeneration == generation
+    if explicitRemoveAllGeneration and explicitRemoveAllGeneration <= generation then
+        explicitRemoveAllGeneration = nil
+    end
+
+    if explicitRemoveAll then
+        HandleExplicitTomTomRemoveAll()
+    else
+        RebuildCarrierAfterTomTomReload()
+    end
+end
+
+local function HandleTomTomWaypointsReloaded()
+    tomTomReloadGeneration = tomTomReloadGeneration + 1
+    pendingTomTomReloadGeneration = tomTomReloadGeneration
+
+    -- Cancel the per-UID work synchronously, before its next-frame flush can
+    -- mistake the UIDs discarded by this reload for individual removals.
+    DiscardPendingTomTomWaypointRemovals()
+
+    if tomTomReloadFlushPending then
+        return
+    end
+    tomTomReloadFlushPending = true
+    NS.After(0, function()
+        tomTomReloadFlushPending = false
+        local generation = pendingTomTomReloadGeneration
+        if generation then
+            FlushTomTomWaypointsReloaded(generation)
+        end
+    end)
+end
+
+local function InstallTomTomRemoveAllIntentHook()
+    local dialogs = rawget(_G, "StaticPopupDialogs")
+    local dialog = type(dialogs) == "table" and dialogs.TOMTOM_REMOVE_ALL_CONFIRM or nil
+    if type(dialog) ~= "table" or type(dialog.OnAccept) ~= "function" then
+        return
+    end
+
+    hooksecurefunc(dialog, "OnAccept", function()
+        -- TomTom's OnAccept finishes ResetProfile (and therefore emits
+        -- WaypointsReloaded) before this post-hook runs. Pair that completed
+        -- reload with this explicit user action without inspecting AceDB.
+        if pendingTomTomReloadGeneration == tomTomReloadGeneration then
+            explicitRemoveAllGeneration = tomTomReloadGeneration
+        end
+    end)
+end
+
 function NS.InstallCarrierTomTomHooks()
     local tomtom = GetTomTomAddon()
     if not tomtom then return end
     if NS.State.routing._carrierHooksInstalled then return end
 
-    if type(tomtom.RemoveWaypoint) == "function" then
-        hooksecurefunc(tomtom, "RemoveWaypoint", function(_, uid)
+    if type(tomtom.RegisterCallback) == "function" then
+        tomtom.RegisterCallback(tomTomCallbackOwner, "WaypointRemoved", function(_, uid)
             QueueTomTomWaypointRemoved(uid)
         end)
+        tomtom.RegisterCallback(tomTomCallbackOwner, "WaypointsReloaded", HandleTomTomWaypointsReloaded)
     end
-
-    if type(tomtom.ClearWaypoint) == "function" then
-        hooksecurefunc(tomtom, "ClearWaypoint", function(_, uid)
-            QueueTomTomWaypointRemoved(uid)
-        end)
-    end
-
-    if type(tomtom.RemoveAllWaypoints) == "function" then
-        hooksecurefunc(tomtom, "RemoveAllWaypoints", function()
-            if IsAWPInitiatedRemove() then
-                return
-            end
-            local activeQueueKey = state.routing and state.routing.activeQueueKey or nil
-            local cs = state.routing and state.routing.carrierState or nil
-            if activeQueueKey == "guide"
-                or (type(activeQueueKey) == "string" and activeQueueKey:match("^guide:") ~= nil)
-                or (type(cs) == "table" and cs.source == "guide")
-            then
-                if not ReassertGuideCarrierAfterExternalClear("remove_all", true) then
-                    ForgetExternalClearedCarrier(true)
-                    if type(NS.RecomputeCarrier) == "function" then
-                        NS.RecomputeCarrier()
-                    end
-                end
-            elseif type(activeQueueKey) == "string" and type(NS.ClearQueueByID) == "function" then
-                NS.ClearQueueByID(activeQueueKey)
-            elseif type(NS.GetManualAuthority) == "function"
-                and NS.GetManualAuthority()
-                and type(NS.HandleExplicitManualAuthorityRemove) == "function"
-            then
-                NS.HandleExplicitManualAuthorityRemove()
-            else
-                ReassertGuideCarrierAfterExternalClear("remove_all", true)
-            end
-        end)
-    end
+    InstallTomTomRemoveAllIntentHook()
 
     NS.State.routing._carrierHooksInstalled = true
 end

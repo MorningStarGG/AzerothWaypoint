@@ -525,9 +525,9 @@ local function EnsureNativeTrackerWarningPopup()
             "",
             "AzerothWaypoint's Tracker Viewer is currently docked into Blizzard's native Objective Tracker.",
             "",
-            "This path is experimental because WoW 12.1 can carry addon taint from the shared tracker into the World Map. It may produce protected-action or secret-value errors, may stop working after a future WoW patch, and may eventually be removed from AWP.",
+            "This path is experimental because the modern Blizzard shared Objective Tracker can carry addon taint into the World Map. It may produce protected-action or secret-value errors, may stop working after a future WoW patch, and may eventually be removed from AWP.",
             "",
-            "The combat quest-click proxy prevents one direct error path, but it does not make native docking taint-free. Kaliel's Tracker is recommended and avoids this specific Blizzard boundary.",
+            "The combat quest-click proxy prevents one direct error path, but it does not make native docking taint-free. When it is available for the current client, Kaliel's Tracker is recommended and avoids this specific Blizzard boundary.",
         }, "\n"),
         button1 = "Okay, remind me later",
         button2 = "Don't remind me again",
@@ -584,6 +584,9 @@ local function CreateZygorStepChatStickySummaryOptions()
 end
 
 local function CreateRoutingBackendOptions()
+    local zygorAddonName = type(NS.GetZygorAddonName) == "function"
+        and NS.GetZygorAddonName()
+        or "ZygorGuidesViewer"
     local function getAddOnInfo(name)
         if type(name) ~= "string" or name == "" then
             return nil
@@ -731,7 +734,7 @@ local function CreateRoutingBackendOptions()
 
     return {
         makeBackendOption("direct", "TomTom Direct"),
-        makeBackendOption("zygor", "Zygor", "RoutingBackend_Zygor", { "ZygorGuidesViewer" }, {
+        makeBackendOption("zygor", "Zygor", "RoutingBackend_Zygor", { zygorAddonName }, {
             not_installed = "Install Zygor Guides Viewer to use Zygor's LibRover routing.",
             disabled = "Enable Zygor Guides Viewer for this character to use Zygor's LibRover routing.",
             not_loaded = "Load Zygor Guides Viewer to use Zygor's LibRover routing.",

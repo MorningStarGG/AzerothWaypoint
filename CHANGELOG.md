@@ -1,5 +1,24 @@
 # Changelog
 
+## 4.2.0
+- **WoW Forever support**
+  - Added WoW Forever to the same addon package as Retail, with shared SavedVariables names and capability-based feature checks.
+  - Added client-flavor detection that uses the bounded Forever interface range instead of project IDs.
+  - Updated quest-watch handling to the current `C_QuestLog.GetQuestWatchType` contract and removed the obsolete Mapzeroth `LEARNED_SPELL_IN_TAB` listener.
+
+- **Support and diagnostics**
+  - Added client flavor and Forever integration availability to `/awp status`, updated integration cards, and documented both installation paths and the client support matrix.
+  - Generalized the experimental Blizzard Tracker Viewer warning to the modern shared Objective Tracker and World Map taint boundary on both supported clients.
+
+- **Options and help**
+  - Updated and added search tags for options inside addon settings that were lacking or missing tags.
+
+## 4.1.4
+- **TomTom 4.4 compatibility**
+  - Updated AWP's carrier and queue waypoints to use TomTom 4.4's new `minimap`, `world`, and zero clear-distance options, removing obsolete waypoint fields.
+  - Arrow settings, theme, and target observation now use TomTom's public callbacks. Target changes retain AWP's next-frame skin refresh, while duplicate refresh requests are combined without changing arrival/navigation state tracking.
+  - `/awp repair` now restores TomTom's clear distance through `profile.persistence.cleardistance`.
+
 ## 4.1.3
 - **Mapzeroth 2.x compatibility**
   - Updated the existing routing backend for Mapzeroth 2.x

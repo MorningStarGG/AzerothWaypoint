@@ -78,6 +78,8 @@ local SKIN_PRESETS = {
 local themeState = state.theme or {}
 state.theme = themeState
 themeState.arrowSuppressionReasons = themeState.arrowSuppressionReasons or {}
+local tomTomCallbackOwner = {}
+local tomTomSkinRefreshPending = false
 
 local DEFAULT_SUPPRESSION_REASON = "default"
 
@@ -916,7 +918,7 @@ local function RegisterTomTomThemes()
 end
 
 local function RevertToTomTomTheme(handler, wayframe)
-    local active = handler and ((handler.GetActiveTheme and handler:GetActiveTheme()) or handler.activeKey)
+    local active = handler and handler:GetActiveTheme()
     if not NS.IsThemeKey(active) then return end
 
     local profileTheme
@@ -938,7 +940,12 @@ function NS.ApplyTomTomArrowSkin()
     local tomtom = GetTomTom()
     local wayframe = GetTomTomArrow()
     local handler = tomtom and tomtom.CrazyArrowThemeHandler
-    if not handler or not wayframe or type(handler.SetActiveTheme) ~= "function" then return end
+    if not handler or not wayframe
+        or type(handler.GetActiveTheme) ~= "function"
+        or type(handler.SetActiveTheme) ~= "function"
+    then
+        return
+    end
 
     local choice = NS.GetSkinChoice and NS.GetSkinChoice() or "default"
     local def = NS.GetArrowSkin(choice)
@@ -952,7 +959,7 @@ function NS.ApplyTomTomArrowSkin()
     local themeKey = GetSkinThemeKey(choice, def)
     if themeKey and handler.themes and handler.themes[themeKey] then
         local active = handler.active and handler.active.tbl
-        local activeKey = (handler.GetActiveTheme and handler:GetActiveTheme()) or handler.activeKey
+        local activeKey = handler:GetActiveTheme()
         if activeKey == themeKey and active then
             local arrivalMode = themeState.tomtomArrivalMode == true
             if arrivalMode then
@@ -989,31 +996,48 @@ function NS.ApplyTomTomArrowSkin()
     end
 end
 
+local function ScheduleTomTomSkinRefresh()
+    if tomTomSkinRefreshPending then
+        return
+    end
+    tomTomSkinRefreshPending = true
+
+    local function Refresh()
+        tomTomSkinRefreshPending = false
+        NS.ApplyTomTomArrowSkin()
+    end
+
+    if type(NS.After) == "function" then
+        NS.After(0, Refresh)
+    else
+        Refresh()
+    end
+end
+
+local function OnTomTomArrowChanged(event, value)
+    -- Preserve the historical SetCrazyArrow refresh only for a real target.
+    -- Clearing the target does not expose an arrow that needs re-skinning.
+    if event == "ArrowTargetChanged" and value == nil then
+        return
+    end
+    -- ApplyTomTomArrowSkin activates AWP themes itself. Ignore that resulting
+    -- callback so a single refresh does not schedule a redundant second pass.
+    if event == "ArrowThemeChanged" and NS.IsThemeKey(value) then
+        return
+    end
+    ScheduleTomTomSkinRefresh()
+end
+
 function NS.HookTomTomThemeBridge()
     local tomtom = GetTomTom()
     if not tomtom or themeState.hookedTomTom then return end
+    if type(tomtom.RegisterCallback) ~= "function" then return end
     themeState.hookedTomTom = true
     local handler = tomtom.CrazyArrowThemeHandler
 
-    local function ApplyAfterTomTomUpdate()
-        if type(NS.After) == "function" then
-            NS.After(0, NS.ApplyTomTomArrowSkin)
-        else
-            NS.ApplyTomTomArrowSkin()
-        end
-    end
-
-    if type(tomtom.ShowHideCrazyArrow) == "function" and _G.hooksecurefunc then
-        _G.hooksecurefunc(tomtom, "ShowHideCrazyArrow", function()
-            ApplyAfterTomTomUpdate()
-        end)
-    end
-
-    if type(tomtom.SetCrazyArrow) == "function" and _G.hooksecurefunc then
-        _G.hooksecurefunc(tomtom, "SetCrazyArrow", function()
-            ApplyAfterTomTomUpdate()
-        end)
-    end
+    tomtom.RegisterCallback(tomTomCallbackOwner, "ArrowSettingsApplied", OnTomTomArrowChanged)
+    tomtom.RegisterCallback(tomTomCallbackOwner, "ArrowThemeChanged", OnTomTomArrowChanged)
+    tomtom.RegisterCallback(tomTomCallbackOwner, "ArrowTargetChanged", OnTomTomArrowChanged)
 
     if handler and _G.hooksecurefunc then
         if type(handler.SwitchToArrivalArrow) == "function" then
@@ -1044,7 +1068,7 @@ function NS.SuppressTomTomArrowDisplay(suppressed, reason)
     local arrow = GetTomTomArrow()
     local tomtom = GetTomTom()
     local handler = tomtom and tomtom.CrazyArrowThemeHandler
-    local active = handler and ((handler.GetActiveTheme and handler:GetActiveTheme()) or handler.activeKey)
+    local active = handler and type(handler.GetActiveTheme) == "function" and handler:GetActiveTheme() or nil
     local activeTheme = handler and handler.active and handler.active.tbl
         or (active and handler and handler.themes and handler.themes[active] and handler.themes[active].tbl)
 

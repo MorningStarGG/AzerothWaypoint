@@ -136,13 +136,6 @@ NS.HELP_PAGES = {
                 spacingAfter = 14,
             },
             {
-                type = "note",
-                align = "CENTER",
-                accent = false,
-                text =
-                "ZygorWaypoint is now AzerothWaypoint. TomTom is the only required addon. Zygor is still fully supported, but it is now optional.",
-            },
-            {
                 type = "heading",
                 text = "What AWP Does",
             },

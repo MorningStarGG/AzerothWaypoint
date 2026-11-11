@@ -1,6 +1,29 @@
 local NS = _G.AzerothWaypointNS
 local C = NS.Constants
 
+local ZYGOR_RETAIL_ADDON = "ZygorGuidesViewer"
+local ZYGOR_FOREVER_ADDON = "ZygorGuidesViewerForever"
+
+local function GetInterfaceVersion()
+    if type(GetBuildInfo) ~= "function" then
+        return nil
+    end
+    local _, _, _, interfaceVersion = GetBuildInfo()
+    return tonumber(interfaceVersion)
+end
+
+function NS.GetClientFlavor()
+    local interfaceVersion = GetInterfaceVersion()
+    if interfaceVersion and interfaceVersion >= 16000 and interfaceVersion < 17000 then
+        return "forever"
+    end
+    return "retail"
+end
+
+function NS.IsWoWForever()
+    return NS.GetClientFlavor() == "forever"
+end
+
 -- ============================================================
 -- Addon accessors
 -- ============================================================
@@ -67,9 +90,54 @@ function NS.IsAddonLoaded(name)
         or false
 end
 
+function NS.GetZygorAddonName()
+    if NS.IsAddonLoaded(ZYGOR_FOREVER_ADDON) then
+        return ZYGOR_FOREVER_ADDON
+    end
+    if NS.IsAddonLoaded(ZYGOR_RETAIL_ADDON) then
+        return ZYGOR_RETAIL_ADDON
+    end
+    return NS.IsWoWForever() and ZYGOR_FOREVER_ADDON or ZYGOR_RETAIL_ADDON
+end
+
+function NS.GetZygorAssetPath(relativePath)
+    if type(relativePath) ~= "string" or relativePath == "" then
+        return nil
+    end
+    relativePath = relativePath:gsub("^[\\/]", ""):gsub("/", "\\")
+
+    local zygor = rawget(_G, "ZGV") or rawget(_G, "ZygorGuidesViewer")
+    local root = type(zygor) == "table" and type(zygor.DIR) == "string" and zygor.DIR or nil
+    if not root or root == "" then
+        root = "Interface\\AddOns\\" .. NS.GetZygorAddonName()
+    end
+    return root:gsub("[\\/]$", "") .. "\\" .. relativePath
+end
+
 function NS.IsZygorLoaded()
-    if not NS.IsAddonLoaded("ZygorGuidesViewer") then return false end
+    if not NS.IsAddonLoaded(NS.GetZygorAddonName()) then return false end
     return rawget(_G, "ZygorGuidesViewer") ~= nil or rawget(_G, "ZGV") ~= nil
+end
+
+function NS.GetInitialRoutingBackendID(isAddonEnabled)
+    if type(isAddonEnabled) ~= "function" then
+        isAddonEnabled = function(addonName)
+            return NS.IsAddonLoaded(addonName)
+        end
+    end
+
+    if isAddonEnabled(NS.GetZygorAddonName()) then
+        return "zygor"
+    end
+    if isAddonEnabled("FarstriderLib")
+        and isAddonEnabled("FarstriderLibData")
+    then
+        return "farstrider"
+    end
+    if isAddonEnabled("Mapzeroth") then
+        return "mapzeroth"
+    end
+    return "direct"
 end
 
 function NS.IsMapzerothLoaded()

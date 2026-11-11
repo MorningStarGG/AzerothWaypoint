@@ -160,25 +160,6 @@ state.db = state.db or {
 }
 
 local dbState = state.db
-
-local ROUTING_BACKEND_DEFAULT_PRIORITY = {
-    {
-        id = "zygor",
-        addons = { "ZygorGuidesViewer" },
-    },
-    {
-        id = "farstrider",
-        addons = { "FarstriderLib", "FarstriderLibData" },
-    },
-    {
-        id = "mapzeroth",
-        addons = { "Mapzeroth" },
-    },
-    {
-        id = "direct",
-    },
-}
-
 local VALID_ROUTING_BACKENDS = {
     zygor = true,
     mapzeroth = true,
@@ -198,30 +179,9 @@ local function IsAddonEnabledForInitialRoutingDefault(addonName)
     return type(NS.IsAddonLoaded) == "function" and NS.IsAddonLoaded(addonName) or false
 end
 
-local function AreRoutingBackendDependenciesEnabled(def)
-    if type(def) ~= "table" then
-        return false
-    end
-    if def.id == "direct" then
-        return true
-    end
-    if type(def.addons) ~= "table" or #def.addons == 0 then
-        return false
-    end
-    for index = 1, #def.addons do
-        if not IsAddonEnabledForInitialRoutingDefault(def.addons[index]) then
-            return false
-        end
-    end
-    return true
-end
-
 local function SelectInitialRoutingBackend()
-    for index = 1, #ROUTING_BACKEND_DEFAULT_PRIORITY do
-        local def = ROUTING_BACKEND_DEFAULT_PRIORITY[index]
-        if AreRoutingBackendDependenciesEnabled(def) then
-            return def.id
-        end
+    if type(NS.GetInitialRoutingBackendID) == "function" then
+        return NS.GetInitialRoutingBackendID(IsAddonEnabledForInitialRoutingDefault)
     end
     return "direct"
 end

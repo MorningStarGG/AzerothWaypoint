@@ -4,8 +4,8 @@
 
 ![](https://github.com/MorningStarGG/AzerothWaypoint/blob/main/media/banner.png?raw=true)
 
-![Version](https://img.shields.io/badge/version-4.1.0b-blue)
-![Game](https://img.shields.io/badge/World%20of%20Warcraft-Addon-orange)
+![Version](https://img.shields.io/badge/version-4.2.0-blue)
+![Game](https://img.shields.io/badge/Clients-Retail%20%7C%20WoW%20Forever-orange)
 ![Required](https://img.shields.io/badge/Required-TomTom-red)
 ![Optional](https://img.shields.io/badge/Optional-Zygor%20%7C%20APR%20%7C%20WoWPro%20%7C%20Farstrider%20%7C%20Mapzeroth%20%7C%20InFlight-lightgrey)
 ![License](https://img.shields.io/badge/license-GPL--3.0-green)
@@ -29,7 +29,8 @@ AzerothWaypoint is the renamed and expanded successor to ZygorWaypoint.
 - [How Navigation Works](#how-navigation-works)
 - [Feature Highlights](#feature-highlights)
 - [Supported Integrations](#supported-integrations)
-- [What's New in 4.1.0b](#whats-new-in-410b)
+- [What's New in 4.2.0](#whats-new-in-420)
+- [Earlier 4.1 Highlights](#earlier-41-highlights)
 - [What Changed in 4.0.0](#what-changed-in-400)
 - [Options](#options)
 - [Slash Commands](#slash-commands)
@@ -402,11 +403,9 @@ Tracker Viewer supports:
 - square, rounded, or hidden progress bar styles
 - contextual tracker text colors for common Zygor goal types
 
-Blizzard native docking has a confirmed WoW 12.1 taint boundary in Blizzard's shared Objective Tracker and World Map code. It can produce protected-action or secret-value errors after otherwise normal tracker and map use. It may stop working entirely after a future WoW patch and may be removed from AWP in favor of Kaliel's Tracker-only docking. The combat quest-click proxy reduces one reproducible failure, but it does not make native docking taint-free.
+Blizzard native docking has a confirmed taint boundary in Blizzard's shared Objective Tracker and World Map code in the current api. It can produce protected-action or secret-value errors after otherwise normal tracker and map use. It may stop working entirely after a future WoW patch and may be removed from AWP in favor of Kaliel's Tracker-only docking. The combat quest-click proxy reduces one reproducible failure, but it does not make native docking taint-free.
 
 When Tracker Viewer attaches to Blizzard's tracker, AWP shows this warning after login or reload. **Okay, remind me later** repeats it next session; **Don't remind me again** disables the popup account-wide. It can be restored with **Zygor > Tracker Viewer > Show Native Docking Warning Popup**.
-
-Kaliel's Tracker is the recommended long-term host because it keeps AWP inside an addon-owned tracker path and avoids this specific Blizzard boundary. AWP selects it automatically when it is installed and loaded.
 
 You can also hide Zygor's native viewer while keeping Zygor's guide engine, active waypoints, guide picker, settings, and guide navigation available through AWP.
 
@@ -482,7 +481,11 @@ Other addons that create normal TomTom or Blizzard waypoint calls can work throu
 
 ---
 
-## What's New in 4.1.0b
+## What's New in 4.2.0
+
+- Now supports Retail and WoW Forever.
+
+## Earlier 4.1 Highlights
 
 ### Blizzard Quest POI Routing
 
@@ -899,47 +902,28 @@ Common aliases:
 ## Installation
 
 1. Download AzerothWaypoint.
-2. Place the folder here:
+2. Place the folder in the matching client directory:
 
 ```text
 World of Warcraft/_retail_/Interface/AddOns/AzerothWaypoint/
 ```
-
-3. If you previously used ZygorWaypoint, delete the old folder:
-
+or
 ```text
-World of Warcraft/_retail_/Interface/AddOns/ZygorWaypoint/
+World of Warcraft/_forever_/Interface/AddOns/AzerothWaypoint/
 ```
-
-4. Install and enable **TomTom**.
-5. Enable any optional supported addons you want to use.
-6. Restart the game or run:
+3. Install and enable **TomTom**.
+4. Enable any optional supported addons you want to use.
+5. Restart the game or run:
 
 ```text
 /reload
 ```
 
-7. Open options:
+6. Open options:
 
 ```text
 /awp options
 ```
-
----
-
-## Upgrade Notes
-
-### From ZygorWaypoint or pre-4.0 development builds
-
-Old ZygorWaypoint settings are not migrated. This was intentional for the v4 rename and development reset.
-
-If the old `ZygorWaypoint` addon folder is still installed, remove or disable it to avoid conflicts.
-
-### WaypointUI
-
-AWP now ships its own 3D world overlay. WaypointUI is not required.
-
-If you still use WaypointUI, AWP may remind you that its native overlay is the recommended setup.
 
 ---
 
@@ -997,7 +981,7 @@ Check:
 - Blizzard's Objective Tracker or Kaliel's Tracker is visible.
 - The tracker is not being hidden or made transparent by another addon.
 
-Kaliel's Tracker is the recommended host. Blizzard native docking remains available as an experimental fallback, but its known WoW 12.1 taint can cause protected-action or secret-value errors and may make native docking unusable after a future patch. Native docking may eventually be removed in favor of Kaliel's Tracker-only docking.
+Kaliel's Tracker is the recommended quest tracker. Blizzard native docking remains available as an experimental fallback, but its known client api taint can cause protected-action or secret-value errors and may make native docking unusable after a future patch. Native docking may eventually be removed in favor of Kaliel's Tracker-only docking.
 
 The native-docking warning popup can be enabled or restored under **Zygor > Tracker Viewer > Show Native Docking Warning Popup**.
 
@@ -1031,7 +1015,7 @@ Try opening the quest log, changing tracking, or waiting for the next quest upda
 - Some Blizzard quest/objective data is not immediately available at login or right after a quest state changes.
 - Some guide addons expose richer metadata than others. AWP uses addon data first where reliable, then falls back to Blizzard APIs.
 - The overlay's dynamic text sizing is limited by Blizzard font behavior and may not animate perfectly smoothly.
-- Farstrider (needs FarstriderLibData), Mapzeroth 2, and Zygor routing depend on their addon being installed and enabled. Mapzeroth has no supported integration API, so `/awp status` reports its compatibility details and AWP follows the normal available-backend fallback if its private capabilities change.
+- Farstrider (requires FarstriderLibData), Mapzeroth, and Zygor routing depend on their current addon builds being installed and enabled. Mapzeroth has no supported integration API, so AWP follows the normal available-backend fallback if its private capabilities change.
 
 ---
 

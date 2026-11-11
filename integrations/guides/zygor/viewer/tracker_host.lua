@@ -10,7 +10,7 @@ local Shared = NS.Internal.ZygorTrackerViewer
 local Host = {}
 Shared.TrackerHost = Host
 
-Host.NATIVE_DOCK_WARNING = "Blizzard native Tracker Viewer docking is experimental and has a known WoW 12.1 taint issue. It may produce protected-action or secret-value errors, may stop working entirely after a future WoW patch, and may be removed from AWP in favor of Kaliel's Tracker-only docking. Kaliel's Tracker is the recommended tracker."
+Host.NATIVE_DOCK_WARNING = "Blizzard native Tracker Viewer docking is experimental and has a known WoW api taint issue. It may produce protected-action or secret-value errors, may stop working entirely after a future WoW patch, and may be removed from AWP in favor of Kaliel's Tracker-only docking. Kaliel's Tracker is the recommended tracker."
 Host.KALIEL_DOCK_STATUS = "Kaliel's Tracker is active and is AWP's recommended Tracker Viewer. It avoids the known Blizzard shared Objective Tracker and World Map taint boundary."
 
 -- ============================================================

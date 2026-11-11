@@ -5,10 +5,11 @@ local state = NS.State
 state.combatVisibility = state.combatVisibility or {
     combatEventActive = false,
     tomTomCloaked = false,
-    tomTomRefreshHooked = false,
+    tomTomRefreshSubscribed = false,
 }
 
 local guard = state.combatVisibility
+local tomTomCallbackOwner = {}
 
 local function IsInCombat()
     if guard.combatEventActive == true then
@@ -100,18 +101,18 @@ local function ApplyTomTomCombatCloak()
     end
 end
 
-local function HookTomTomCombatCloak()
-    if guard.tomTomRefreshHooked then
+local function SubscribeTomTomCombatCloak()
+    if guard.tomTomRefreshSubscribed then
         return
     end
 
     local tomtom = GetTomTom()
-    if not tomtom or type(tomtom.ShowHideCrazyArrow) ~= "function" or type(hooksecurefunc) ~= "function" then
+    if not tomtom or type(tomtom.RegisterCallback) ~= "function" then
         return
     end
 
-    guard.tomTomRefreshHooked = true
-    hooksecurefunc(tomtom, "ShowHideCrazyArrow", function()
+    guard.tomTomRefreshSubscribed = true
+    tomtom.RegisterCallback(tomTomCallbackOwner, "ArrowSettingsApplied", function()
         if ShouldHideTomTomNow() then
             CloakTomTomArrow()
         end
@@ -119,7 +120,7 @@ local function HookTomTomCombatCloak()
 end
 
 local function ApplyTomTomGuard()
-    HookTomTomCombatCloak()
+    SubscribeTomTomCombatCloak()
     local hidden = ShouldHideTomTomNow()
     ApplyTomTomCombatCloak()
     if type(NS.ApplySpecialActionCombatVisibility) == "function" then

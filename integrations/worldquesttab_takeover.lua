@@ -1,4 +1,5 @@
 local NS = _G.AzerothWaypointNS
+if type(NS.IsWoWForever) == "function" and NS.IsWoWForever() then return end
 local state = NS.State
 
 state.bridgeWorldQuestTabTakeover = state.bridgeWorldQuestTabTakeover or {
