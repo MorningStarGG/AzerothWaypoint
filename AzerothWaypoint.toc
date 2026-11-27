@@ -2,7 +2,7 @@
 ## Title: AzerothWaypoint
 ## Notes: Unified navigation with smart travel routing, integrated guide viewers, waypoint queues, and customizable 3D world markers powered by TomTom.
 ## Author: MorningStarGG
-## Version: 5.0.0
+## Version: 5.0.1
 ## IconTexture: Interface\AddOns\AzerothWaypoint\media\icon.png
 ## SavedVariables: AzerothWaypointDB
 ## SavedVariablesPerCharacter: AzerothWaypointCharDB

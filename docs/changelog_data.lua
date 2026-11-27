@@ -2,6 +2,27 @@ local NS = _G.AzerothWaypointNS
 
 NS.CHANGELOG_DATA = {
     {
+        version = "5.0.1",
+        sections = {
+            {
+                title = "Mapzeroth",
+                entries = {
+                    { text = "Updated support for Mapzeroth 1.7.0 on WoW Forever and 2.4.0 on Retail. An earlier Mapzeroth quest trip can no longer replace your active AWP route when the quest objective moves. Explicit **Route with Mapzeroth** actions still work.", level = 1 },
+                    { text = "Added **Search Nearby > Next Profession Rank** on WoW Forever. Find the trainer, book vendor, or quest giver for your next rank and get directions using your selected travel planner. Try `/awp search next rank first aid`.",             level = 1 },
+                    { text = "Added Mapzeroth as a fallback for verified dungeon and raid entrances when Blizzard and Farstrider have no result. This includes entrance data for the five new Forever dungeons.",                                                         level = 1 },
+                }
+            },
+            {
+                title = "Ellesmere UI (WoW Forever)",
+                entries = {
+                    { text = "The Taxi List now uses Ellesmere UI 9.9.6's recorded time for the exact flight route when available, adjusted for Frequent Flier.",                                                                                                    level = 1 },
+                    { text = "Reduced unnecessary tracker layout work when Ellesmere UI reorders quests by distance.",                                                                                                                                               level = 1 },
+                    { text = "Added a startup prompt when AWP's World Overlay and Ellesmere UI's **Show Waypoints in the World** are both enabled. You can turn off Ellesmere's marker immediately, ask to be reminded later, or dismiss the reminder permanently.", level = 1 },
+                }
+            },
+        },
+    },
+    {
         version = "5.0.0",
         sections = {
             {

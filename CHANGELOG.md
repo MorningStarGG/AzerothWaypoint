@@ -1,5 +1,21 @@
 # Changelog
 
+## 5.0.1
+
+This update improves Mapzeroth routing on both clients and Ellesmere UI integration on WoW Forever.
+
+### Mapzeroth
+
+- Updated support for Mapzeroth 1.7.0 on WoW Forever and 2.4.0 on Retail. An earlier Mapzeroth quest trip can no longer replace your active AWP route when the quest objective moves. Explicit **Route with Mapzeroth** actions still work.
+- Added **Search Nearby > Next Profession Rank** on WoW Forever. Find the trainer, book vendor, or quest giver for your next rank and get directions using your selected travel planner. Try `/awp search next rank first aid`.
+- Added Mapzeroth as a fallback for verified dungeon and raid entrances when Blizzard and Farstrider have no result. This includes entrance data for the five new Forever dungeons.
+
+### Ellesmere UI (WoW Forever)
+
+- The Taxi List now uses Ellesmere UI 9.9.6's recorded time for the exact flight route when available, adjusted for Frequent Flier.
+- Reduced unnecessary tracker layout work when Ellesmere UI reorders quests by distance.
+- Added a startup prompt when AWP's World Overlay and Ellesmere UI's **Show Waypoints in the World** are both enabled. You can turn off Ellesmere's marker immediately, ask to be reminded later, or dismiss the reminder permanently.
+
 ## 5.0.0
 
 A major update expanding AzerothWaypoint into a more complete navigation and guide experience across Retail and WoW Forever. This release introduces new guide and routing integrations, controller support on Forever, expanded appearance customization, shared guide actions, settings profiles, and improvements to travel and waypoint management.
