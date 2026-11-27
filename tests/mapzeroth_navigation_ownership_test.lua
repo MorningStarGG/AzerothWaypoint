@@ -76,6 +76,8 @@ MapzerothAddon = {
         end,
     },
     WaypointPrompt = {
+        OnQuestSpotChanged = function() end,
+        OnTripStarted = function() end,
         OnWaypointChanged = function()
             if waypoint ~= seen then
                 seen = waypoint

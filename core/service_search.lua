@@ -2,7 +2,7 @@
 -- Nearby service search
 -- ============================================================
 --
--- Finds nearby services through the available guide providers and sends the
+-- Finds nearby services through available addon data and sends the
 -- winning result to manual routing. The same search serves the minimap menu
 -- and slash command. Each request advances through available providers until
 -- it finds a usable result.
@@ -18,37 +18,39 @@ function Search.Generation() return generation end
 function Search.InvalidateCapabilities() generation = generation + 1 end
 
 local definitions = {
-    { "repair",         "Repair",              nil,           "repairs|repair vendor" },
-    { "innkeeper",      "Innkeeper",           nil,           "inn|innkeepers" },
-    { "flightmaster",   "Flight Master",       nil,           "flight master|flightmasters|fp" },
-    { "mailbox",        "Mailbox",             nil,           "mail|mailboxes" },
-    { "banker",         "Bank",                nil,           "bank|bankers" },
-    { "auctioneer",     "Auction House",       nil,           "auction|auction house|ah|auctioneers" },
-    { "stable",         "Stable Master",       nil,           "stable master|stablemaster|stable masters|stables" },
-    { "barber",         "Barber",              nil,           "barbers|barbershop" },
-    { "transmogrifier", "Transmogrifier",      nil,           "mog|tmog|transmog|transmogs|transmogrifiers" },
-    { "voidstorage",    "Void Storage",        nil,           "void storage|void" },
-    { "battlemaster",   "Battlemaster",        nil,           "battlemaster|battle master" },
-    { "vendor",         "Vendor",              "vendors",     "vendors|store" },
-    { "food",           "Food and Drink",      "vendors",     "drink|food and drink|food vendor|drink vendor|water" },
-    { "poisons",        "Poison Vendor",       "vendors",     "poison|poison vendor" },
-    { "reagents",       "Reagent Vendor",      "vendors",     "reagent|reagent vendor" },
-    { "general",        "General Goods",       "vendors",     "general goods|goods|supplies" },
-    { "arrows",         "Arrows",              "vendors",     "arrow" },
-    { "bullets",        "Bullets",             "vendors",     "bullet" },
-    { "ranged",         "Bows and Guns",       "vendors",     "bow|bows|gun|guns|bows and guns|crossbow|crossbows" },
-    { "trainer",        "Profession Trainer",  "professions", "trainers|profession trainer|profession trainers" },
-    { "class",          "Class Trainer",       "classes",     "class trainer|class trainers" },
-    { "weapon",         "Weapon Master",       "weapons",     "weapon master|weapon masters|weapon trainer" },
-    { "workshop",       "Profession Workshop", "workshops",   "workshops|profession workshop|profession workshops" },
-    { "riding",         "Riding Trainer",      "trainers",    "riding trainer|riding trainers" },
-    { "pettrainer",     "Hunter Pet Trainer",  "trainers",    "pet trainer|hunter pet trainer|hunter pets trainer" },
-    { "portaltrainer",  "Portal Trainer",      "trainers",    "portal trainer|mage portal trainer" },
-    { "training",       "Special Trainer",     "trainers" },
+    { "repair",         "Repair",               nil,           "repairs|repair vendor" },
+    { "innkeeper",      "Innkeeper",            nil,           "inn|innkeepers" },
+    { "flightmaster",   "Flight Master",        nil,           "flight master|flightmasters|fp" },
+    { "mailbox",        "Mailbox",              nil,           "mail|mailboxes" },
+    { "banker",         "Bank",                 nil,           "bank|bankers" },
+    { "auctioneer",     "Auction House",        nil,           "auction|auction house|ah|auctioneers" },
+    { "stable",         "Stable Master",        nil,           "stable master|stablemaster|stable masters|stables" },
+    { "barber",         "Barber",               nil,           "barbers|barbershop" },
+    { "transmogrifier", "Transmogrifier",       nil,           "mog|tmog|transmog|transmogs|transmogrifiers" },
+    { "voidstorage",    "Void Storage",         nil,           "void storage|void" },
+    { "battlemaster",   "Battlemaster",         nil,           "battlemaster|battle master" },
+    { "vendor",         "Vendor",               "vendors",     "vendors|store" },
+    { "food",           "Food and Drink",       "vendors",     "drink|food and drink|food vendor|drink vendor|water" },
+    { "poisons",        "Poison Vendor",        "vendors",     "poison|poison vendor" },
+    { "reagents",       "Reagent Vendor",       "vendors",     "reagent|reagent vendor" },
+    { "general",        "General Goods",        "vendors",     "general goods|goods|supplies" },
+    { "arrows",         "Arrows",               "vendors",     "arrow" },
+    { "bullets",        "Bullets",              "vendors",     "bullet" },
+    { "ranged",         "Bows and Guns",        "vendors",     "bow|bows|gun|guns|bows and guns|crossbow|crossbows" },
+    { "trainer",        "Profession Trainer",   "professions", "trainers|profession trainer|profession trainers" },
+    { "next_rank",      "Next Profession Rank", "ranks",       "next rank|next profession rank",                     "mapzeroth" },
+    { "class",          "Class Trainer",        "classes",     "class trainer|class trainers" },
+    { "weapon",         "Weapon Master",        "weapons",     "weapon master|weapon masters|weapon trainer" },
+    { "workshop",       "Profession Workshop",  "workshops",   "workshops|profession workshop|profession workshops" },
+    { "riding",         "Riding Trainer",       "trainers",    "riding trainer|riding trainers" },
+    { "pettrainer",     "Hunter Pet Trainer",   "trainers",    "pet trainer|hunter pet trainer|hunter pets trainer" },
+    { "portaltrainer",  "Portal Trainer",       "trainers",    "portal trainer|mage portal trainer" },
+    { "training",       "Special Trainer",      "trainers" },
 }
 local groups = {
     { "vendors", "Vendors" }, { "professions", "Profession Trainers" }, { "classes", "Class Trainers" },
     { "weapons", "Weapon Masters" }, { "workshops", "Profession Workshops" }, { "trainers", "Other Trainers" },
+    { "ranks", "Next Profession Rank" },
 }
 Search.Professions = {
     alchemy = "Alchemy",
@@ -99,7 +101,7 @@ Search.Weapons = {
     [46] = "Guns",
     [176] = "Thrown"
 }
-local byService, aliases, subjects = {}, {}, {}
+local byService, aliases, subjects, dedicatedProviders = {}, {}, {}, {}
 
 -- ============================================================
 -- Service and trainer queries
@@ -110,9 +112,10 @@ local function Normalize(text)
     return text:lower():gsub("[%-%_]", " "):gsub("%s+", " "):match("^%s*(.-)%s*$")
 end
 for index, entry in ipairs(definitions) do
-    byService[entry[1]] = { label = entry[2], group = entry[3], order = index }
+    byService[entry[1]] = { label = entry[2], group = entry[3], order = index, provider = entry[5] }
     aliases[entry[1]] = entry[1]
     for alias in (entry[4] or ""):gmatch("[^|]+") do aliases[alias] = entry[1] end
+    if entry[5] then dedicatedProviders[entry[5]] = true end
 end
 for key, label in pairs(Search.Classes) do subjects[Normalize(label)] = { "class", key } end
 for key, label in pairs(Search.Professions) do subjects[Normalize(label)] = { "trainer", key } end
@@ -128,7 +131,10 @@ function Search.Query(service, subject, label)
     local definition = byService[service]
     if not definition then return end
     local query = { service = service, label = label or definition.label }
-    if service == "trainer" or service == "workshop" then
+    if service == "next_rank" then
+        if not Search.Professions[subject] then return end
+        query.profession, query.label = subject, label or Search.Professions[subject]
+    elseif service == "trainer" or service == "workshop" then
         if subject then
             if not Search.Professions[subject] then return end
             query.profession = subject
@@ -160,8 +166,16 @@ function Search.ResolveQuery(text)
     if text == "" or text == "help" or text == "list" then return nil, true end
     local service = aliases[text]
     if service then
-        if service == "workshop" then return nil, true end
+        if service == "workshop" or service == "next_rank" then return nil, true end
         return Search.Query(service)
+    end
+    local rank = text:match("^next rank%s+(.+)$") or text:match("^next profession rank%s+(.+)$")
+    if rank then
+        if Search.Professions[rank] then return Search.Query("next_rank", rank) end
+        for _, candidate in ipairs(Search.GetCapabilities(byService.next_rank.provider) or {}) do
+            if candidate.service == "next_rank" and Normalize(candidate.label) == rank then return candidate end
+        end
+        return nil, false, text
     end
     local profession = text:match("^workshop%s+(.+)$") or text:match("^profession workshops?%s+(.+)$") or
         text:match("^(.+)%s+workshops?$")
@@ -175,7 +189,7 @@ function Search.ResolveQuery(text)
     -- shown in the catalog without borrowing another service's meaning.
     for _, entry in ipairs(Search.GetCatalog()) do
         for _, candidate in ipairs(entry.children or { entry }) do
-            if Normalize(candidate.label) == text then return candidate.query end
+            if candidate.query.service ~= "next_rank" and Normalize(candidate.label) == text then return candidate.query end
         end
     end
     return nil, false, text
@@ -212,19 +226,17 @@ end
 function Search.GetCatalog()
     WatchCapabilities()
     local changed, count = catalog == nil, 0
-    for _, key in ipairs(NS.GetGuideTrackerViewerOrder()) do
-        local provider = providers[key]
-        if provider and provider.GetCapabilities then
-            local capabilities = Search.GetCapabilities(key)
-            if capabilities then
-                count = count + 1
-                local old = sources[count]
-                if not old or old.key ~= key or old.capabilities ~= capabilities then
-                    sources[count], changed = { key = key, capabilities = capabilities }, true
-                end
-            end
+    local function addSource(key)
+        local capabilities = Search.GetCapabilities(key)
+        if not capabilities then return end
+        count = count + 1
+        local old = sources[count]
+        if not old or old.key ~= key or old.capabilities ~= capabilities then
+            sources[count], changed = { key = key, capabilities = capabilities }, true
         end
     end
+    for _, key in ipairs(NS.GetGuideTrackerViewerOrder()) do addSource(key) end
+    for key in pairs(dedicatedProviders) do addSource(key) end
     if #sources ~= count then
         changed = true; for i = #sources, count + 1, -1 do sources[i] = nil end
     end
@@ -233,7 +245,8 @@ function Search.GetCatalog()
     for _, source in ipairs(sources) do
         for _, query in ipairs(source.capabilities) do
             local definition = byService[query.service]
-            local key = definition and Search.Key(query)
+            local key = definition and (not definition.provider or definition.provider == source.key) and
+            Search.Key(query)
             if key and not seen[key] then
                 seen[key] = true
                 local entry = { label = query.label, query = query, order = definition.order }
@@ -274,7 +287,10 @@ end
 
 function Search.ShowHelp()
     NS.Msg("Usage: /awp search <service> | trainer <profession/class> | workshop <profession> | weapon master <weapon>")
-    NS.Msg("Search uses Guide Viewer Order and your selected AWP travel backend. Available searches:")
+    if Search.GetCapabilities(byService.next_rank.provider) then
+        NS.Msg("Profession ranks: /awp search next rank <profession>")
+    end
+    NS.Msg("Guide searches follow Guide Viewer Order. Results use your selected AWP travel backend. Available searches:")
     local entries = Search.GetCatalog()
     if #entries == 0 then NS.Msg("No supported search provider is ready.") end
     for _, entry in ipairs(entries) do
@@ -328,6 +344,8 @@ end
 
 function Search.Request(query, providerKey)
     Search.Cancel()
+    local definition = byService[query.service]
+    providerKey = definition and definition.provider or providerKey
     local order = providerKey and { providerKey } or NS.GetGuideTrackerViewerOrder()
     local request = { index = 0, success = false }
     current = request

@@ -42,6 +42,7 @@ integrations/external_waypoint_sources.lua
 integrations/btwquests.lua
 integrations/guides/native_map_waypoints.lua
 integrations/questie.lua
+integrations/mapzeroth_data.lua
 integrations/service_zygor.lua
 integrations/guides/dugi/dugi_source.lua
 integrations/silverdragon.lua

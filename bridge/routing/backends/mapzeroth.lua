@@ -37,8 +37,9 @@ local NAVIGATION_REQUIRED = {
     { "WaypointPrompt", "OnWaypointChanged" }, { "WaypointPrompt", "ShowQuest" },
     { "WaypointPrompt", "Answer" }, { "WaypointPrompt", "IsQuestShown" },
     { "WaypointPrompt", "Hide" }, { "WaypointPrompt", "Settle" },
-    { "Corpse",    "Lead" }, { "GetCorpseTarget" }, { "QuestArrow", "Route" },
-    { "Navigator", "Resume" }, { "Navigator", "Stop" }, { "MultiRoute", "Run" },
+    { "WaypointPrompt", "OnQuestSpotChanged" }, { "WaypointPrompt", "OnTripStarted" },
+    { "Corpse",         "Lead" }, { "GetCorpseTarget" }, { "QuestArrow", "Route" },
+    { "Navigator",  "Resume" }, { "Navigator", "Stop" }, { "MultiRoute", "Run" },
     { "Navigation", "IsActive" },
 }
 
@@ -1354,6 +1355,11 @@ local function InstallNativeNavigationGuards(addon)
         if ownsNativeNavigation then return end
         return waypointChanged(...)
     end
+    local questSpotChanged = prompt.OnQuestSpotChanged
+    prompt.OnQuestSpotChanged = function(...)
+        if ownsNativeNavigation then return end
+        return questSpotChanged(...)
+    end
     local showQuest, answer = prompt.ShowQuest, prompt.Answer
     local offeredQuestID
     prompt.ShowQuest = function(self, quest, ...)
@@ -1443,6 +1449,9 @@ function backend.RefreshNativeNavigationOwnership()
         Call(addon.WaypointPrompt, "Hide")
         local ok, active = Call(addon.Navigation, "IsActive")
         if ok and active then Call(addon.Navigator, "Stop") end
+        -- An arrived trip has no replan target for Stop to report. Clear its
+        -- remembered quest even if there was no active navigator to stop.
+        Call(addon.WaypointPrompt, "OnTripStarted", nil)
     else
         Call(addon.WaypointPrompt, "Settle")
     end

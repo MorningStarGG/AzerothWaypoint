@@ -4,8 +4,8 @@
 --
 -- Resolves entrances for instance routes and identifies their travel icons.
 -- The final waypoint keeps its interior coordinates. Blizzard entrance data
--- has priority over Farstrider data. The caller can retry when map information
--- is still unavailable.
+-- has priority, followed by Farstrider and Mapzeroth. The caller can retry
+-- when map information is still unavailable.
 
 local NS = _G.AzerothWaypointNS
 
@@ -58,15 +58,15 @@ local function GetRouteInstanceInfo(destinationMapID)
     end
 
     local instanceName = nil
-    local isRaid = false
+    local travelType
     if EJ_GetInstanceInfo then
         local _, _, _, _, _, _, _, _, _, _, _, raidFlag
         instanceName, _, _, _, _, _, _, _, _, _, _, raidFlag = EJ_GetInstanceInfo(journalInstanceID)
-        isRaid = raidFlag == true
+        if type(raidFlag) == "boolean" then travelType = raidFlag and "raid" or "dungeon" end
     end
 
     local info = {
-        travelType = isRaid and "raid" or "dungeon",
+        travelType = travelType,
         parentMapID = parentMapID,
         journalInstanceID = journalInstanceID,
         name = instanceName,
@@ -326,53 +326,93 @@ local function ResolveDelveRouteEntrance(instanceInfo, title)
     return matched
 end
 
-local function FindFarstriderInstanceEntrance(instanceInfo, mapID, x, y)
-    local api = rawget(_G, "FarstriderLibData_API")
-    local lookup = type(api) == "table" and rawget(api, "GetInstanceEntrance")
-    if type(lookup) ~= "function" or (not instanceInfo.journalInstanceID and instanceInfo.mapType ~= Enum.UIMapType.Dungeon)
-        or not NS.GetWorldPositionFromMapCoords or not NS.ResolveUserWaypointMapCoordsFromWorldPosition
-        or not C_Map.GetMapPosFromWorldPos or not CreateVector2D then
+-- ============================================================
+-- Verified external entrance data
+-- ============================================================
+
+local function FiniteNumber(value)
+    return not (issecretvalue and issecretvalue(value)) and type(value) == "number"
+        and value > -math.huge and value < math.huge
+end
+
+local function VerifiedWorldPosition(mapID, x, y)
+    if not FiniteNumber(x) or not FiniteNumber(y) or x < 0 or x > 1 or y < 0 or y > 1
+        or not NS.GetWorldPositionFromMapCoords or not C_Map.GetMapPosFromWorldPos or not CreateVector2D then
         return
     end
-
     local ok, gameMap, wx, wy = pcall(NS.GetWorldPositionFromMapCoords, mapID, x, y)
-    if not ok or issecretvalue and (issecretvalue(gameMap) or issecretvalue(wx) or issecretvalue(wy))
-        or type(gameMap) ~= "number" or gameMap <= 1 or type(wx) ~= "number" or type(wy) ~= "number" then
+    if not ok or not FiniteNumber(gameMap) or not FiniteNumber(wx) or not FiniteNumber(wy) then return end
+    local mapped, returnedMap, pos = pcall(C_Map.GetMapPosFromWorldPos, gameMap, CreateVector2D(wx, wy), mapID)
+    if not mapped or not FiniteNumber(returnedMap) or returnedMap ~= mapID then return end
+    local rx, ry = ReadMapPositionCoords(pos)
+    if not FiniteNumber(rx) or not FiniteNumber(ry)
+        or math.abs(rx - x) > AREA_POI_COORD_EPSILON or math.abs(ry - y) > AREA_POI_COORD_EPSILON then
         return
     end
-    if IsInInstance and IsInInstance() and GetInstanceInfo then
-        local current = select(8, GetInstanceInfo())
-        if not (issecretvalue and issecretvalue(current)) and current == gameMap then return end
-    end
-    local mapped, returnedMap, pos = pcall(C_Map.GetMapPosFromWorldPos, gameMap, CreateVector2D(wx, wy), mapID)
-    if not mapped or returnedMap ~= mapID then return end
-    local rx, ry = ReadMapPositionCoords(pos)
-    if not rx or not ry or math.abs(rx - x) > AREA_POI_COORD_EPSILON or math.abs(ry - y) > AREA_POI_COORD_EPSILON then return end
+    return gameMap
+end
 
-    local journalLookup = C_EncounterJournal and C_EncounterJournal.GetInstanceForGameMap
-    if instanceInfo.journalInstanceID and type(journalLookup) == "function" then
-        local found, id = pcall(journalLookup, gameMap)
-        if not found or id ~= instanceInfo.journalInstanceID then return end
-    end
+local function IsExteriorMap(mapID)
+    if not FiniteNumber(mapID) or mapID <= 0 then return false end
+    local info = C_Map.GetMapInfo(mapID)
+    return info and info.mapType and info.mapType >= Enum.UIMapType.Continent and info.mapType <= Enum.UIMapType.Zone
+end
 
+local function FindFarstriderInstanceEntrance(lookup, gameMap, name)
+    if not NS.ResolveUserWaypointMapCoordsFromWorldPosition then return end
     local found, entrance = pcall(lookup, gameMap)
     if not found or type(entrance) ~= "table" or type(entrance.pos) ~= "table"
-        or type(entrance.mapId) ~= "number" or entrance.mapId == gameMap
-        or type(entrance.pos.x) ~= "number" or type(entrance.pos.y) ~= "number" then
+        or not FiniteNumber(entrance.mapId) or entrance.mapId == gameMap
+        or not FiniteNumber(entrance.pos.x) or not FiniteNumber(entrance.pos.y) then
         return
     end
 
     local projected, exterior, px, py = pcall(NS.ResolveUserWaypointMapCoordsFromWorldPosition,
         entrance.pos.x, entrance.pos.y, entrance.uiMapHint, entrance.mapId)
-    if not projected or not exterior then return end
-    local info = C_Map.GetMapInfo(exterior)
-    if not info or not info.mapType or info.mapType > Enum.UIMapType.Zone or info.mapType < Enum.UIMapType.Continent then return end
+    if not projected or not IsExteriorMap(exterior) then return end
     local exteriorMap, exteriorX, exteriorY = NS.GetWorldPositionFromMapCoords(exterior, px, py)
-    if exteriorMap ~= entrance.mapId or not exteriorX or not exteriorY
+    if not FiniteNumber(exteriorMap) or exteriorMap ~= entrance.mapId
+        or not FiniteNumber(exteriorX) or not FiniteNumber(exteriorY)
         or math.abs(exteriorX - entrance.pos.x) > 5 or math.abs(exteriorY - entrance.pos.y) > 5 then
         return
     end
-    return { mapID = exterior, x = px, y = py, name = instanceInfo.name }
+    return { mapID = exterior, x = px, y = py, name = name }
+end
+
+local function FindExternalInstanceEntrance(instanceInfo, mapID, x, y)
+    local api = rawget(_G, "FarstriderLibData_API")
+    local lookup = type(api) == "table" and rawget(api, "GetInstanceEntrance")
+    local data = NS.Internal.MapzerothData
+    local journalID = instanceInfo.journalInstanceID
+    local useFarstrider = type(lookup) == "function" and (journalID or instanceInfo.mapType == Enum.UIMapType.Dungeon)
+    local useMapzeroth = data and (journalID or NS.IsWoWForever()) and data.HasWorld()
+    if not useFarstrider and not useMapzeroth then return end
+
+    local gameMap = VerifiedWorldPosition(mapID, x, y)
+    if not gameMap or gameMap <= 1 then return end
+    if IsInInstance and IsInInstance() and GetInstanceInfo then
+        local current = select(8, GetInstanceInfo())
+        if FiniteNumber(current) and current == gameMap then return end
+    end
+
+    local journalLookup = C_EncounterJournal and C_EncounterJournal.GetInstanceForGameMap
+    if journalID and type(journalLookup) == "function" then
+        local found, id = pcall(journalLookup, gameMap)
+        local verifiedID = found and FiniteNumber(id) and id > 0 and id
+        if verifiedID and verifiedID ~= journalID then return end
+        if not verifiedID then useFarstrider = false end
+    end
+    if useFarstrider then
+        local entrance = FindFarstriderInstanceEntrance(lookup, gameMap, instanceInfo.name)
+        if entrance then return entrance end
+    end
+    if useMapzeroth then
+        local ok, entrance = pcall(data.FindInstanceEntrance, gameMap, journalID)
+        if ok and entrance and IsExteriorMap(entrance.mapID) then
+            local exterior = VerifiedWorldPosition(entrance.mapID, entrance.x, entrance.y)
+            if exterior and exterior ~= gameMap then return entrance end
+        end
+    end
 end
 
 -- ============================================================
@@ -397,7 +437,7 @@ function NS.ResolveInstanceRouteIntent(destinationMapID, destinationX, destinati
     end
 
     if not entrance then
-        entrance = FindFarstriderInstanceEntrance(instanceInfo, destinationMapID, destinationX, destinationY)
+        entrance = FindExternalInstanceEntrance(instanceInfo, destinationMapID, destinationX, destinationY)
     end
     if type(entrance) ~= "table" then
         return nil
@@ -405,7 +445,7 @@ function NS.ResolveInstanceRouteIntent(destinationMapID, destinationX, destinati
 
     return {
         kind = "instance",
-        travelType = travelType or "dungeon",
+        travelType = travelType or (entrance.raid and "raid" or "dungeon"),
         parentMapID = instanceInfo.parentMapID,
         journalInstanceID = instanceInfo.journalInstanceID,
         areaPoiID = entrance.areaPoiID,

@@ -14,7 +14,8 @@ return function(addon)
     defaults("Corpse", { Lead = noop })
     defaults("QuestArrow", { Route = noop })
     defaults("WaypointPrompt", { OnWaypointChanged = noop, ShowQuest = noop,
-        Answer = noop, IsQuestShown = function() return false end, Hide = noop, Settle = noop })
+        Answer = noop, IsQuestShown = function() return false end, Hide = noop, Settle = noop,
+        OnQuestSpotChanged = noop, OnTripStarted = noop })
     defaults("MultiRoute", { Run = function(_, work, done) return done(work(noop)) end })
     addon.GetCorpseTarget = addon.GetCorpseTarget or noop
     addon.HasNodeName = addon.HasNodeName or function() return false end

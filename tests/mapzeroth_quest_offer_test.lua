@@ -4,9 +4,9 @@ local NS = AzerothWaypointNS
 local M, backend = NS.Internal.BlizzardTakeovers, NS.RoutingBackend_Mapzeroth
 local current, selected, quest, mode, dead = nil, "zygor", nil, "ask", false
 local map, x, y, resolved = 1412, .51, .65, true
-local now = 100
+local now, routingEnabled = 100, true
 GetTime = function() return now end
-NS.IsRoutingEnabled = function() return true end
+NS.IsRoutingEnabled = function() return routingEnabled end
 NS.GetSelectedBackendID = function() return selected end
 NS.RoutePlanningCore.GetActiveRecord = function() return current end
 UnitIsDeadOrGhost = function() return dead end
@@ -94,3 +94,51 @@ before = requests; p:Answer("route"); assert(requests == before and not offer)
 current = nil; NS.State.routing.manualAuthority = nil; follow(42)
 quest = 43; p:Answer("route"); assert(requests == before)
 print("Native Mapzeroth quest offers: final identity, pending priority, planner intent, guides and acceptance passed")
+
+-- An arrived quest trip (including one whose window has already closed)
+-- keeps its continuation even when Navigator:Stop has no replan target.
+for _, client in ipairs({ "forever", "retail" }) do
+    local active, nativeRoutes = false, 0
+    routingEnabled = false
+    local native = dofile("tests/mapzeroth_navigation_fixture.lua")({
+        L = {}, Theme = {}, Equipment = { Sync = function() end }, Journey = {},
+        Options = { Get = function() return "off" end },
+    })
+    native.GetWaypoint = function() end
+    native.GetQuestTarget = a.GetQuestTarget
+    native.Navigation.ReplanTarget = function() end
+    native.Navigation.IsActive = function() return active end
+    native.Navigation.Stop = function() active = false end
+    native.Panel.OnTripUpdate = function() end
+    assert(loadfile(NativePath(client, "Mapzeroth/UI/WaypointPrompt.lua")))("Mapzeroth", native)
+    assert(loadfile(NativePath(client, "Mapzeroth/UI/Navigator.lua")))("Mapzeroth", native)
+    local prompt = native.WaypointPrompt
+    native.Panel.RouteToQuest = function(_, id)
+        nativeRoutes = nativeRoutes + 1
+        prompt:OnTripStarted({ dest = native:GetQuestTarget(id) })
+    end
+    MapzerothAddon = native
+    assert(backend.RefreshNativeNavigationOwnership())
+    quest = 42
+    prompt:Settle()
+    for _, windowOpen in ipairs({ true, false }) do
+        active = windowOpen
+        native.Panel:RouteToQuest(quest)
+        local beforeNative, beforeAWP = nativeRoutes, requests
+        routingEnabled = true
+        assert(backend.RefreshNativeNavigationOwnership())
+        x = x + .02
+        prompt:OnQuestSpotChanged()
+        assert(requests == beforeAWP and not active, client .. " continued a native trip into AWP")
+        routingEnabled = false
+        assert(backend.RefreshNativeNavigationOwnership())
+        prompt:OnQuestSpotChanged()
+        assert(nativeRoutes == beforeNative, client .. " resumed a stale quest after ownership returned")
+    end
+    native.Panel:RouteToQuest(quest)
+    local beforeNative = nativeRoutes
+    x = x + .02
+    prompt:OnQuestSpotChanged()
+    assert(nativeRoutes == beforeNative + 1, client .. " blocked a new native quest continuation")
+end
+print("Arrived native Mapzeroth quest trips are cleared across ownership changes on both clients")

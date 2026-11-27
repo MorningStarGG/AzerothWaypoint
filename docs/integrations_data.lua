@@ -229,6 +229,8 @@ local INTEGRATIONS = {
             "Use supported wearable teleport items, with equipment restored after travel.",
             "On Forever, follow supported roads and capital streets using Mapzeroth's Walking routes setting. Areas without road coverage keep ordinary guidance.",
             "Mapzeroth quest-tracker, quest-follow and corpse-routing actions can hand navigation to AWP. On Forever, this also includes Route with Mapzeroth in DaylightUI.",
+            "On Forever, use Search Nearby > Next Profession Rank to find the trainer, book vendor or quest giver for your next rank.",
+            "AWP can use Mapzeroth's entrance data to route to supported dungeons and raids when Blizzard has no verified entrance.",
             "Flight Map Assist can highlight the intended flight destination when a match is available.",
         },
     },

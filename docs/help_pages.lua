@@ -138,7 +138,7 @@ NS.HELP_PAGES = {
                 "- Save your setup: use Profiles to share settings or keep a different setup for each character.",
             }),
             Note(
-            "Use the minimap button for quick access. /awp help opens this guide, /awp status shows your current setup, and /awp changelog shows release notes."),
+                "Use the minimap button for quick access. /awp help opens this guide, /awp status shows your current setup, and /awp changelog shows release notes."),
         },
     },
     {
@@ -183,7 +183,7 @@ NS.HELP_PAGES = {
                 "Missing map or terrain coverage keeps ordinary guidance. A route may not know the exact floor or final approach.",
             }),
             Note(
-            "Follow ground paths while flying (General) is off by default. When off, a supported planner may bypass ordinary ground points during self-flight if it confirms a valid shortcut. Required stops remain."),
+                "Follow ground paths while flying (General) is off by default. When off, a supported planner may bypass ordinary ground points during self-flight if it confirms a valid shortcut. Required stops remain."),
         },
     },
     {
@@ -245,6 +245,8 @@ NS.HELP_PAGES = {
                 "General > Guide Viewer Order also determines which search provider is checked first. AWP uses the first matching result from the available providers in that order. Your selected travel planner then routes to that destination, even if another addon supplied the result.",
                 "",
                 "Specific searches stay specific: a request for an alchemy trainer or a blacksmithing workshop does not fall back to an unrelated service. Class searches skip providers that only support your own class when you request another class. Each guide's own Find Nearest menu still searches that guide alone.",
+                "",
+                "On Forever, Mapzeroth adds Next Profession Rank to Search Nearby. Pick a profession you know to find a trainer who teaches its next rank, or the book vendor or quest giver for ranks learned that way.",
             }),
             Heading("Search with a command"),
             Text({
@@ -256,9 +258,10 @@ NS.HELP_PAGES = {
                 "/awp search trainer mage - find a mage trainer.",
                 "/awp search weapon master swords - find sword training.",
                 "/awp search workshop blacksmithing - find a blacksmithing workshop.",
+                "/awp search next rank first aid - find your next First Aid rank with Mapzeroth on Forever.",
             }),
             Note(
-            "If a service is missing, check that Zygor, Dugi or Polestar is installed and ready. Not every provider supports every search. TomTom alone does not provide service-location data."),
+                "If a service is missing, check which providers are ready with /awp search help. On Forever, check that Mapzeroth is loaded for Next Profession Rank."),
         },
     },
     {
@@ -286,7 +289,7 @@ NS.HELP_PAGES = {
                 "- Ask: choose the behavior each time.",
             }),
             Note(
-            "Use Replace Active for everyday single destinations, Append for an itinerary, or Ask if you frequently switch between the two."),
+                "Use Replace Active for everyday single destinations, Append for an itinerary, or Ask if you frequently switch between the two."),
             Heading("Manage or share a queue"),
             Text({
                 "Open queue details to review destinations and travel steps, reorder or remove manual destinations, or show the final destination on the map. Select rows with checkboxes to delete several at once. Guide queues cannot be edited or deleted like manual queues.",
@@ -486,7 +489,7 @@ NS.HELP_PAGES = {
                 "In shared scrolling trackers, Guide Viewers appear above quests. Scroll back up to return to your guides. With Questie, enable Always Show Tracker to keep Viewers visible when no quests are tracked.",
             }),
             Note(
-            "Experimental Blizzard docking can cause blocked actions or other UI errors. This also applies when UI addons such as ElvUI style Blizzard's tracker rather than replace it. For the best experience, use a tracker with dedicated docking support. Show Native Docking Warning Popup controls the reminder."),
+                "Experimental Blizzard docking can cause blocked actions or other UI errors. This also applies when UI addons such as ElvUI style Blizzard's tracker rather than replace it. For the best experience, use a tracker with dedicated docking support. Show Native Docking Warning Popup controls the reminder."),
             Heading("Use the header controls", "header_controls"),
             Text({
                 "- Guide title or guide dropdown: switch or open guides and access guide actions.",
@@ -532,7 +535,7 @@ NS.HELP_PAGES = {
                 "When Kaliel's Tracker is active, you can optionally match its header texture, background color, font, title/icon color and button color.",
             }),
             Note(
-            "Tracker Viewer and Hide Native Guide Frame are separate settings. You can show both the AWP Viewer and the original guide window."),
+                "Tracker Viewer and Hide Native Guide Frame are separate settings. You can show both the AWP Viewer and the original guide window."),
         },
     },
     {
@@ -561,7 +564,7 @@ NS.HELP_PAGES = {
                 "Hide Native Action Controls is independent of both AWP action displays and filters. If you hide the native controls and turn both AWP displays off, you may have no visible action buttons. Hiding the entire original guide frame is a separate setting. APR, WoWPro and QuestieRouter check embedded action coverage before hiding the whole frame unless native controls are explicitly hidden.",
             }),
             Note(
-            "Polestar's optional bag-space helper can be shown through Helpers when enabled in Polestar. Spare bags are equipped first, junk deletion retains its two-click confirmation. AWP does not automatically enable or execute this helper."),
+                "Polestar's optional bag-space helper can be shown through Helpers when enabled in Polestar. Spare bags are equipped first, junk deletion retains its two-click confirmation. AWP does not automatically enable or execute this helper."),
             Heading("Chat Output", "chat_output"),
             Text({
                 "Open your guide > Chat Output to show instructions in your own chat when the step changes. Nothing is sent to other players. Chat Step Text chooses contextual or fixed colors. Chat Sticky Summary chooses whether to show no summary, counts only, or counts with titles. Polestar counts along-the-way goals.",
@@ -624,7 +627,7 @@ NS.HELP_PAGES = {
                 "Choose whether to show a backing diamond and destination icon, just the icon, or neither. Icons and colors can reflect quests, travel steps, services and other destination types.",
             }),
             Note(
-            "Auto colors follow available destination context. Choose a preset or Custom to keep a consistent color across destinations."),
+                "Auto colors follow available destination context. Choose a preset or Custom to keep a consistent color across destinations."),
         },
     },
     {
@@ -714,7 +717,7 @@ NS.HELP_PAGES = {
                 "Animate Plaque Effects toggles glow or pulse effects on designs that support them. If a supported UI styles AWP, disable that UI's styling to use the standalone artwork and supported border controls.",
             }),
             Note(
-            "Forever and Blizzard are the default plaques on their respective clients. Fantasy is the former Default artwork, Future is the former image-based Modern style."),
+                "Forever and Blizzard are the default plaques on their respective clients. Fantasy is the former Default artwork, Future is the former image-based Modern style."),
         },
     },
     {
@@ -791,7 +794,7 @@ NS.HELP_PAGES = {
                 "With GW2 UI's map skin enabled, Waypoint Queues opens beside the map where possible and keeps the quest pane accessible on narrow maps.",
             }),
             Note(
-            "Ellesmere UI's AzerothWaypoint settings include a live Search settings filter. Clear Search restores the unfiltered page. Preset changes that require a UI reload follow the UI's normal behavior."),
+                "Ellesmere UI's AzerothWaypoint settings include a live Search settings filter. Clear Search restores the unfiltered page. Preset changes that require a UI reload follow the UI's normal behavior."),
         },
     },
     {
@@ -826,7 +829,7 @@ NS.HELP_PAGES = {
             }),
             Capture("ProfilesImportReview", 470, 297, "An import review with Layout left unchecked."),
             Note(
-            "Profiles include AWP preferences, per-guide text-size overrides and frame positions. Waypoint queues, active routes, guide progress, open guide tabs, flight favorites/history and other addons' settings are stored separately."),
+                "Profiles include AWP preferences, per-guide text-size overrides and frame positions. Waypoint queues, active routes, guide progress, open guide tabs, flight favorites/history and other addons' settings are stored separately."),
         },
     },
     {
@@ -860,7 +863,7 @@ NS.HELP_PAGES = {
                 "- Dropdowns: move through enabled choices and pages of longer lists.",
             }),
             Note(
-            "Use /awp controllerdiag or the Controller settings page to check focus, bindings and the prepared action."),
+                "Use /awp controllerdiag or the Controller settings page to check focus, bindings and the prepared action."),
         },
     },
     {
@@ -934,7 +937,7 @@ NS.HELP_PAGES = {
             }),
             Heading("Search Nearby"),
             Text({
-                "Open Search Nearby from the minimap menu or use /awp search help. Zygor, Dugi and Polestar (Forever) can provide results. See the Search Nearby Help page for "
+                "Open Search Nearby from the minimap menu or use /awp search help. Zygor, Dugi and Polestar (Forever) can provide results. Mapzeroth adds Next Profession Rank on Forever. See the Search Nearby Help page for "
                 .. Link("provider priority", "search_nearby", "providers") .. " and "
                 .. Link("setup", "search_nearby", "setup") .. ".",
                 "",
@@ -949,6 +952,7 @@ NS.HELP_PAGES = {
                 "/awp search trainer mage",
                 "/awp search weapon master swords",
                 "/awp search workshop blacksmithing",
+                "/awp search next rank first aid",
             }),
             Heading("Diagnostics"),
             Text({
@@ -998,7 +1002,7 @@ NS.HELP_PAGES = {
             }),
             Heading("Nearby search has no result"),
             Text({
-                "Check that a supported search provider (Zygor, Dugi or Polestar on Forever) is loaded and ready. Use /awp search help to see available services. Guide Viewer Order determines which provider is tried first, enabling a Viewer is not required.",
+                "Use /awp search help to see available services. Guide Viewer Order sets the priority for Zygor, Dugi and Polestar searches. On Forever, Mapzeroth provides Next Profession Rank.",
             }),
             Heading("The minimap button is missing"),
             Text({

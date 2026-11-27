@@ -166,6 +166,8 @@ Supported guide integrations provide convenient searches for nearby services suc
 
 Open the minimap icon's **Search Nearby** submenu to browse the combined services your available providers support. Vendors, professions, classes, weapon masters and workshops have their own submenus where available. Each entry uses the same fallback as the command. Class choices include every class a provider can explicitly search, providers restricted to your own class are skipped for other classes. Use `/awp search help` for the current list.
 
+On Forever, Mapzeroth adds **Next Profession Rank** to Search Nearby. Pick a profession you know to find the trainer, book vendor or quest giver for your next rank. You can also use `/awp search next rank first aid`.
+
 ```text
 /awp search vendor
 /awp search repair
