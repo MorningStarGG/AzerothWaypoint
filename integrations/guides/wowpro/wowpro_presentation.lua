@@ -1,5 +1,11 @@
+-- ============================================================
+-- WoW-Pro guide presentation
+-- ============================================================
+--
+-- Converts WoW-Pro's tagged rows and live quest state into tracker
+-- instructions.
+
 local NS = _G.AzerothWaypointNS
-if not NS.IsWoWProLoaded() then return end
 
 NS.Internal = NS.Internal or {}
 NS.Internal.WoWProPresentation = NS.Internal.WoWProPresentation or {}
@@ -89,10 +95,23 @@ local function CollectQuestIDs(rawQID)
     return ids
 end
 
+-- ============================================================
+-- Quest ownership and title
+-- ============================================================
+
 local function IsQuestInWoWProLog(WoWPro, questID)
     return type(WoWPro) == "table"
         and type(WoWPro.QuestLog) == "table"
         and type(WoWPro.QuestLog[questID]) == "table"
+end
+
+local function NativeQuestState(w, id)
+    local entry = w.QuestLog and w.QuestLog[id]
+    if type(entry) == "table" then
+        -- WoWPro's compatibility layer retains the classic 1 / nil / -1
+        -- completion values on clients that expose booleans.
+        return true, entry.complete == true or entry.complete == 1
+    end
 end
 
 local function SelectWoWProQuestInLog(WoWPro, rawQID)
@@ -128,6 +147,7 @@ local function SelectPrimaryQuestID(WoWPro, rawQID, questIDs)
         end
     end
 
+    if type(rawQID) == "string" and rawQID:find("^", 1, true) then return nil end
     return questIDs[1], questIDs[1] and "firstQuestID" or nil
 end
 
@@ -139,7 +159,7 @@ local function ResolveQuestTitle(WoWPro, questID, fallbackTitle)
         return title, "wowproQuestLogTitle"
     end
 
-    title = type(NS.ResolveQuestTitle) == "function" and NS.ResolveQuestTitle(questID) or nil
+    title = questID and type(NS.ResolveQuestTitle) == "function" and NS.ResolveQuestTitle(questID) or nil
     title = NormalizeText(title)
     if title then
         return title, "blizzardQuestTitle"
@@ -229,10 +249,15 @@ local function ResolveQOProgress(WoWPro, questID, rawQuestText)
     end
 end
 
+-- ============================================================
+-- Objective progress
+-- ============================================================
+
 local function ResolveLeaderboardProgress(WoWPro, questID)
     questID = NormalizeID(questID)
     local questInfo = questID and IsQuestInWoWProLog(WoWPro, questID) and WoWPro.QuestLog[questID] or nil
-    local leaderBoard = type(questInfo) == "table" and type(questInfo.leaderBoard) == "table" and questInfo.leaderBoard or nil
+    local leaderBoard = type(questInfo) == "table" and type(questInfo.leaderBoard) == "table" and questInfo.leaderBoard or
+    nil
     if type(leaderBoard) ~= "table" then
         return nil
     end
@@ -311,7 +336,11 @@ local function BuildLabelTitle(label, stepText)
     return stepText or label
 end
 
-function M.ResolveStep(WoWPro, stepIndex)
+-- ============================================================
+-- Step presentation
+-- ============================================================
+
+function M.ResolveStep(WoWPro, stepIndex, useDialog)
     if type(WoWPro) ~= "table" or type(stepIndex) ~= "number" then
         return nil
     end
@@ -325,17 +354,41 @@ function M.ResolveStep(WoWPro, stepIndex)
     local stepText = GetTextField(WoWPro, "step", stepIndex)
     local noteText = GetTextField(WoWPro, "note", stepIndex)
     local questIDs = CollectQuestIDs(rawQID)
-    local primaryQuestID, primaryQuestSource = SelectPrimaryQuestID(WoWPro, rawQID, questIDs)
+    local baseAction = action and action:sub(1, 1) or nil
+    local handoff = (baseAction == "A" or action == "a") and "accept"
+        or (action == "T" or action == "t") and "turnin" or nil
+    local primaryQuestID, primaryQuestSource, alternatives
+    if handoff then
+        alternatives = #questIDs > 1 and type(rawQID) == "string" and rawQID:find("^", 1, true) ~= nil
+        primaryQuestID = NS.Internal.GuideQuestSelection.Select(handoff, questIDs, alternatives,
+            NativeQuestState, WoWPro, useDialog)
+        primaryQuestSource = primaryQuestID and "questHandoff" or nil
+    else
+        primaryQuestID, primaryQuestSource = SelectPrimaryQuestID(WoWPro, rawQID, questIDs)
+    end
     local questTitle, questTitleSource = ResolveQuestTitle(WoWPro, primaryQuestID, stepText)
     local progressText, progressSource = ResolveProgressSubtext(WoWPro, primaryQuestID, rawQuestText)
-    local baseAction = action and action:sub(1, 1) or nil
 
     local title
     local titleSource
     local subtext
     local subtextSource
 
-    if baseAction == "A" or action == "a" then
+    local scenario = GetRawField(WoWPro, "sobjective", stepIndex)
+    if not handoff and type(scenario) == "string" and WoWPro.Scenario then
+        local stage, objective = scenario:match("^(%d+);(.+)$")
+        stage = tonumber(stage)
+        if stage and objective and WoWPro.Scenario.currentStage == stage then
+            local ok, _, status = pcall(function()
+                return WoWPro.ScenarioObjectiveStatus(stage, objective)
+            end)
+            if ok and status ~= "?" then title = NormalizeText(status) end
+            if title then titleSource = "nativeScenarioCriteria" end
+        end
+    end
+    if title then
+        subtext, subtextSource = noteText, noteText and "note" or nil
+    elseif baseAction == "A" or action == "a" then
         title = QuoteQuestTitle("Accept", questTitle)
         titleSource = title and "acceptQuestTitle" or nil
         if not title then
@@ -354,22 +407,22 @@ function M.ResolveStep(WoWPro, stepIndex)
         subtext = noteText
         subtextSource = subtext and "note" or nil
     elseif action == "C" then
-        if noteText then
+        title, titleSource = ResolveObjectiveTitle(WoWPro, primaryQuestID, rawQuestText)
+        if title then
+            subtext = noteText or progressText
+            subtextSource = noteText and "note" or progressSource
+        elseif noteText then
             title = noteText
             titleSource = "noteInstruction"
         else
-            title, titleSource = ResolveObjectiveTitle(WoWPro, primaryQuestID, rawQuestText)
-            if not title then
-                title = QuoteQuestTitle("Complete", questTitle)
-                titleSource = title and "completeQuestTitle" or nil
-            end
+            title = QuoteQuestTitle("Complete", questTitle)
+            titleSource = title and "completeQuestTitle" or nil
             if not title then
                 title = stepText or "Complete objective"
                 titleSource = stepText and "stepText" or "completeFallback"
             end
         end
-        subtext = progressText
-        subtextSource = progressSource
+        if not subtext then subtext, subtextSource = progressText, progressSource end
     elseif action == "N" then
         title = stepText or noteText or "Note"
         titleSource = stepText and "stepText" or noteText and "note" or "noteFallback"
@@ -380,7 +433,8 @@ function M.ResolveStep(WoWPro, stepIndex)
     else
         local label = GetActionLabel(WoWPro, action)
         title = BuildLabelTitle(label, stepText) or noteText or "WoWPro step"
-        titleSource = label and stepText and "actionLabelStep" or stepText and "stepText" or noteText and "note" or "fallback"
+        titleSource = label and stepText and "actionLabelStep" or stepText and "stepText" or noteText and "note" or
+        "fallback"
         if noteText and noteText ~= title then
             subtext = noteText
             subtextSource = "note"
@@ -391,8 +445,14 @@ function M.ResolveStep(WoWPro, stepIndex)
         end
     end
 
+    local common = NS.Internal.GuidePresentation
+    if common and alternatives then
+        local interaction, quest = common.DescribeQuestAlternative(handoff, primaryQuestID and title or nil, subtext)
+        if interaction then title, subtext = interaction, quest end
+    end
     title = NormalizeText(title) or "WoWPro step"
     subtext = NormalizeText(subtext)
+    if subtext == title then subtext, subtextSource = nil, nil end
 
     return {
         title = title,
@@ -400,6 +460,7 @@ function M.ResolveStep(WoWPro, stepIndex)
         subtext = subtext,
         stepIndex = stepIndex,
         action = action,
+        handoffAction = handoff,
         rawStep = NormalizeText(rawStep),
         rawNote = NormalizeText(rawNote),
         rawQuestText = NormalizeText(rawQuestText),

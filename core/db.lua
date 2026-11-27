@@ -1,158 +1,16 @@
+-- ============================================================
+-- Saved settings and profiles
+-- ============================================================
+--
+-- Owns saved-data validation, profile application and runtime accessors.
+-- Settings readers use the active profile. The database layer normalizes saved
+-- values before the UI and routing consumers use them.
+
 local NS = _G.AzerothWaypointNS
-local C = NS.Constants
-local state = NS.State
-
-local function CopyOverlayColor(color)
-    color = color or C.WORLD_OVERLAY_COLOR_PRESETS[C.WORLD_OVERLAY_COLOR_GOLD] or { r = 0.95, g = 0.84, b = 0.44 }
-    return {
-        r = color.r or 1,
-        g = color.g or 1,
-        b = color.b or 1,
-    }
-end
-
-local DEFAULT_OVERLAY_CUSTOM_COLOR = CopyOverlayColor(C.WORLD_OVERLAY_COLOR_PRESETS[C.WORLD_OVERLAY_COLOR_GOLD])
-local DEFAULT_ZYGOR_TRACKER_VIEWER_TEXT_COLOR = CopyOverlayColor(C.WORLD_OVERLAY_COLOR_PRESETS[C.WORLD_OVERLAY_COLOR_WHITE])
-
--- ============================================================
--- Schema
--- ============================================================
-
-local DB_DEFAULTS = {
-    guideStepsOnlyHover = false,
-    guideStepBackgroundsHover = C.GUIDE_STEP_BACKGROUND_MODE_NONE,
-    manualWaypointAutoClear = false,
-    manualWaypointClearDistance = C.MANUAL_CLEAR_DISTANCE_DEFAULT,
-    trackedQuestAutoRoute = false,
-    untrackedQuestAutoClear = false,
-    superTrackedQuestAutoClear = false,
-    genericAddonBlizzardTakeoverEnabled = true,
-    manualClickQueueMode = "replace",
-
-    routingEnabled           = true,
-    routingBackend           = "direct",  -- first-run auto-selects zygor | farstrider | mapzeroth | direct
-    flightMapAssistMarker    = true,
-    flightMapAutoTakeMode    = C.FLIGHT_MAP_AUTO_TAKE_DISABLED,
-    flightMapCatalogEnabled  = true,
-    flightMapCatalogCollapsed = false,
-    flightMapCatalogSide     = "auto",
-    flightMapCatalogFontSize = C.FLIGHT_MAP_CATALOG_FONT_SIZE_DEFAULT,
-    flightMapCatalogFavorites = {},
-    flightMapCatalogRecent   = {},
-    flightMapCatalogRecentMax = 12,
-    combatHideMode           = C.COMBAT_HIDE_MODE_DISABLED,
-    startupHelpMode          = C.STARTUP_HELP_MODE_CHARACTER,
-    startupWhatsNewMode      = C.STARTUP_HELP_MODE_ACCOUNT,
-    resumeManualRoute        = true,
-    arrowSkin                = C.SKIN_STARLIGHT,
-    arrowScale               = C.SCALE_DEFAULT,
-    specialTravelDisplayMode = "replace_arrow",  -- "replace_arrow" | "companion_icon"
-    specialTravelButtonScale = C.SCALE_DEFAULT,
-
-    zygorTrackerViewerEnabled     = false,
-    zygorTrackerViewerDockMode    = "tracker",
-    zygorTrackerViewerHideNative  = false,
-    zygorTrackerViewerPosition    = nil,           -- { point, relPoint, x, y }
-    zygorTrackerViewerTextColorMode = C.WORLD_OVERLAY_COLOR_AUTO,
-    zygorTrackerViewerTextCustomColor = DEFAULT_ZYGOR_TRACKER_VIEWER_TEXT_COLOR,
-    zygorTrackerViewerProgressStyle = "rounded",
-    zygorTrackerViewerNativeWarningPopup = true,
-    zygorTrackerViewerKTHeaderTexture = false,
-    zygorTrackerViewerKTHeaderBackgroundColor = false,
-    zygorTrackerViewerKTHeaderFont = false,
-    zygorTrackerViewerKTHeaderTextIconColor = false,
-    zygorTrackerViewerKTHeaderButtonColor = false,
-    zygorStepChatOutputOnChange = false,
-    zygorStepChatTextColorMode = C.WORLD_OVERLAY_COLOR_AUTO,
-    zygorStepChatTextCustomColor = DEFAULT_ZYGOR_TRACKER_VIEWER_TEXT_COLOR,
-    zygorStepChatStickySummary = C.ZYGOR_STEP_CHAT_STICKY_TITLES,
-
-    minimapButtonEnabled = true,
-    minimapButtonPosition = nil, -- { point, relPoint, x, y }
-    -- manualAuthority is the persisted authority record; nil by default
-    -- and only set when there is an active manual route to resume.
-}
-
-local OVERLAY_SETTING_DEFS = {
-    worldOverlayEnabled = { default = true, kind = "boolean" },
-    worldOverlayFadeOnHover = { default = true, kind = "boolean" },
-    worldOverlayContextDisplayMode = {
-        default = C.WORLD_OVERLAY_CONTEXT_DISPLAY_DIAMOND_ICON,
-        kind = "string",
-        values = C.WORLD_OVERLAY_CONTEXT_DISPLAY_MODES,
-    },
-    worldOverlayPinpointDistance = { default = 35, kind = "number", min = 25, max = 500, step = 5 },
-    worldOverlayHideDistance = { default = 0, kind = "number", min = 0, max = 500, step = 5 },
-    worldOverlayUseMeters = { default = false, kind = "boolean" },
-    worldOverlayWaypointMode = { default = C.WORLD_OVERLAY_WAYPOINT_MODE_FULL, kind = "string", values = C.WORLD_OVERLAY_WAYPOINT_MODES },
-    worldOverlayWaypointSize = { default = 1, kind = "number", min = 0.5, max = 5, step = 0.1 },
-    worldOverlayWaypointSizeMin = { default = 0.75, kind = "number", min = 0.125, max = 1, step = 0.125 },
-    worldOverlayWaypointSizeMax = { default = 1, kind = "number", min = 1, max = 2, step = 0.1 },
-    worldOverlayWaypointOpacity = { default = 1, kind = "number", min = 0.1, max = 1, step = 0.1 },
-    worldOverlayWaypointOffsetY = { default = -25, kind = "number", min = -200, max = 200, step = 5 },
-    worldOverlayBeaconStyle = { default = C.WORLD_OVERLAY_BEACON_STYLE_DISTANCE, kind = "string", values = C.WORLD_OVERLAY_BEACON_STYLES },
-    worldOverlayBeaconBaseDistance = { default = 75, kind = "number", min = 5, max = 500, step = 5 },
-    worldOverlayBeaconOpacity = { default = 1, kind = "number", min = 0.1, max = 1, step = 0.1 },
-    worldOverlayBeaconBaseOffsetY = { default = 25, kind = "number", min = -200, max = 200, step = 5 },
-    worldOverlayInfoTextSize = { default = 1, kind = "number", min = 0.1, max = 2, step = 0.1 },
-    worldOverlayInfoTextOpacity = { default = 1, kind = "number", min = 0, max = 1, step = 0.1 },
-    worldOverlaySubtextOpacity = { default = 0.7, kind = "number", min = 0, max = 1, step = 0.1 },
-    worldOverlayFooterText = {
-        default = C.WORLD_OVERLAY_INFO_ALL,
-        kind = "string",
-        values = {
-            [C.WORLD_OVERLAY_INFO_ALL] = true,
-            [C.WORLD_OVERLAY_INFO_DISTANCE] = true,
-            [C.WORLD_OVERLAY_INFO_ARRIVAL] = true,
-            [C.WORLD_OVERLAY_INFO_DESTINATION] = true,
-            [C.WORLD_OVERLAY_INFO_NONE] = true,
-        },
-    },
-    worldOverlayPinpointMode = { default = C.WORLD_OVERLAY_PINPOINT_MODE_FULL, kind = "string", values = C.WORLD_OVERLAY_PINPOINT_MODES },
-    worldOverlayPinpointPlaqueType = {
-        default = C.WORLD_OVERLAY_PLAQUE_DEFAULT,
-        kind = "string",
-        values = C.WORLD_OVERLAY_PLAQUE_TYPES,
-    },
-    worldOverlayPinpointSize = { default = 1, kind = "number", min = 0.5, max = 2, step = 0.1 },
-    worldOverlayPinpointOpacity = { default = 1, kind = "number", min = 0.1, max = 1, step = 0.1 },
-    worldOverlayPinpointAnimatePlaqueEffects = { default = true, kind = "boolean" },
-    worldOverlayPinpointAutoVerticalAdjust = { default = true, kind = "boolean" },
-    worldOverlayPinpointManualVerticalGap = { default = 75, kind = "number", min = 75, max = 800, step = 1 },
-    worldOverlayShowDestinationInfo = { default = true, kind = "boolean" },
-    worldOverlayShowExtendedInfo = { default = true, kind = "boolean" },
-    worldOverlayShowCoordinateFallback = { default = true, kind = "boolean" },
-    worldOverlayShowPinpointArrows = { default = true, kind = "boolean" },
-    worldOverlayNavigatorShow = { default = true, kind = "boolean" },
-    worldOverlayNavigatorSize = { default = 1, kind = "number", min = 0.5, max = 2, step = 0.1 },
-    worldOverlayNavigatorOpacity = { default = 1, kind = "number", min = 0.1, max = 1, step = 0.1 },
-    worldOverlayNavigatorDistance = { default = 1, kind = "number", min = 0.1, max = 3, step = 0.1 },
-    worldOverlayNavigatorDynamicDistance = { default = true, kind = "boolean" },
-    worldOverlayWaypointTextColorMode = { default = C.WORLD_OVERLAY_COLOR_GRAY, kind = "string", values = C.WORLD_OVERLAY_COLOR_MODES },
-    worldOverlayWaypointTextCustomColor = { default = DEFAULT_OVERLAY_CUSTOM_COLOR, kind = "color" },
-    worldOverlayPinpointTitleColorMode = { default = C.WORLD_OVERLAY_COLOR_AUTO, kind = "string", values = C.WORLD_OVERLAY_COLOR_MODES },
-    worldOverlayPinpointTitleCustomColor = { default = DEFAULT_OVERLAY_CUSTOM_COLOR, kind = "color" },
-    worldOverlayPinpointSubtextColorMode = { default = C.WORLD_OVERLAY_COLOR_AUTO, kind = "string", values = C.WORLD_OVERLAY_COLOR_MODES },
-    worldOverlayPinpointSubtextCustomColor = { default = DEFAULT_OVERLAY_CUSTOM_COLOR, kind = "color" },
-    worldOverlayBeaconColorMode = { default = C.WORLD_OVERLAY_COLOR_AUTO, kind = "string", values = C.WORLD_OVERLAY_COLOR_MODES },
-    worldOverlayBeaconCustomColor = { default = DEFAULT_OVERLAY_CUSTOM_COLOR, kind = "color" },
-    worldOverlayContextDiamondColorMode = { default = C.WORLD_OVERLAY_COLOR_AUTO, kind = "string", values = C.WORLD_OVERLAY_COLOR_MODES },
-    worldOverlayContextDiamondCustomColor = { default = DEFAULT_OVERLAY_CUSTOM_COLOR, kind = "color" },
-    worldOverlayIconColorMode = { default = C.WORLD_OVERLAY_COLOR_AUTO, kind = "string", values = C.WORLD_OVERLAY_COLOR_MODES },
-    worldOverlayIconCustomColor = { default = DEFAULT_OVERLAY_CUSTOM_COLOR, kind = "color" },
-    worldOverlayArrowColorMode = { default = C.WORLD_OVERLAY_COLOR_AUTO, kind = "string", values = C.WORLD_OVERLAY_COLOR_MODES },
-    worldOverlayArrowCustomColor = { default = DEFAULT_OVERLAY_CUSTOM_COLOR, kind = "color" },
-    worldOverlayNavArrowColorMode = { default = C.WORLD_OVERLAY_COLOR_AUTO, kind = "string", values = C.WORLD_OVERLAY_COLOR_MODES },
-    worldOverlayNavArrowCustomColor = { default = DEFAULT_OVERLAY_CUSTOM_COLOR, kind = "color" },
-    worldOverlayPlaqueColorMode = { default = C.WORLD_OVERLAY_COLOR_AUTO, kind = "string", values = C.WORLD_OVERLAY_COLOR_MODES },
-    worldOverlayPlaqueCustomColor = { default = DEFAULT_OVERLAY_CUSTOM_COLOR, kind = "color" },
-    worldOverlayAnimatedColorMode = { default = C.WORLD_OVERLAY_COLOR_AUTO, kind = "string", values = C.WORLD_OVERLAY_COLOR_MODES },
-    worldOverlayAnimatedCustomColor = { default = DEFAULT_OVERLAY_CUSTOM_COLOR, kind = "color" },
-}
-
-NS.Internal = NS.Internal or {}
-NS.Internal.DBDefaults = DB_DEFAULTS
-NS.Internal.OverlaySettingDefs = OVERLAY_SETTING_DEFS
+local C, state = NS.Constants, NS.State
+local DB_DEFAULTS = NS.Internal.DBDefaults
+local OVERLAY_SETTING_DEFS = NS.Internal.OverlaySettingDefs
+local colorDefaults = NS.Internal.SavedColorDefaults
 
 state.db = state.db or {
     initCaptured = false,
@@ -160,12 +18,7 @@ state.db = state.db or {
 }
 
 local dbState = state.db
-local VALID_ROUTING_BACKENDS = {
-    zygor = true,
-    mapzeroth = true,
-    farstrider = true,
-    direct = true,
-}
+local VALID_ROUTING_BACKENDS = NS.Internal.RoutingBackends.byID
 
 local function IsAddonEnabledForInitialRoutingDefault(addonName)
     if type(addonName) ~= "string" or addonName == "" then
@@ -204,13 +57,18 @@ function NS.NormalizeSkin(value)
         -- During early file load the registry may not exist yet. Runtime
         -- normalization will re-check against the final registered skin list.
         if type(NS.HasArrowSkin) ~= "function" then
-            if key == C.SKIN_STARLIGHT or key == C.SKIN_STEALTH then
+            if key == C.SKIN_AWP_MODERN or key == C.SKIN_STARLIGHT or key == C.SKIN_STEALTH then
                 return key
             end
         end
     end
 
-    return C.SKIN_DEFAULT
+    return C.SKIN_AWP_MODERN
+end
+
+local function NormalizeStoredSkin(value)
+    if value == C.SKIN_STARLIGHT or value == C.SKIN_STEALTH then return value end
+    return NS.NormalizeSkin(value)
 end
 
 function NS.NormalizeScale(value)
@@ -377,11 +235,29 @@ local function NormalizeAddonTakeoverList(list)
     return out
 end
 
-local function NormalizeAddonTakeoverLists(db)
-    db.genericAddonBlizzardTakeoverAllowlist =
-        NormalizeAddonTakeoverList(db.genericAddonBlizzardTakeoverAllowlist)
-    db.genericAddonBlizzardTakeoverBlocklist =
-        NormalizeAddonTakeoverList(db.genericAddonBlizzardTakeoverBlocklist)
+---@alias AWPAddonTakeoverListKind "allowlist"|"blocklist"
+
+---@param kind AWPAddonTakeoverListKind
+---@param list string[]
+local function SetAddonTakeoverList(db, kind, list)
+    if kind == "allowlist" then
+        db.genericAddonBlizzardTakeoverAllowlist = list
+    else
+        db.genericAddonBlizzardTakeoverBlocklist = list
+    end
+end
+
+---@param kind AWPAddonTakeoverListKind
+local function GetNormalizedAddonTakeoverList(db, kind)
+    local saved
+    if kind == "allowlist" then
+        saved = db.genericAddonBlizzardTakeoverAllowlist
+    else
+        saved = db.genericAddonBlizzardTakeoverBlocklist
+    end
+    local list = NormalizeAddonTakeoverList(saved)
+    SetAddonTakeoverList(db, kind, list)
+    return list
 end
 
 -- Pre-compute format strings for each number-type overlay setting def.
@@ -422,7 +298,7 @@ local function ClampColorComponent(value, fallback)
 end
 
 local function NormalizeOverlayColor(def, value)
-    local fallback = type(def.default) == "table" and def.default or DEFAULT_OVERLAY_CUSTOM_COLOR
+    local fallback = type(def.default) == "table" and def.default or colorDefaults.overlay
     local r = fallback.r or 1
     local g = fallback.g or 1
     local b = fallback.b or 1
@@ -455,6 +331,8 @@ local function NormalizeOverlayColor(def, value)
     }
 end
 
+NS.Internal.NormalizeSavedColor = NormalizeOverlayColor
+
 local function NormalizeOverlaySetting(key, value)
     local def = OVERLAY_SETTING_DEFS[key]
     if not def then
@@ -483,6 +361,308 @@ local function NormalizeOverlaySetting(key, value)
     return value
 end
 
+-- ============================================================
+-- Saved-variable schemas and validation
+-- ============================================================
+
+-- Saved-data recognition is independent of which integrations are enabled.
+-- Optional records live beside setting definitions, dynamic payloads retain
+-- their owner's validators rather than being recursively treated as settings.
+local savedSchemas = { account = {}, character = {} }
+local profileFields = {}
+NS.Internal.SavedVariableSchemas = savedSchemas
+function NS.Internal.RegisterSavedVariableField(scope, key, definition, profile)
+    assert(savedSchemas[scope] and type(key) == "string" and type(definition) == "table")
+    assert(not profile or scope == "account")
+    savedSchemas[scope][key] = definition
+    if profile then profileFields[key] = definition end
+end
+
+local function ProfileField(key, definition)
+    NS.Internal.RegisterSavedVariableField("account", key, definition, true)
+end
+local primitiveSchemas = {}
+local function Primitive(kind)
+    if not primitiveSchemas[kind] then primitiveSchemas[kind] = { kind = kind } end
+    return primitiveSchemas[kind]
+end
+local function Record(fields, discardEmpty) return { kind = "record", fields = fields, discardEmpty = discardEmpty } end
+local function Map(values, keys, discardEmpty)
+    return {
+        kind = "map",
+        entry = values,
+        keys = keys,
+        discardEmpty =
+            discardEmpty
+    }
+end
+local function ProviderKey(key) return C.GUIDE_PROVIDER_BY_KEY[key] ~= nil end
+function NS.Internal.NormalizeGuideTrackerViewerOrder(value)
+    local order, seen = {}, {}
+    if type(value) == "table" then
+        for index = 1, #C.GUIDE_PROVIDERS do
+            local key = value[index]
+            if ProviderKey(key) and not seen[key] then
+                order[#order + 1], seen[key] = key, true
+            end
+        end
+    end
+    for _, provider in ipairs(C.GUIDE_PROVIDERS) do
+        if not seen[provider.key] then order[#order + 1] = provider.key end
+    end
+    return order
+end
+
+local anchor = {
+    kind = "string",
+    values = {
+        TOPLEFT = true,
+        TOP = true,
+        TOPRIGHT = true,
+        LEFT = true,
+        CENTER = true,
+        RIGHT = true,
+        BOTTOMLEFT = true,
+        BOTTOM = true,
+        BOTTOMRIGHT = true,
+    }
+}
+local offset = { kind = "number", min = -10000, max = 10000 }
+local function Position(relative)
+    local def = Record({ point = anchor, [relative] = anchor, x = offset, y = offset })
+    def.validate = function(value)
+        return value.point ~= nil and value[relative] ~= nil and value.x ~= nil and value.y ~= nil
+    end
+    return def
+end
+local catalogState = { flightMapCatalogFavorites = true, flightMapCatalogRecent = true, flightMapCatalogCollapsed = true }
+for key, value in pairs(DB_DEFAULTS) do
+    local definition = type(value) == "table" and value.r and { kind = "color", default = value }
+        or Primitive(type(value))
+    NS.Internal.RegisterSavedVariableField("account", key, definition, not catalogState[key])
+end
+for key, definition in pairs(OVERLAY_SETTING_DEFS) do ProfileField(key, definition) end
+ProfileField("appearanceProvider",
+    { kind = "string", values = { auto = true, awp = true, daylight = true, ellesmere = true, elvui = true, gw2ui = true } })
+ProfileField("routingBackend", { kind = "string", values = VALID_ROUTING_BACKENDS })
+ProfileField("guideTrackerViewerQuestieRouterVisibleTasks",
+    { kind = "number", min = 1, max = C.QUESTIEROUTER_VIEWER_MAX_TASKS, integer = true })
+for _, provider in ipairs(C.GUIDE_PROVIDERS) do
+    for _, size in ipairs(C.GUIDE_VIEWER_TEXT_SIZES) do
+        ProfileField("guideTrackerViewer" .. provider.suffix .. size.suffix,
+            { kind = "number", min = size.min, max = size.max, integer = true })
+    end
+end
+savedSchemas.account._meta = Record({ lastAddonVersion = Primitive("string"), overviewShown = Primitive("boolean") },
+    true)
+savedSchemas.account.activeGuideProvider = { kind = "string", validate = ProviderKey }
+savedSchemas.account.activeRouteSource = { kind = "string", values = { manual = true, guide = true } }
+savedSchemas.account.manualAuthority = Primitive("table")
+savedSchemas.account.manualQueues = Primitive("table")
+ProfileField("guideTrackerViewerPosition", Position("relPoint"))
+ProfileField("guideTrackerViewerOrder", { kind = "table", copy = NS.Internal.NormalizeGuideTrackerViewerOrder })
+ProfileField("minimapButtonPosition", Position("relPoint"))
+ProfileField("awpPanelPos", Position("relPoint"))
+local addonList = {
+    kind = "table",
+    copy = function(value, report)
+        for key, item in pairs(value) do
+            local name = type(item) == "string" and item or item == true and type(key) == "string" and key
+            if not name or name:find("[%c|]") then report.invalid = true end
+        end
+        local list = NormalizeAddonTakeoverList(value)
+        for index = #list, 1, -1 do
+            if list[index]:find("[%c|]") then table.remove(list, index) end
+        end
+        return list
+    end
+}
+ProfileField("genericAddonBlizzardTakeoverAllowlist", addonList)
+ProfileField("genericAddonBlizzardTakeoverBlocklist", addonList)
+local actionTypes = {}
+for _, action in ipairs(C.GUIDE_ACTION_TYPES) do actionTypes[action.key] = Primitive("boolean") end
+for _, provider in ipairs(C.GUIDE_PROVIDERS) do
+    local definition = Record({
+        enabled = Primitive("boolean"),
+        inline = Primitive("boolean"),
+        hideNative = Primitive("boolean"),
+        groupPosition = { kind = "string", values = { above = true, below = true } },
+        position = Position("relative"),
+        types = Record(actionTypes),
+    })
+    definition.replaceOnClean = true -- Readers cache action settings by record identity.
+    ProfileField("guideTrackerViewer" .. provider.suffix .. "Actions", definition)
+end
+for _, key in ipairs({ "lastAddonVersion", "waypointUIPromptVersion" }) do
+    savedSchemas.character[key] = Primitive(
+        "string")
+end
+for _, key in ipairs({ "overviewShown", "pendingOverviewReplay", "zygorArrowPromptShown", "dugiArrowPromptShown",
+    "rxpArrowPromptShown", "polestarArrowPromptShown", "aprArrowPromptShown", "questieRouterArrowPromptShown" }) do
+    savedSchemas.character[key] = Primitive("boolean")
+end
+savedSchemas.character.guideTrackerViewerOpenGuides = Map(Primitive("table"), ProviderKey)
+savedSchemas.character.guideTrackerViewerActiveSlots = Map({ kind = "number", min = 1, integer = true }, ProviderKey)
+local plaqueEntries = {}
+for name, defaults in pairs(C.PLAQUE_APPEARANCE_DEFAULTS) do
+    local fields = {}
+    for key, default in pairs(defaults) do
+        local range = C.PLAQUE_APPEARANCE_FIELDS[key]
+        fields[key] = { kind = "number", min = range.min, max = range.max, step = range.step, default = default, omitDefault = true }
+    end
+    plaqueEntries[name] = Record(fields, true)
+end
+ProfileField("plaqueAppearance", { kind = "map", entries = plaqueEntries, discardEmpty = true })
+
+local function RejectSavedValue(copy)
+    if copy then copy.invalid = true end
+    return nil, true
+end
+
+local function CleanSavedValue(value, definition, copy)
+    local tableKind = definition.kind == "record" or definition.kind == "map" or definition.kind == "rgb" or
+        definition.kind == "color"
+    if type(value) ~= (tableKind and "table" or definition.kind) then return RejectSavedValue(copy) end
+    if copy and definition.copy then return definition.copy(value, copy), true end
+    if copy and definition.kind == "table" then return RejectSavedValue(copy) end
+    if definition.kind == "record" or definition.kind == "map" then
+        local changed = false
+        local output = copy and {} or value
+        for key, item in pairs(value) do
+            local field
+            if definition.kind == "record" then
+                field = definition.fields[key]
+            elseif definition.entries then
+                field = definition.entries[key]
+            elseif not definition.keys or definition.keys(key) then
+                field = definition.entry
+            end
+            local normalized, dirty
+            if field then
+                normalized, dirty = CleanSavedValue(item, field, copy)
+            elseif copy then
+                copy.ignored = copy.ignored + 1
+            end
+            if copy or not field or dirty then
+                output[key] = normalized; changed = true
+            end
+        end
+        if definition.validate and not definition.validate(output) then return RejectSavedValue(copy) end
+        if definition.discardEmpty and not next(output) then return nil, true end
+        if copy then return output, true end
+        if changed and definition.onClean then definition.onClean() end
+        if changed and definition.replaceOnClean then
+            local copy = {}
+            for key, item in pairs(value) do copy[key] = item end
+            return copy, true
+        end
+        return value, changed
+    end
+    if definition.kind == "color" then
+        if copy then
+            for _, component in ipairs({ "r", "g", "b" }) do
+                local number = value[component]
+                if type(number) ~= "number" or number ~= number or number < 0 or number > 1 then
+                    return RejectSavedValue(copy)
+                end
+            end
+            for key in pairs(value) do
+                if key ~= "r" and key ~= "g" and key ~= "b" then copy.ignored = copy.ignored + 1 end
+            end
+            return colorDefaults.copy(value), true
+        end
+        local color = NormalizeOverlayColor(definition, value)
+        local changed = false
+        for key, component in pairs(value) do if color[key] ~= component then changed = true end end
+        for key, component in pairs(color) do if value[key] ~= component then changed = true end end
+        return changed and color or value, changed
+    end
+    if definition.kind == "rgb" then
+        for index = 1, 3 do
+            local number = value[index]
+            if type(number) ~= "number" or number ~= number or number < 0 or number > 1 then
+                return RejectSavedValue(
+                    copy)
+            end
+        end
+        if copy then
+            for key in pairs(value) do
+                if key ~= 1 and key ~= 2 and key ~= 3 then copy.ignored = copy.ignored + 1 end
+            end
+            return { value[1], value[2], value[3] }, true
+        end
+        local changed = false
+        for key in pairs(value) do
+            if key ~= 1 and key ~= 2 and key ~= 3 then
+                value[key] = nil; changed = true
+            end
+        end
+        return value, changed
+    end
+    if definition.kind == "number" then
+        if value ~= value or value == math.huge or value == -math.huge then return RejectSavedValue(copy) end
+        if definition.integer and value ~= math.floor(value) then return RejectSavedValue(copy) end
+        local number = value
+        if definition.min then number = math.max(number, definition.min) end
+        if definition.max then number = math.min(number, definition.max) end
+        if definition.step then
+            local origin = definition.min or 0
+            number = origin + math.floor((number - origin) / definition.step + 0.5) * definition.step
+        end
+        if definition.omitDefault and number == definition.default then return nil, true end
+        return number, number ~= value
+    end
+    if definition.values and not definition.values[value] or definition.validate and not definition.validate(value) then
+        return RejectSavedValue(copy)
+    end
+    return value, false
+end
+local plaqueSettingsCache = {}
+local function SanitizeSavedVariables(account, character)
+    CleanSavedValue(account, Record(savedSchemas.account))
+    CleanSavedValue(character, Record(savedSchemas.character))
+    for key in pairs(plaqueSettingsCache) do plaqueSettingsCache[key] = nil end
+end
+
+-- Only explicit overrides are saved. Resolved values and their source identity
+-- are cached, unchanged rendering never creates settings tables or scans records.
+function NS.GetPlaqueAppearance(plaqueType)
+    local defaults = C.PLAQUE_APPEARANCE_DEFAULTS[plaqueType]
+    if not defaults then return nil end
+    local db = NS.GetDB()
+    local saved = type(db.plaqueAppearance) == "table" and db.plaqueAppearance[plaqueType] or nil
+    local cached = plaqueSettingsCache[plaqueType]
+    if cached and cached.db == db and cached.saved == saved then return cached.settings end
+    local settings = {}
+    for key, default in pairs(defaults) do settings[key] = type(saved) == "table" and saved[key] or default end
+    plaqueSettingsCache[plaqueType] = { db = db, saved = saved, settings = settings }
+    return settings
+end
+
+function NS.SetPlaqueAppearanceSetting(plaqueType, key, value)
+    local entrySchema = plaqueEntries[plaqueType]
+    local field = entrySchema and entrySchema.fields[key]
+    if not field or type(value) ~= "number" or value ~= value or value == math.huge or value == -math.huge then return false end
+    local normalized = CleanSavedValue(value, field)
+    local db = NS.GetDB()
+    local previous = type(db.plaqueAppearance) == "table" and db.plaqueAppearance[plaqueType] or nil
+    local previousValue = type(previous) == "table" and previous[key] or nil
+    if (previous == nil or type(previous) == "table") and previousValue == normalized then return true end
+    local entry = {}
+    for name in pairs(entrySchema.fields) do if type(previous) == "table" then entry[name] = previous[name] end end
+    entry[key] = normalized
+    if next(entry) then
+        if type(db.plaqueAppearance) ~= "table" then db.plaqueAppearance = {} end
+        db.plaqueAppearance[plaqueType] = entry
+    elseif type(db.plaqueAppearance) == "table" then
+        db.plaqueAppearance[plaqueType] = nil
+        if not next(db.plaqueAppearance) then db.plaqueAppearance = nil end
+    end
+    plaqueSettingsCache[plaqueType] = nil
+    NS.InvalidateOverlaySettings()
+    return true
+end
+
 local function GetDBMeta()
     local db = NS.GetDB()
     if type(db._meta) ~= "table" then
@@ -497,6 +677,8 @@ local function GetCharDB()
     end
     return AzerothWaypointCharDB
 end
+
+NS.Internal.GetCharacterDB = GetCharDB
 
 local function ParseVersionParts(version)
     if type(version) ~= "string" or version == "" then
@@ -580,42 +762,15 @@ function NS.GetDB()
     return AzerothWaypointDB
 end
 
-function NS.ApplyDBDefaults()
-    local db = NS.GetDB()
-    if not dbState.initCaptured then
-        dbState.initCaptured = true
-        dbState.hadExistingData = next(db) ~= nil
-    end
-    for key, value in pairs(DB_DEFAULTS) do
-        if db[key] == nil then
-            db[key] = value
-        end
-    end
-
-    db.arrowSkin = NS.NormalizeSkin(db.arrowSkin)
+local function NormalizePreferences(db)
+    db.arrowSkin = NormalizeStoredSkin(db.arrowSkin)
     db.arrowScale = NS.NormalizeScale(db.arrowScale)
     db.specialTravelButtonScale = NS.NormalizeScale(db.specialTravelButtonScale)
-    if dbState.hadExistingData == false then
-        db.routingBackend = SelectInitialRoutingBackend()
-    elseif not VALID_ROUTING_BACKENDS[db.routingBackend] then
-        db.routingBackend = "direct"
-    end
-    if db.flightMapCatalogFavorites == DB_DEFAULTS.flightMapCatalogFavorites then
-        db.flightMapCatalogFavorites = {}
-    end
-    if db.flightMapCatalogRecent == DB_DEFAULTS.flightMapCatalogRecent then
-        db.flightMapCatalogRecent = {}
-    end
+    if not VALID_ROUTING_BACKENDS[db.routingBackend] then db.routingBackend = "direct" end
     db.combatHideMode = NS.NormalizeCombatHideMode(db.combatHideMode)
     db.flightMapAutoTakeMode = NS.NormalizeFlightMapAutoTakeMode(db.flightMapAutoTakeMode)
     db.flightMapCatalogSide = NS.NormalizeFlightMapCatalogSide(db.flightMapCatalogSide)
     db.flightMapCatalogFontSize = NS.NormalizeFlightMapCatalogFontSize(db.flightMapCatalogFontSize)
-    if type(db.flightMapCatalogFavorites) ~= "table" then
-        db.flightMapCatalogFavorites = {}
-    end
-    if type(db.flightMapCatalogRecent) ~= "table" then
-        db.flightMapCatalogRecent = {}
-    end
     db.flightMapCatalogRecentMax = tonumber(db.flightMapCatalogRecentMax) or 12
     if db.flightMapCatalogRecentMax < 1 then
         db.flightMapCatalogRecentMax = 12
@@ -631,15 +786,69 @@ function NS.ApplyDBDefaults()
     then
         db.manualClickQueueMode = "create"
     end
-    NormalizeAddonTakeoverLists(db)
+    GetNormalizedAddonTakeoverList(db, "allowlist")
+    GetNormalizedAddonTakeoverList(db, "blocklist")
 
     for key, def in pairs(OVERLAY_SETTING_DEFS) do
-        if db[key] == nil then
-            db[key] = NormalizeOverlaySetting(key, def.default)
-        end
-        db[key] = NormalizeOverlaySetting(key, db[key])
+        db[key] = NormalizeOverlaySetting(key, db[key] == nil and def.default or db[key])
     end
+end
 
+-- ============================================================
+-- Profile copies and startup defaults
+-- ============================================================
+
+-- Copy only known preferences. Dormant records and imported data use this
+-- same schema without firing live cache invalidation callbacks.
+function NS.Internal.CopyProfileSettings(source, importing)
+    local copy = { ignored = 0 }
+    local settings = {}
+    for key, def in pairs(profileFields) do
+        local value = source[key]
+        if value ~= nil then settings[key] = CleanSavedValue(value, def, copy) end
+        if settings[key] == nil and DB_DEFAULTS[key] ~= nil then
+            settings[key] = CleanSavedValue(DB_DEFAULTS[key], def, copy)
+        end
+    end
+    if importing then
+        for key in pairs(source) do
+            if type(key) ~= "string" then
+                copy.invalid = true
+            elseif not profileFields[key] then
+                copy.ignored = copy.ignored + 1
+            end
+        end
+        if copy.invalid then return nil, copy.ignored end
+    end
+    NormalizePreferences(settings)
+    return settings, copy.ignored
+end
+
+function NS.Internal.NewProfileSettings()
+    return NS.Internal.CopyProfileSettings({ routingBackend = SelectInitialRoutingBackend() })
+end
+
+function NS.Internal.ApplyProfileSettings(db, settings)
+    for key in pairs(profileFields) do db[key] = settings[key] end
+end
+
+function NS.ApplyDBDefaults()
+    local db, character = NS.GetDB(), GetCharDB()
+    local initializing = not dbState.initCaptured
+    if initializing then
+        dbState.initCaptured = true
+        dbState.hadExistingData = next(db) ~= nil
+    end
+    SanitizeSavedVariables(db, character)
+    if initializing and NS.Internal.Profiles then NS.Internal.Profiles.Initialize(db, character) end
+    for key, value in pairs(DB_DEFAULTS) do
+        if db[key] == nil then db[key] = value end
+    end
+    if initializing and not dbState.hadExistingData then db.routingBackend = SelectInitialRoutingBackend() end
+    if db.flightMapCatalogFavorites == DB_DEFAULTS.flightMapCatalogFavorites then db.flightMapCatalogFavorites = {} end
+    if db.flightMapCatalogRecent == DB_DEFAULTS.flightMapCatalogRecent then db.flightMapCatalogRecent = {} end
+    NormalizePreferences(db)
+    if NS.InvalidateOverlaySettings then NS.InvalidateOverlaySettings() end
     return db
 end
 
@@ -685,6 +894,15 @@ end
 
 function NS.MarkZygorArrowPromptShown()
     GetCharDB().zygorArrowPromptShown = true
+    return true
+end
+
+function NS.HasSeenDugiArrowPrompt()
+    return GetCharDB().dugiArrowPromptShown == true
+end
+
+function NS.MarkDugiArrowPromptShown()
+    GetCharDB().dugiArrowPromptShown = true
     return true
 end
 
@@ -754,9 +972,7 @@ function NS.IsRoutingEnabled()
 end
 
 function NS.GetSkinChoice()
-    local db = NS.GetDB()
-    db.arrowSkin = NS.NormalizeSkin(db.arrowSkin)
-    return db.arrowSkin
+    return NS.NormalizeSkin(NS.GetDB().arrowSkin)
 end
 
 function NS.SetSkinChoice(skin)
@@ -823,185 +1039,8 @@ function NS.SetSpecialTravelButtonScale(value)
 end
 
 -- ============================================================
--- Manual waypoint settings
+-- Minimap and flight map settings
 -- ============================================================
-
-function NS.IsGuideStepsOnlyHoverEnabled()
-    local db = NS.GetDB()
-    return db.guideStepsOnlyHover == true
-end
-
-function NS.SetGuideStepsOnlyHoverEnabled(enabled)
-    local db = NS.GetDB()
-    db.guideStepsOnlyHover = enabled and true or false
-    return db.guideStepsOnlyHover
-end
-
-function NS.GetGuideStepBackgroundsHoverMode()
-    local db = NS.GetDB()
-    db.guideStepBackgroundsHover = NS.NormalizeGuideStepBackgroundsHoverMode(db.guideStepBackgroundsHover)
-    return db.guideStepBackgroundsHover
-end
-
-function NS.SetGuideStepBackgroundsHoverMode(mode)
-    local db = NS.GetDB()
-    db.guideStepBackgroundsHover = NS.NormalizeGuideStepBackgroundsHoverMode(mode)
-    return db.guideStepBackgroundsHover
-end
-
-function NS.IsGuideStepBackgroundsHoverEnabled()
-    return NS.GetGuideStepBackgroundsHoverMode() ~= C.GUIDE_STEP_BACKGROUND_MODE_NONE
-end
-
-function NS.SetGuideStepBackgroundsHoverEnabled(enabled)
-    if enabled then
-        return NS.SetGuideStepBackgroundsHoverMode(C.GUIDE_STEP_BACKGROUND_MODE_BG)
-    end
-    return NS.SetGuideStepBackgroundsHoverMode(C.GUIDE_STEP_BACKGROUND_MODE_NONE)
-end
-
-local ZYGOR_TRACKER_VIEWER_DOCK_MODES = {
-    tracker = true,
-}
-
-local ZYGOR_TRACKER_VIEWER_PROGRESS_STYLES = {
-    square = true,
-    rounded = true,
-    none = true,
-}
-
-local function NormalizeZygorTrackerViewerDockMode(value)
-    if type(value) == "string" and ZYGOR_TRACKER_VIEWER_DOCK_MODES[value] then
-        return value
-    end
-    return "tracker"
-end
-
-local function NormalizeZygorTrackerViewerProgressStyle(value)
-    if type(value) == "string" and ZYGOR_TRACKER_VIEWER_PROGRESS_STYLES[value] then
-        return value
-    end
-    return "rounded"
-end
-
-local function NormalizeZygorTrackerViewerTextColorMode(value)
-    if type(value) == "string" and C.WORLD_OVERLAY_COLOR_MODES[value] then
-        return value
-    end
-    return C.WORLD_OVERLAY_COLOR_AUTO
-end
-
-local function NormalizeZygorStepChatStickySummary(value)
-    if type(value) == "string" and C.ZYGOR_STEP_CHAT_STICKY_MODES[value] then
-        return value
-    end
-    return C.ZYGOR_STEP_CHAT_STICKY_TITLES
-end
-
-local ZYGOR_TRACKER_VIEWER_TEXT_COLOR_DEF = {
-    default = DEFAULT_ZYGOR_TRACKER_VIEWER_TEXT_COLOR,
-}
-
-function NS.GetZygorTrackerViewerSettings()
-    local db = NS.GetDB()
-    db.zygorTrackerViewerDockMode = NormalizeZygorTrackerViewerDockMode(db.zygorTrackerViewerDockMode)
-    db.zygorTrackerViewerProgressStyle = NormalizeZygorTrackerViewerProgressStyle(db.zygorTrackerViewerProgressStyle)
-    db.zygorTrackerViewerTextColorMode = NormalizeZygorTrackerViewerTextColorMode(db.zygorTrackerViewerTextColorMode)
-    db.zygorTrackerViewerTextCustomColor = NormalizeOverlayColor(
-        ZYGOR_TRACKER_VIEWER_TEXT_COLOR_DEF,
-        db.zygorTrackerViewerTextCustomColor)
-
-    return {
-        enabled        = db.zygorTrackerViewerEnabled == true,
-        dockMode       = db.zygorTrackerViewerDockMode,
-        hideZygorFrame = db.zygorTrackerViewerHideNative == true,
-        position       = type(db.zygorTrackerViewerPosition) == "table" and db.zygorTrackerViewerPosition or nil,
-        progressStyle  = db.zygorTrackerViewerProgressStyle,
-        nativeDockWarningPopup = db.zygorTrackerViewerNativeWarningPopup ~= false,
-        textColorMode  = db.zygorTrackerViewerTextColorMode,
-        textCustomColor = db.zygorTrackerViewerTextCustomColor,
-        ktHeaderStyle = {
-            texture = db.zygorTrackerViewerKTHeaderTexture == true,
-            backgroundColor = db.zygorTrackerViewerKTHeaderBackgroundColor == true,
-            font = db.zygorTrackerViewerKTHeaderFont == true,
-            textIconColor = db.zygorTrackerViewerKTHeaderTextIconColor == true,
-            buttonColor = db.zygorTrackerViewerKTHeaderButtonColor == true,
-        },
-    }
-end
-
-function NS.SetZygorTrackerViewerSetting(key, value)
-    local db = NS.GetDB()
-    if key == "enabled" then
-        db.zygorTrackerViewerEnabled = value and true or false
-    elseif key == "dockMode" then
-        db.zygorTrackerViewerDockMode = NormalizeZygorTrackerViewerDockMode(value)
-    elseif key == "hideZygorFrame" then
-        db.zygorTrackerViewerHideNative = value and true or false
-    elseif key == "progressStyle" then
-        db.zygorTrackerViewerProgressStyle = NormalizeZygorTrackerViewerProgressStyle(value)
-    elseif key == "nativeDockWarningPopup" then
-        db.zygorTrackerViewerNativeWarningPopup = value and true or false
-    elseif key == "textColorMode" then
-        db.zygorTrackerViewerTextColorMode = NormalizeZygorTrackerViewerTextColorMode(value)
-    elseif key == "textCustomColor" then
-        db.zygorTrackerViewerTextCustomColor = NormalizeOverlayColor(
-            ZYGOR_TRACKER_VIEWER_TEXT_COLOR_DEF,
-            value)
-    elseif key == "ktHeaderTexture" then
-        db.zygorTrackerViewerKTHeaderTexture = value and true or false
-    elseif key == "ktHeaderBackgroundColor" then
-        db.zygorTrackerViewerKTHeaderBackgroundColor = value and true or false
-    elseif key == "ktHeaderFont" then
-        db.zygorTrackerViewerKTHeaderFont = value and true or false
-    elseif key == "ktHeaderTextIconColor" then
-        db.zygorTrackerViewerKTHeaderTextIconColor = value and true or false
-    elseif key == "ktHeaderButtonColor" then
-        db.zygorTrackerViewerKTHeaderButtonColor = value and true or false
-    elseif key == "position" then
-        if type(value) == "table" and value.point then
-            db.zygorTrackerViewerPosition = {
-                point = value.point,
-                relPoint = value.relPoint or "CENTER",
-                x = tonumber(value.x) or 0,
-                y = tonumber(value.y) or 0,
-            }
-        else
-            db.zygorTrackerViewerPosition = nil
-        end
-    end
-end
-
-function NS.GetZygorStepChatSettings()
-    local db = NS.GetDB()
-    db.zygorStepChatTextColorMode = NormalizeZygorTrackerViewerTextColorMode(db.zygorStepChatTextColorMode)
-    db.zygorStepChatTextCustomColor = NormalizeOverlayColor(
-        ZYGOR_TRACKER_VIEWER_TEXT_COLOR_DEF,
-        db.zygorStepChatTextCustomColor)
-    db.zygorStepChatStickySummary = NormalizeZygorStepChatStickySummary(db.zygorStepChatStickySummary)
-
-    return {
-        outputOnChange = db.zygorStepChatOutputOnChange == true,
-        textColorMode = db.zygorStepChatTextColorMode,
-        textCustomColor = db.zygorStepChatTextCustomColor,
-        stickySummary = db.zygorStepChatStickySummary,
-    }
-end
-
-function NS.SetZygorStepChatSetting(key, value)
-    local db = NS.GetDB()
-    if key == "outputOnChange" then
-        db.zygorStepChatOutputOnChange = value and true or false
-    elseif key == "textColorMode" then
-        db.zygorStepChatTextColorMode = NormalizeZygorTrackerViewerTextColorMode(value)
-    elseif key == "textCustomColor" then
-        db.zygorStepChatTextCustomColor = NormalizeOverlayColor(
-            ZYGOR_TRACKER_VIEWER_TEXT_COLOR_DEF,
-            value)
-    elseif key == "stickySummary" then
-        db.zygorStepChatStickySummary = NormalizeZygorStepChatStickySummary(value)
-    end
-end
 
 function NS.GetMinimapButtonSettings()
     local db = NS.GetDB()
@@ -1139,6 +1178,10 @@ function NS.ResetFlightMapCatalog()
     end
 end
 
+-- ============================================================
+-- Manual, quest and external waypoint settings
+-- ============================================================
+
 function NS.IsManualWaypointAutoClearEnabled()
     local db = NS.GetDB()
     return db.manualWaypointAutoClear == true
@@ -1146,7 +1189,11 @@ end
 
 function NS.SetManualWaypointAutoClearEnabled(enabled)
     local db = NS.GetDB()
+    local previous = db.manualWaypointAutoClear
     db.manualWaypointAutoClear = enabled and true or false
+    if previous ~= db.manualWaypointAutoClear and NS.RefreshManualArrivalMonitoring then
+        NS.RefreshManualArrivalMonitoring()
+    end
     return db.manualWaypointAutoClear
 end
 
@@ -1158,7 +1205,11 @@ end
 
 function NS.SetManualWaypointClearDistance(value)
     local db = NS.GetDB()
+    local previous = db.manualWaypointClearDistance
     db.manualWaypointClearDistance = NS.NormalizeManualWaypointClearDistance(value)
+    if previous ~= db.manualWaypointClearDistance and db.manualWaypointAutoClear and NS.RefreshManualArrivalMonitoring then
+        NS.RefreshManualArrivalMonitoring()
+    end
     return db.manualWaypointClearDistance
 end
 
@@ -1195,20 +1246,12 @@ function NS.SetGenericAddonBlizzardTakeoverEnabled(enabled)
     return db.genericAddonBlizzardTakeoverEnabled
 end
 
-local function GetAddonTakeoverListField(kind)
-    kind = type(kind) == "string" and kind:lower() or ""
-    if kind == "allowlist" then
-        return "genericAddonBlizzardTakeoverAllowlist", "allowlist"
-    end
-    if kind == "blocklist" then
-        return "genericAddonBlizzardTakeoverBlocklist", "blocklist"
-    end
-    return nil, nil
-end
-
-local function GetNormalizedAddonTakeoverList(db, field)
-    db[field] = NormalizeAddonTakeoverList(db[field])
-    return db[field]
+---@return AWPAddonTakeoverListKind?
+local function NormalizeAddonTakeoverListKind(kind)
+    if type(kind) ~= "string" then return end
+    kind = kind:lower()
+    if kind == "allowlist" then return "allowlist" end
+    if kind == "blocklist" then return "blocklist" end
 end
 
 local function FindAddonTakeoverListIndex(list, addonName)
@@ -1226,12 +1269,12 @@ local function FindAddonTakeoverListIndex(list, addonName)
 end
 
 function NS.GetGenericAddonBlizzardTakeoverList(kind)
-    local field = GetAddonTakeoverListField(kind)
-    if not field then
+    kind = NormalizeAddonTakeoverListKind(kind)
+    if not kind then
         return {}
     end
     local db = NS.GetDB()
-    local list = GetNormalizedAddonTakeoverList(db, field)
+    local list = GetNormalizedAddonTakeoverList(db, kind)
     local copy = {}
     for index, entry in ipairs(list) do
         copy[index] = entry
@@ -1240,8 +1283,8 @@ function NS.GetGenericAddonBlizzardTakeoverList(kind)
 end
 
 function NS.AddGenericAddonBlizzardTakeoverListEntry(kind, addonName)
-    local field, canonicalKind = GetAddonTakeoverListField(kind)
-    if not field then
+    kind = NormalizeAddonTakeoverListKind(kind)
+    if not kind then
         return false, "invalid_list"
     end
     local normalized = NS.NormalizeAddonTakeoverName(addonName)
@@ -1250,49 +1293,47 @@ function NS.AddGenericAddonBlizzardTakeoverListEntry(kind, addonName)
     end
 
     local db = NS.GetDB()
-    local list = GetNormalizedAddonTakeoverList(db, field)
-    local existingIndex, existingName = FindAddonTakeoverListIndex(list, normalized)
+    local list = GetNormalizedAddonTakeoverList(db, kind)
+    local existingIndex = FindAddonTakeoverListIndex(list, normalized)
     if not existingIndex then
-        list[#list + 1] = existingName or normalized
-        db[field] = NormalizeAddonTakeoverList(list)
+        list[#list + 1] = normalized
+        SetAddonTakeoverList(db, kind, NormalizeAddonTakeoverList(list))
     end
 
-    local opposite = canonicalKind == "allowlist"
-        and "genericAddonBlizzardTakeoverBlocklist"
-        or "genericAddonBlizzardTakeoverAllowlist"
+    local opposite = kind == "allowlist" and "blocklist" or "allowlist"
     local oppositeList = GetNormalizedAddonTakeoverList(db, opposite)
     local oppositeIndex = FindAddonTakeoverListIndex(oppositeList, normalized)
     if oppositeIndex then
         table.remove(oppositeList, oppositeIndex)
-        db[opposite] = NormalizeAddonTakeoverList(oppositeList)
+        SetAddonTakeoverList(db, opposite, NormalizeAddonTakeoverList(oppositeList))
     end
 
     return true, normalized
 end
 
 function NS.RemoveGenericAddonBlizzardTakeoverListEntry(kind, addonName)
-    local field = GetAddonTakeoverListField(kind)
-    if not field then
+    kind = NormalizeAddonTakeoverListKind(kind)
+    if not kind then
         return false, "invalid_list"
     end
     local db = NS.GetDB()
-    local list = GetNormalizedAddonTakeoverList(db, field)
+    local list = GetNormalizedAddonTakeoverList(db, kind)
     local index, existingName = FindAddonTakeoverListIndex(list, addonName)
     if not index then
         return false, "not_found"
     end
     table.remove(list, index)
-    db[field] = NormalizeAddonTakeoverList(list)
+    SetAddonTakeoverList(db, kind, NormalizeAddonTakeoverList(list))
     return true, existingName
 end
 
 function NS.ClearGenericAddonBlizzardTakeoverList(kind)
-    local field = GetAddonTakeoverListField(kind)
-    if not field then
+    kind = NormalizeAddonTakeoverListKind(kind)
+    if not kind then
         return false, "invalid_list"
     end
     local db = NS.GetDB()
-    db[field] = {}
+    SetAddonTakeoverList(db, kind, {})
     return true
 end
 
@@ -1302,13 +1343,13 @@ function NS.GetGenericAddonBlizzardTakeoverDecision(addonName)
         return false, "invalid_addon"
     end
     local db = NS.GetDB()
-    local blocklist = GetNormalizedAddonTakeoverList(db, "genericAddonBlizzardTakeoverBlocklist")
+    local blocklist = GetNormalizedAddonTakeoverList(db, "blocklist")
     local blockedIndex, blockedName = FindAddonTakeoverListIndex(blocklist, normalized)
     if blockedIndex then
         return false, "blocklist", blockedName
     end
 
-    local allowlist = GetNormalizedAddonTakeoverList(db, "genericAddonBlizzardTakeoverAllowlist")
+    local allowlist = GetNormalizedAddonTakeoverList(db, "allowlist")
     local allowedIndex, allowedName = FindAddonTakeoverListIndex(allowlist, normalized)
     if allowedIndex then
         return true, "allowlist", allowedName

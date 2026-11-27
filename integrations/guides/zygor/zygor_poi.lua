@@ -1,3 +1,10 @@
+-- ============================================================
+-- Zygor map POIs
+-- ============================================================
+--
+-- Reads Zygor map POIs and turns explicit pin selections into AWP
+-- destinations.
+
 local NS = _G.AzerothWaypointNS
 if not NS.IsZygorLoaded() then return end
 
@@ -170,6 +177,10 @@ local function RefreshZygorPoiPins(Poi)
     end
 end
 
+-- ============================================================
+-- Active POI ownership
+-- ============================================================
+
 local function MarkZygorPoiActive(Z, Poi, ident)
     if type(ident) == "string" and ident ~= "" and Z and Z.db and Z.db.char then
         Z.db.char.activepoi = ident
@@ -252,6 +263,10 @@ local function IsCurrentZygorPoiGuideForPoint(point)
         and type(loaderGuide) == "table"
         and (currentGuide == loaderGuide or currentGuide.title == loaderGuide.title)
 end
+
+-- ============================================================
+-- Guide and manual route adoption
+-- ============================================================
 
 local function ActivateZygorPoiGuideAdoption(point, trigger)
     if type(GetActiveManualDestination) ~= "function" or type(GetActiveManualDestination()) ~= "table" then
@@ -365,7 +380,8 @@ function NS.InstallZygorPoiTakeoverHooks()
 end
 
 function NS.HandleRemovedZygorPoiDestination(destination)
-    local identity = type(destination) == "table" and type(destination.identity) == "table" and destination.identity or nil
+    local identity = type(destination) == "table" and type(destination.identity) == "table" and destination.identity or
+    nil
     if type(identity) ~= "table" or identity.kind ~= "zygor_poi" then
         return
     end

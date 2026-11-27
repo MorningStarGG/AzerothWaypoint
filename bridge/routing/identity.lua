@@ -1,3 +1,10 @@
+-- ============================================================
+-- Route identity
+-- ============================================================
+--
+-- Builds and validates the identities used to recognize a route across
+-- planning, display and persistence.
+
 local NS = _G.AzerothWaypointNS
 
 -- ============================================================
@@ -8,6 +15,7 @@ local Signature = NS.Signature
 
 local IDENTITY_KINDS = {
     manual = true,
+    corpse = true,
     blizzard_user_waypoint = true,
     map_pin = true,
     quest = true,
@@ -86,6 +94,10 @@ function NS.RouteSignature(mapID, x, y)
     return nil
 end
 
+-- ============================================================
+-- Identities by waypoint source
+-- ============================================================
+
 local function BaseIdentity(kind, source, mapID, x, y, opts)
     opts = type(opts) == "table" and opts or {}
     return {
@@ -102,8 +114,38 @@ function NS.BuildManualIdentity(mapID, x, y, opts)
     return BaseIdentity("manual", "manual", mapID, x, y, opts)
 end
 
+function NS.BuildCorpseIdentity(mapID, x, y)
+    local identity = BaseIdentity("corpse", "external", mapID, x, y)
+    identity.destinationKind = "corpse"
+    return identity
+end
+
+function NS.GetCorpseRouteIdentity(record)
+    local identity = type(record) == "table" and record.identity or nil
+    if type(identity) == "table" and identity.destinationKind == "corpse" then
+        return identity
+    end
+end
+
+function NS.IsCorpseRoute(record)
+    return NS.GetCorpseRouteIdentity(record) ~= nil
+end
+
 function NS.BuildUserWaypointIdentity(mapID, x, y, opts)
-    return BaseIdentity("blizzard_user_waypoint", "blizzard", mapID, x, y, opts)
+    local identity = BaseIdentity("blizzard_user_waypoint", "blizzard", mapID, x, y, opts)
+    identity.worldMapClick = opts and opts.worldMapClick
+    return identity
+end
+
+function NS.GetWorldMapClickIdentity(record)
+    local identity = record and record.identity
+    if not identity or identity.kind ~= "blizzard_user_waypoint" then return end
+    -- Earlier 4.3.0 records already kept the source map when a plain click
+    -- resolved to a neighboring zone. Other Blizzard takeovers kept one map.
+    if identity.worldMapClick or (identity.worldMapClick == nil and not record.sourceAddon
+            and record.mapID and record.mapID ~= identity.mapID) then
+        return identity
+    end
 end
 
 function NS.BuildMapPinInfo(kind, mapID, x, y, opts)
@@ -194,13 +236,22 @@ function NS.BuildExternalTomTomIdentity(uid, mapID, x, y, opts)
     if type(uid) == "table" and not sourceAddon then
         sourceAddon = uid.awpSourceAddon or uid.sourceAddon or uid.source or uid.from
     end
-    local sig = TrimString(opts.externalSig) or TrimString(opts.queueSig) or TrimString(opts.sig) or NS.RouteSignature(mapID, x, y)
+    local sig = TrimString(opts.externalSig) or TrimString(opts.queueSig) or TrimString(opts.sig) or
+        NS.RouteSignature(mapID, x, y)
     local identity = BaseIdentity("external_tomtom", "external", mapID, x, y, { sig = sig })
+    identity.destinationKind = type(uid) == "table" and uid.corpse == true and "corpse" or nil
     identity.externalSig = TrimString(opts.externalSig) or sig
     identity.queueSig = TrimString(opts.queueSig)
     identity.queueIndex = type(opts.queueIndex) == "number" and opts.queueIndex or nil
     identity.sourceAddon = NormalizeSourceAddon(sourceAddon)
     return identity
+end
+
+function NS.GetRouteBackendOverride(meta)
+    local id = type(meta) == "table" and meta.backendOverride
+    if type(id) ~= "string" then return nil end
+    local catalog = NS.Internal and NS.Internal.RoutingBackends
+    return catalog and catalog.byID[id] and id or nil
 end
 
 function NS.BuildRouteMeta(identity, opts)
@@ -214,18 +265,28 @@ function NS.BuildRouteMeta(identity, opts)
         sourceAddonIconKey = TrimString(opts.sourceAddonIconKey),
         searchKind = TrimString(opts.searchKind),
         manualQuestID = PositiveNumber(opts.manualQuestID or identity.questID or identity.completionQuestID),
+        backendOverride = NS.GetRouteBackendOverride(opts),
+        questContext = CopyTable(opts.questContext),
+        navigationHeight = type(opts.navigationHeight) == "number" and opts.navigationHeight or nil,
+        navigationContinent = type(opts.navigationContinent) == "number" and opts.navigationContinent or nil,
         mapPinInfo = CopyTable(opts.mapPinInfo),
-        queueSourceType = NormalizeQueueSourceType(opts.queueSourceType or identity.queueSourceType),
+        queueSourceType = identity.destinationKind == "corpse" and "transient_source"
+            or NormalizeQueueSourceType(opts.queueSourceType or identity.queueSourceType),
     }
     if meta.identity.kind == "map_pin" and type(meta.mapPinInfo) ~= "table" then
-        meta.mapPinInfo = NS.BuildMapPinInfo(meta.identity.mapPinKind, meta.identity.mapID, meta.identity.x, meta.identity.y, {
-            mapPinType = meta.identity.mapPinType,
-            mapPinID = meta.identity.mapPinID,
-            sig = meta.identity.sig,
-        })
+        meta.mapPinInfo = NS.BuildMapPinInfo(meta.identity.mapPinKind, meta.identity.mapID, meta.identity.x,
+            meta.identity.y, {
+                mapPinType = meta.identity.mapPinType,
+                mapPinID = meta.identity.mapPinID,
+                sig = meta.identity.sig,
+            })
     end
     return meta
 end
+
+-- ============================================================
+-- Validation and identity matching
+-- ============================================================
 
 function NS.ValidateRouteIdentity(identity)
     if type(identity) ~= "table" or IDENTITY_KINDS[identity.kind] ~= true then
@@ -279,9 +340,12 @@ local function IdentityKey(identity)
         return table.concat({ identity.kind, tostring(identity.poiType or ""), tostring(identity.ident or "") }, "\031")
     end
     if identity.kind == "external_tomtom" then
-        return table.concat({ identity.kind, tostring(identity.externalSig or identity.queueSig or identity.sig or "") }, "\031")
+        return table.concat({ identity.kind, tostring(identity.externalSig or identity.queueSig or identity.sig or ""),
+            tostring(identity.destinationKind or "") }, "\031")
     end
-    return table.concat({ identity.kind, tostring(identity.sig or NS.RouteSignature(identity.mapID, identity.x, identity.y) or "") }, "\031")
+    return table.concat(
+        { identity.kind, tostring(identity.sig or NS.RouteSignature(identity.mapID, identity.x, identity.y) or "") },
+        "\031")
 end
 
 function NS.RouteIdentitiesMatch(a, b)

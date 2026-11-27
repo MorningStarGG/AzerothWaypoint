@@ -16,10 +16,6 @@ local Signature = NS.Signature
 local externalWaypointBuffer = {}
 local pendingRemovedTomTomUIDs = {}
 local pendingRemovedTomTomFlush = false
-local tomTomReloadGeneration = 0
-local pendingTomTomReloadGeneration = nil
-local tomTomReloadFlushPending = false
-local explicitRemoveAllGeneration = nil
 local tomTomCallbackOwner = {}
 
 local EXTERNAL_SOURCE_STACK_START = 3
@@ -72,20 +68,30 @@ end
 
 local function IsGuideProviderTomTomSource(sourceAddon)
     sourceAddon = NormalizeSourceAddonCandidate(sourceAddon)
-    return sourceAddon == "WoWPro"
+    return type(NS.GetExternalWaypointGuideProvider) == "function"
+        and NS.GetExternalWaypointGuideProvider(sourceAddon) ~= nil
 end
 
 local function ScheduleGuideProviderForTomTomSource(sourceAddon, reason)
-    if not IsGuideProviderTomTomSource(sourceAddon) then
+    sourceAddon = NormalizeSourceAddonCandidate(sourceAddon)
+    local providerKey = type(NS.GetExternalWaypointGuideProvider) == "function"
+        and NS.GetExternalWaypointGuideProvider(sourceAddon)
+        or nil
+    if not providerKey then
         return false
     end
     if type(NS.ScheduleGuideProviderEvaluation) == "function" then
-        NS.ScheduleGuideProviderEvaluation("wowpro", reason or "WoWProTomTom", { allowProviderSwitch = true })
+        -- A publication is a state update, including during addon startup.
+        -- Explicit selections are captured by the guide provider itself.
+        NS.ScheduleGuideProviderEvaluation(providerKey, reason or (providerKey .. "TomTom"))
     end
     return true
 end
 
 local function ResolveExplicitTomTomSourceAddon(opts, uid)
+    if type(opts) == "table" and opts.corpse == true or type(uid) == "table" and uid.corpse == true then
+        return "TomTom"
+    end
     local fields = {
         type(opts) == "table" and opts.from or nil,
         type(opts) == "table" and opts.source or nil,
@@ -105,11 +111,14 @@ local function ResolveDebugStackTomTomSourceAddon()
     if type(debugstack) ~= "function" then
         return nil
     end
-    return NormalizeSourceAddonCandidate(debugstack(
+    local stack = debugstack(
         EXTERNAL_SOURCE_STACK_START,
         EXTERNAL_SOURCE_STACK_COUNT,
         EXTERNAL_SOURCE_STACK_COUNT
-    ))
+    )
+    local btw = NS.Internal.BtWQuests
+    if btw and btw.IsTomTomPublisher(stack) then return "btwquests" end
+    return NormalizeSourceAddonCandidate(stack)
 end
 
 local function ResolveExternalTomTomSourceAddon(opts, uid, allowDebugStack)
@@ -203,7 +212,7 @@ end
 
 local function IsAWPWaypoint(uid)
     return type(uid) == "table" and
-    (uid.fromAWP == true or uid.awpCarrier == true or uid.from == "AzerothWaypoint:Carrier")
+        (uid.fromAWP == true or uid.awpCarrier == true or uid.from == "AzerothWaypoint:Carrier")
 end
 
 local function IsQueueProjectionWaypoint(uid)
@@ -230,6 +239,10 @@ local function IsExternalTomTomWaypoint(uid)
         and type(uid[3]) == "number"
         and not IsAWPWaypoint(uid)
 end
+
+-- ============================================================
+-- External waypoint index
+-- ============================================================
 
 local function GetExternalWaypointSig(uid)
     if not IsExternalTomTomWaypoint(uid) then
@@ -354,12 +367,12 @@ function NS.GetExternalTomTomWaypointBySig(sig)
     return GetIndexedExternalTomTomWaypointBySig(sig)
 end
 
--- ------------------------------------------------------------
+-- ============================================================
 -- UID lifecycle
--- ------------------------------------------------------------
+-- ============================================================
 --
 -- The live carrier UID lives in state.routing.carrierState.uid.
--- We dedupe writes via a sig comparison so identical re-pushes are no-ops.
+-- Publishing at the same coordinates can reuse the indexed pin.
 -- Build the waypoint options table TomTom expects. Title is AWP's choice.
 local function BuildCarrierOpts(title, meta)
     local opts = {}
@@ -382,6 +395,8 @@ local function BuildCarrierOpts(title, meta)
     opts.minimap         = true
     opts.world           = true
     opts.awpCarrier      = true
+    -- Publish the arrow once the carrier owns the returned UID.
+    opts.crazy           = false
     -- Marker used by this carrier's TomTom hook so internal carrier
     -- writes are never adopted as external user waypoints.
     opts.fromAWP         = true
@@ -424,6 +439,10 @@ local function UpdateIndexedTomTomWaypointTitle(tomtom, uid, title)
         end
     end
 
+    local newKey = GetTomTomWaypointKey(tomtom, mapID, x, y, title)
+    local existing = newKey and mapWaypoints and mapWaypoints[newKey]
+    if existing and existing ~= uid then return true, existing end
+
     uid.title = title
     uid.arrowtitle = title
 
@@ -434,26 +453,11 @@ local function UpdateIndexedTomTomWaypointTitle(tomtom, uid, title)
         return false
     end
 
-    local newKey = GetTomTomWaypointKey(tomtom, mapID, x, y, title)
     if newKey and newKey ~= indexedKey then
         mapWaypoints[indexedKey] = nil
         mapWaypoints[newKey] = uid
     end
     return true
-end
-
-local function SetCarrierArrowTitle(tomtom, carrier, title)
-    if type(carrier) ~= "table" or not carrier.uid then
-        return false
-    end
-    title = title or "AWP Route"
-    carrier.title = title
-    local indexed = UpdateIndexedTomTomWaypointTitle(tomtom, carrier.uid, title)
-    local setCrazyArrow = state.routing.originalSetCrazyArrow or tomtom and tomtom.SetCrazyArrow
-    if indexed and type(tomtom) == "table" and type(setCrazyArrow) == "function" then
-        pcall(setCrazyArrow, tomtom, carrier.uid, 15, title)
-    end
-    return indexed
 end
 
 local function PromoteQueueProjectionToCarrier(uid, opts)
@@ -462,8 +466,8 @@ local function PromoteQueueProjectionToCarrier(uid, opts)
     end
 
     local published = state.routing and state.routing.publishedQueueState or nil
-    local uidByEntryKey = type(published) == "table" and published.uidByEntryKey or nil
-    if type(uidByEntryKey) == "table" then
+    if type(published) == "table" and type(published.uidByEntryKey) == "table" then
+        local uidByEntryKey = published.uidByEntryKey
         for key, publishedUID in pairs(uidByEntryKey) do
             if publishedUID == uid then
                 uidByEntryKey[key] = nil
@@ -488,70 +492,91 @@ local function PromoteQueueProjectionToCarrier(uid, opts)
     return true
 end
 
-function NS.PushCarrierWaypoint(mapID, x, y, title, meta)
+local function SetCarrierArrowTitle(tomtom, carrier, title)
+    if type(carrier) ~= "table" or not carrier.uid then
+        return false
+    end
+    title = title or "AWP Route"
+    carrier.title = title
+    local indexed, existing = UpdateIndexedTomTomWaypointTitle(tomtom, carrier.uid, title)
+    if existing then
+        -- Match TomTom's AddWaypoint deduplication instead of overwriting a
+        -- source-owned UID (notably the native corpse) at the new title key.
+        NS.Internal.CarrierTomTom.RemoveCarrierUID(tomtom, carrier.uid)
+        if state.routing.carrierState ~= carrier then return false end
+        carrier.uid = existing
+        state.routing.lastPushedCarrierUID = existing
+        PromoteQueueProjectionToCarrier(existing, BuildCarrierOpts(title))
+    end
+    local setCrazyArrow = state.routing.originalSetCrazyArrow or tomtom and tomtom.SetCrazyArrow
+    if indexed and type(tomtom) == "table" and type(setCrazyArrow) == "function" then
+        pcall(setCrazyArrow, tomtom, carrier.uid, 15, title)
+    end
+    return indexed
+end
+
+function NS.PushCarrierWaypoint(mapID, x, y, title, meta, previous)
     if not HasUsableTomTom() then return false end
     if type(mapID) ~= "number" or type(x) ~= "number" or type(y) ~= "number" then
         return false
     end
 
     local tomtom = GetTomTomAddon()
-    local carrier = state.routing.carrierState
+    local routing = state.routing
+    local carrier = routing.carrierState or {}
+    previous = previous or carrier
+    routing.carrierState = carrier
     local newSig = Signature and Signature(mapID, x, y) or string.format("%s:%s:%s", mapID, x, y)
 
-    -- Dedupe: same sig and an existing live UID? Nothing to do.
-    if carrier and carrier.sig == newSig and carrier.uid then
-        if IsTomTomWaypointActive(tomtom, carrier.uid) then
+    if previous.sig == newSig and previous.uid
+        and (previous.uid.corpse ~= true or type(meta) == "table" and type(meta.identity) == "table"
+            and meta.identity.destinationKind == "corpse") then
+        if IsTomTomWaypointActive(tomtom, previous.uid) then
+            carrier.uid = previous.uid
             SetCarrierArrowTitle(tomtom, carrier, title)
             return true
         end
-        carrier.uid = nil
-        state.routing.lastPushedCarrierUID = nil
-    end
-
-    -- Tear down the old carrier UID (if any) before adding the new one.
-    -- Uses the AWP-initiated remove wrapper so our own external-remove
-    -- hook doesn't react to this self-initiated cleanup.
-    if carrier and carrier.uid and NS.Internal and NS.Internal.CarrierTomTom then
-        NS.Internal.CarrierTomTom.RemoveCarrierUID(tomtom, carrier.uid)
+    elseif previous.uid then
+        NS.Internal.CarrierTomTom.RemoveCarrierUID(tomtom, previous.uid)
+        if routing.carrierState ~= carrier then return false end
     end
 
     local opts = BuildCarrierOpts(title, meta)
-    local ok, uid = pcall(tomtom.AddWaypoint, tomtom, mapID, x, y, opts)
-    if not ok or not uid then
-        return false
+    local published = state.routing.publishedQueueState
+    local publishedUIDs = published and published.uidByEntryKey
+    local key = publishedUIDs and GetTomTomWaypointKey(tomtom, mapID, x, y, opts.title)
+    local uid = key and publishedUIDs[key]
+    local mapWaypoints = type(tomtom.waypoints) == "table" and tomtom.waypoints[mapID]
+    if not IsQueueProjectionWaypoint(uid) or not mapWaypoints or mapWaypoints[key] ~= uid then
+        local ok
+        ok, uid = pcall(tomtom.AddWaypoint, tomtom, mapID, x, y, opts)
+        if not ok or not uid then return false end
+        if routing.carrierState ~= carrier then
+            local current = routing.carrierState
+            if uid.awpCarrier and not uid.awpQueueProjection and not (current and current.uid == uid)
+                and IsTomTomWaypointActive(tomtom, uid) then
+                NS.Internal.CarrierTomTom.RemoveCarrierUID(tomtom, uid)
+            end
+            return false
+        end
     end
     PromoteQueueProjectionToCarrier(uid, opts)
 
-    state.routing.carrierState         = state.routing.carrierState or {}
-    local cs                           = state.routing.carrierState
-    cs.mapID                           = mapID
-    cs.x                               = x
-    cs.y                               = y
-    cs.title                           = title
-    cs.sig                             = newSig
-    cs.uid                             = uid
-    state.routing.lastPushedCarrierUID = uid
+    carrier.mapID, carrier.x, carrier.y = mapID, x, y
+    carrier.sig, carrier.uid = newSig, uid
+    routing.lastPushedCarrierUID = uid
 
     -- Make this waypoint the active crazy-arrow target. AddWaypoint just
-    -- creates the pin; SetCrazyArrow makes it the live navigation arrow.
+    -- creates the pin, SetCrazyArrow makes it the live navigation arrow.
     -- The carrier owns arrival display, but not clear/removal.
-    return SetCarrierArrowTitle(tomtom, cs, title)
-end
-
-function NS.RefreshCarrierWaypointTitle(title)
-    local tomtom = GetTomTomAddon()
-    local carrier = state.routing.carrierState
-    if not tomtom or type(carrier) ~= "table" or not carrier.uid then
-        return false
-    end
     return SetCarrierArrowTitle(tomtom, carrier, title)
 end
 
 function NS.ClearCarrierWaypoint()
     local carrier = state.routing.carrierState
+    state.routing.carrierState = nil
+    state.routing.lastPushedCarrierUID = nil
     if not carrier or not carrier.uid then
-        state.routing.carrierState = nil
-        state.routing.lastPushedCarrierUID = nil
         return
     end
 
@@ -559,10 +584,11 @@ function NS.ClearCarrierWaypoint()
     if tomtom and NS.Internal and NS.Internal.CarrierTomTom then
         NS.Internal.CarrierTomTom.RemoveCarrierUID(tomtom, carrier.uid)
     end
-
-    state.routing.carrierState = nil
-    state.routing.lastPushedCarrierUID = nil
 end
+
+-- ============================================================
+-- Queue pins on the map
+-- ============================================================
 
 local function BuildQueueProjectionOpts(entry)
     entry = type(entry) == "table" and entry or {}
@@ -601,29 +627,22 @@ end
 function NS.ClearPublishedQueuePins()
     local routing = state.routing
     local published = routing.publishedQueueState
+    if published and not published.queueKey and published.uidByEntryKey and not next(published.uidByEntryKey) then return end
+    -- A removal listener may publish a new queue before this loop returns.
+    routing.publishedQueueState = { uidByEntryKey = {} }
     if type(published) ~= "table" or type(published.uidByEntryKey) ~= "table" then
-        routing.publishedQueueState = {
-            queueKey = nil,
-            signature = nil,
-            uidByEntryKey = {},
-        }
         return
     end
 
     local tomtom = GetTomTomAddon()
     if tomtom and NS.Internal and NS.Internal.CarrierTomTom then
-        for _, uid in pairs(published.uidByEntryKey) do
-            if uid then
+        for key, uid in pairs(published.uidByEntryKey) do
+            local carrier = routing.carrierState
+            if routing.publishedQueueState.uidByEntryKey[key] ~= uid and not (carrier and carrier.uid == uid) then
                 NS.Internal.CarrierTomTom.RemoveCarrierUID(tomtom, uid)
             end
         end
     end
-
-    routing.publishedQueueState = {
-        queueKey = nil,
-        signature = nil,
-        uidByEntryKey = {},
-    }
 end
 
 function NS.PublishQueueProjectionPins()
@@ -642,11 +661,12 @@ function NS.PublishQueueProjectionPins()
 
     local signature = BuildQueueProjectionSignature(entries, queueKey)
     local published = state.routing.publishedQueueState or {}
-    if published.signature == signature then
+    local carrier = state.routing.carrierState
+    local carrierUID = carrier and carrier.uid
+    local carrierTitle = type(carrierUID) == "table" and carrierUID.title or nil
+    if published.signature == signature and published.carrierUID == carrierUID and published.carrierTitle == carrierTitle then
         return true
     end
-
-    NS.ClearPublishedQueuePins()
 
     local tomtom = GetTomTomAddon()
     local addWaypoint = state.routing.originalAddWaypoint or tomtom and tomtom.AddWaypoint
@@ -654,40 +674,79 @@ function NS.PublishQueueProjectionPins()
         return false
     end
 
-    local uidByEntryKey = {}
-    for index = 1, #entries do
-        local entry = entries[index]
-        if type(entry) == "table"
-            and type(entry.mapID) == "number"
-            and type(entry.x) == "number"
-            and type(entry.y) == "number"
+    if published.queueKey ~= queueKey or type(published.uidByEntryKey) ~= "table" then
+        NS.ClearPublishedQueuePins()
+        if state.routing.carrierState ~= carrier then return false end
+        published = state.routing.publishedQueueState
+    end
+    published.queueKey, published.signature = queueKey, nil
+    local uidByEntryKey = published.uidByEntryKey
+    local carrierKey = type(carrierUID) == "table"
+        and GetTomTomWaypointKey(tomtom, carrierUID[1], carrierUID[2], carrierUID[3], carrierTitle)
+    local wanted = {}
+    for index, entry in ipairs(entries) do
+        if type(entry) == "table" and type(entry.mapID) == "number"
+            and type(entry.x) == "number" and type(entry.y) == "number"
         then
-            local opts = BuildQueueProjectionOpts(entry)
-            local ok, uid = pcall(addWaypoint, tomtom, entry.mapID, entry.x, entry.y, opts)
-            if ok and uid then
-                if type(uid) == "table" then
-                    uid.fromAWP = true
-                    uid.awpQueueProjection = true
-                    uid.awpQueueID = opts.awpQueueID
-                    uid.awpQueueItemIndex = opts.awpQueueItemIndex
-                    uid.awpQueueEntryType = opts.awpQueueEntryType
-                end
-                uidByEntryKey[entry.key or tostring(index)] = uid
+            -- TomTom identifies a pin by coordinates and title. A queue index
+            -- is click metadata and can change while the pin stays in place.
+            local key = GetTomTomWaypointKey(tomtom, entry.mapID, entry.x, entry.y, entry.title or "AWP Queue")
+                or entry.key or tostring(index)
+            local prior = wanted[key]
+            if key ~= carrierKey and (not prior or entry.isTopLevel and not prior.isTopLevel) then
+                wanted[key] = entry
             end
         end
     end
+    for key, uid in pairs(uidByEntryKey) do
+        local entry = wanted[key]
+        if uid == carrierUID or not entry or type(uid) ~= "table" or uid.title ~= (entry.title or "AWP Queue") then
+            uidByEntryKey[key] = nil
+            if uid ~= carrierUID then
+                NS.Internal.CarrierTomTom.RemoveCarrierUID(tomtom, uid)
+                if state.routing.carrierState ~= carrier or state.routing.publishedQueueState ~= published then return false end
+            end
+        end
+    end
+    local complete = true
+    for key, entry in pairs(wanted) do
+        local uid = uidByEntryKey[key]
+        if not uid then
+            local opts = BuildQueueProjectionOpts(entry)
+            local ok, addedUID = pcall(addWaypoint, tomtom, entry.mapID, entry.x, entry.y, opts)
+            if state.routing.carrierState ~= carrier or state.routing.publishedQueueState ~= published then
+                local current = state.routing.publishedQueueState
+                if ok and IsQueueProjectionWaypoint(addedUID) and not (current and current.uidByEntryKey[key] == addedUID)
+                    and IsTomTomWaypointActive(tomtom, addedUID) then
+                    NS.Internal.CarrierTomTom.RemoveCarrierUID(tomtom, addedUID)
+                end
+                return false
+            end
+            if ok and addedUID then
+                uid = addedUID
+                if uid ~= carrierUID then uidByEntryKey[key] = uid end
+            else
+                complete = false
+            end
+        end
+        if type(uid) == "table" and uid ~= carrierUID and uid.corpse ~= true then
+            uid.fromAWP = true
+            uid.awpQueueProjection = true
+            uid.awpQueueID = entry.queueID
+            uid.awpQueueItemIndex = entry.queueItemIndex
+            uid.awpQueueEntryType = entry.entryType
+        end
+    end
 
-    state.routing.publishedQueueState = {
-        queueKey = queueKey,
-        signature = signature,
-        uidByEntryKey = uidByEntryKey,
-    }
+    published.signature = complete and signature or nil
+    published.carrierUID = carrierUID
+    published.carrierTitle = carrierTitle
     return true
 end
 
--- ------------------------------------------------------------
+-- ============================================================
 -- External TomTom waypoint hook
--- ------------------------------------------------------------
+-- ============================================================
 
 local function ShouldDivertExternalTomTomAdd(mapID, x, y, opts)
     if type(NS.IsRoutingEnabled) == "function" and not NS.IsRoutingEnabled() then
@@ -744,6 +803,9 @@ local function PrepareExternalTomTomAddOptions(mapID, x, y, opts)
 end
 
 local function PrepareGuideProviderTomTomAddOptions(opts)
+    if type(NS.IsRoutingEnabled) == "function" and not NS.IsRoutingEnabled() then
+        return opts, nil
+    end
     local sourceAddon = ResolveExternalTomTomSourceAddon(opts, nil, true)
     if not IsGuideProviderTomTomSource(sourceAddon) then
         return opts, nil
@@ -778,28 +840,22 @@ local function QueueSlashWaypointBatch(mapID, x, y, title)
         end
 
         if type(NS.IsRoutingEnabled) == "function" and not NS.IsRoutingEnabled() then
-            if type(NS.ClearManualQueues) == "function" then
-                NS.ClearManualQueues()
-            end
+            return
+        end
+
+        if #entries > 1 then
+            NS.RouteImportedWaypointBatch(entries)
             return
         end
 
         local first = entries[1]
-        if #entries > 1 and type(NS.RouteImportedWaypointBatch) == "function" then
-            local routed = NS.RouteImportedWaypointBatch(entries)
-            if routed then
-                return
-            end
-        end
-
-        if type(NS.ClearManualQueues) == "function" then
-            NS.ClearManualQueues()
-        end
         local uid = Signature and GetIndexedExternalTomTomWaypointBySig(Signature(first.mapID, first.x, first.y)) or nil
         local meta = type(NS.CreateRouteMetaForExternalWaypoint) == "function"
             and NS.CreateRouteMetaForExternalWaypoint(uid, first.mapID, first.x, first.y, first.title)
             or nil
-        NS.AdoptExternalWaypoint(first.mapID, first.x, first.y, first.title, meta)
+        NS.RequestManualRoute(first.mapID, first.x, first.y, first.title, meta, {
+            clickContext = { source = "tomtom_way", explicit = true },
+        })
     end)
     return true
 end
@@ -815,13 +871,15 @@ local function RouteExternalTomTomWaypoint(mapID, x, y, title, uid)
     local meta = type(NS.CreateRouteMetaForExternalWaypoint) == "function"
         and NS.CreateRouteMetaForExternalWaypoint(uid, mapID, x, y, title)
         or nil
-    local queue = NS.RouteQueueInternal
-    local sourceType = type(queue) == "table"
-        and type(queue.InferQueueSourceType) == "function"
-        and queue.InferQueueSourceType(meta)
-        or nil
-    if sourceType ~= "transient_source" and type(NS.ClearManualQueues) == "function" then
-        NS.ClearManualQueues()
+    local current = type(NS.GetManualAuthority) == "function" and NS.GetManualAuthority() or nil
+    local corpseIdentity = NS.GetCorpseRouteIdentity(state.routing.pendingManualAuthority)
+        or NS.GetCorpseRouteIdentity(current)
+    local incomingIdentity = NS.GetCorpseRouteIdentity(meta)
+    if incomingIdentity and corpseIdentity
+        and (corpseIdentity.kind == "corpse" or NS.RouteIdentitiesMatch(corpseIdentity, incomingIdentity)) then
+        -- A corpse source can publish again after spirit release, including
+        -- after a route was already acquired from Mapzeroth.
+        return true
     end
     local adopted = NS.AdoptExternalWaypoint(mapID, x, y, title, meta)
     if adopted then
@@ -878,20 +936,26 @@ function NS.InstallExternalTomTomHooks()
             effectiveOpts = PrepareExternalTomTomAddOptions(mapID, x, y, opts)
         end
         local uid = originalAddWaypoint(self, mapID, x, y, effectiveOpts)
+        -- TomTom can return a previously published UID when its key matches.
+        -- Prefer the current publisher over metadata from that older click.
+        local sourceAddon = guideSourceAddon or (divert and effectiveOpts.awpSourceAddon)
+            or ResolveExternalTomTomSourceAddon(effectiveOpts, uid, false)
+        if NS.CaptureExternalWaypointMetadata then
+            NS.CaptureExternalWaypointMetadata(sourceAddon, uid, mapID, x, y)
+        end
         if guideSourceAddon then
             if type(uid) == "table" then
                 uid.awpSourceAddon = guideSourceAddon
             end
-            ScheduleGuideProviderForTomTomSource(guideSourceAddon, "WoWProTomTomAddWaypoint")
+            if NS.ObserveGuideTomTomWaypoint then NS.ObserveGuideTomTomWaypoint(guideSourceAddon, "added", uid) end
+            ScheduleGuideProviderForTomTomSource(guideSourceAddon, "GuideTomTomAddWaypoint")
         elseif type(uid) == "table" and divert then
-            local sourceAddon = ResolveExternalTomTomSourceAddon(effectiveOpts, uid, false)
             if type(sourceAddon) == "string" then
                 uid.awpSourceAddon = sourceAddon
             end
             IndexExternalTomTomWaypoint(uid)
         elseif type(uid) == "table" then
-            local sourceAddon = ResolveExternalTomTomSourceAddon(effectiveOpts, uid, false)
-            if ScheduleGuideProviderForTomTomSource(sourceAddon, "WoWProTomTomAddWaypoint") then
+            if ScheduleGuideProviderForTomTomSource(sourceAddon, "GuideTomTomAddWaypoint") then
                 uid.awpSourceAddon = sourceAddon
             end
         end
@@ -902,8 +966,6 @@ function NS.InstallExternalTomTomHooks()
             or nil
 
         if divert then
-            local sourceAddon = type(uid) == "table" and uid.awpSourceAddon
-                or ResolveExternalTomTomSourceAddon(effectiveOpts, uid, false)
             if IsRareScannerMouseDownPublish(sourceAddon) then
                 return uid
             end
@@ -932,7 +994,8 @@ function NS.InstallExternalTomTomHooks()
                 return originalSetCrazyArrow(self, uid, dist, title)
             end
             local sourceAddon = ResolveExternalTomTomSourceAddon(nil, uid, false)
-            if ScheduleGuideProviderForTomTomSource(sourceAddon, "WoWProTomTomSetCrazyArrow") then
+            if NS.ObserveGuideTomTomWaypoint then NS.ObserveGuideTomTomWaypoint(sourceAddon, "selected", uid) end
+            if ScheduleGuideProviderForTomTomSource(sourceAddon, "GuideTomTomSetCrazyArrow") then
                 return nil
             end
 
@@ -948,9 +1011,9 @@ function NS.InstallExternalTomTomHooks()
     state.routing._externalTomTomHooksInstalled = true
 end
 
--- ------------------------------------------------------------
+-- ============================================================
 -- Carrier-UID removal detection
--- ------------------------------------------------------------
+-- ============================================================
 --
 -- When the user right-clicks the TomTom arrow and chooses Remove, or
 -- otherwise dismisses the waypoint through TomTom, its public
@@ -1071,12 +1134,22 @@ local function HandleTomTomWaypointRemoved(uid)
     if IsAWPInitiatedRemove() then
         return
     end
+    local published = state.routing.publishedQueueState
+    if published and published.uidByEntryKey then
+        for key, publishedUID in pairs(published.uidByEntryKey) do
+            if publishedUID == uid then published.uidByEntryKey[key], published.signature = nil, nil end
+        end
+    end
 
     if type(NS.NoteQueuedTomTomWaypointCleared) == "function" then
         NS.NoteQueuedTomTomWaypointCleared(uid)
     end
 
-    if type(sig) == "string" and sig == GetActiveExternalManualSig()
+    local active = type(NS.GetManualAuthority) == "function" and NS.GetManualAuthority() or nil
+    local identity = active and active.identity
+    local sameDestinationKind = (type(uid) == "table" and uid.corpse == true)
+        == (type(identity) == "table" and identity.destinationKind == "corpse")
+    if sameDestinationKind and type(sig) == "string" and sig == GetActiveExternalManualSig()
         and type(NS.HandleExplicitManualAuthorityRemove) == "function"
     then
         NS.HandleExplicitManualAuthorityRemove()
@@ -1128,78 +1201,30 @@ local function RebuildCarrierAfterTomTomReload()
 end
 
 local function HandleExplicitTomTomRemoveAll()
+    if NS.Internal.ServiceSearch then NS.Internal.ServiceSearch.Cancel() end
     RebuildExternalTomTomWaypointIndex(GetTomTomAddon())
-
-    local activeQueueKey = state.routing and state.routing.activeQueueKey or nil
-    local carrierState = state.routing and state.routing.carrierState or nil
-    local guideQueueActive = activeQueueKey == "guide"
-        or (type(activeQueueKey) == "string" and activeQueueKey:match("^guide:") ~= nil)
-        or (type(carrierState) == "table" and carrierState.source == "guide")
-
-    if guideQueueActive then
-        if not ReassertGuideCarrierAfterExternalClear("remove_all", true) then
-            ForgetExternalClearedCarrier(true)
-            if type(NS.RecomputeCarrier) == "function" then
-                NS.RecomputeCarrier()
-            end
-        end
-    elseif type(activeQueueKey) == "string" and type(NS.ClearQueueByID) == "function" then
-        NS.ClearQueueByID(activeQueueKey)
-    elseif type(NS.GetManualAuthority) == "function"
-        and NS.GetManualAuthority()
-        and type(NS.HandleExplicitManualAuthorityRemove) == "function"
-    then
+    local routing = state.routing
+    routing.queueAfterCorpse = nil
+    local record = routing.manualAuthority
+    local pending = routing.pendingManualAuthority
+    local queueID = record and record.queueID
+    -- A click can own the Blizzard pin before its queue transaction commits.
+    -- Release that request while the host still knows which pin it owns.
+    if pending then
+        if pending.queueID and pending.queueID == routing.activeQueueKey then queueID = pending.queueID end
+        NS.CancelPendingManualRoute("remove_all")
+        if routing.pendingManualAuthority or routing.manualAuthority ~= record then return end
+    end
+    if queueID and NS.ClearQueueByID and NS.ClearQueueByID(queueID) then return end
+    if record then
         NS.HandleExplicitManualAuthorityRemove()
     else
         ForgetExternalClearedCarrier(true)
-        ReassertGuideCarrierAfterExternalClear("remove_all", true)
+        if NS.RecomputeCarrier then NS.RecomputeCarrier() end
     end
 end
 
-local function FlushTomTomWaypointsReloaded(generation)
-    if generation ~= pendingTomTomReloadGeneration then
-        return
-    end
-    pendingTomTomReloadGeneration = nil
-
-    -- ReloadWaypoints replaces every UID. Its WaypointRemoved callbacks refer
-    -- to the discarded collection, not independent user removal requests.
-    DiscardPendingTomTomWaypointRemovals()
-
-    local explicitRemoveAll = explicitRemoveAllGeneration == generation
-    if explicitRemoveAllGeneration and explicitRemoveAllGeneration <= generation then
-        explicitRemoveAllGeneration = nil
-    end
-
-    if explicitRemoveAll then
-        HandleExplicitTomTomRemoveAll()
-    else
-        RebuildCarrierAfterTomTomReload()
-    end
-end
-
-local function HandleTomTomWaypointsReloaded()
-    tomTomReloadGeneration = tomTomReloadGeneration + 1
-    pendingTomTomReloadGeneration = tomTomReloadGeneration
-
-    -- Cancel the per-UID work synchronously, before its next-frame flush can
-    -- mistake the UIDs discarded by this reload for individual removals.
-    DiscardPendingTomTomWaypointRemovals()
-
-    if tomTomReloadFlushPending then
-        return
-    end
-    tomTomReloadFlushPending = true
-    NS.After(0, function()
-        tomTomReloadFlushPending = false
-        local generation = pendingTomTomReloadGeneration
-        if generation then
-            FlushTomTomWaypointsReloaded(generation)
-        end
-    end)
-end
-
-local function InstallTomTomRemoveAllIntentHook()
+local function InstallTomTomRemoveAllIntentHook(reload)
     local dialogs = rawget(_G, "StaticPopupDialogs")
     local dialog = type(dialogs) == "table" and dialogs.TOMTOM_REMOVE_ALL_CONFIRM or nil
     if type(dialog) ~= "table" or type(dialog.OnAccept) ~= "function" then
@@ -1207,11 +1232,11 @@ local function InstallTomTomRemoveAllIntentHook()
     end
 
     hooksecurefunc(dialog, "OnAccept", function()
-        -- TomTom's OnAccept finishes ResetProfile (and therefore emits
-        -- WaypointsReloaded) before this post-hook runs. Pair that completed
-        -- reload with this explicit user action without inspecting AceDB.
-        if pendingTomTomReloadGeneration == tomTomReloadGeneration then
-            explicitRemoveAllGeneration = tomTomReloadGeneration
+        -- ResetProfile emits WaypointsReloaded inside OnAccept. Consume the
+        -- reset here so a later click cannot be cleared by a next-frame timer.
+        if reload.pending then
+            reload:Cancel()
+            HandleExplicitTomTomRemoveAll()
         end
     end)
 end
@@ -1223,11 +1248,20 @@ function NS.InstallCarrierTomTomHooks()
 
     if type(tomtom.RegisterCallback) == "function" then
         tomtom.RegisterCallback(tomTomCallbackOwner, "WaypointRemoved", function(_, uid)
+            if NS.ObserveGuideTomTomWaypoint then
+                NS.ObserveGuideTomTomWaypoint(ResolveExternalTomTomSourceAddon(nil, uid, false), "removed", uid)
+            end
             QueueTomTomWaypointRemoved(uid)
         end)
-        tomtom.RegisterCallback(tomTomCallbackOwner, "WaypointsReloaded", HandleTomTomWaypointsReloaded)
+        local reload = NS.Internal.Scheduling.CreateCoalescer(RebuildCarrierAfterTomTomReload)
+        tomtom.RegisterCallback(tomTomCallbackOwner, "WaypointsReloaded", function()
+            -- TomTom discarded the whole collection. Its earlier per-pin
+            -- callbacks belong to the reload and should not advance a queue.
+            DiscardPendingTomTomWaypointRemovals()
+            reload:Request()
+        end)
+        InstallTomTomRemoveAllIntentHook(reload)
     end
-    InstallTomTomRemoveAllIntentHook()
 
     NS.State.routing._carrierHooksInstalled = true
 end
@@ -1240,6 +1274,9 @@ local function AWPRemoveCarrierUID(tomtom, uid)
     if not tomtom or not uid or type(tomtom.RemoveWaypoint) ~= "function" then
         return
     end
+    -- An adopted native corpse UID may also serve as our carrier. TomTom
+    -- still owns its lifetime and must be able to remove it on resurrection.
+    if type(uid) == "table" and uid.corpse == true then return end
     awpInitiatedRemove = awpInitiatedRemove + 1
     pcall(tomtom.RemoveWaypoint, tomtom, uid)
     awpInitiatedRemove = awpInitiatedRemove - 1

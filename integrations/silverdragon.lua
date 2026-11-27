@@ -1,3 +1,9 @@
+-- ============================================================
+-- SilverDragon waypoints
+-- ============================================================
+--
+-- Registers SilverDragon rare sightings as temporary waypoint sources.
+
 local NS = _G.AzerothWaypointNS
 
 NS.RegisterExternalWaypointSource("silverdragon", {
@@ -8,4 +14,3 @@ NS.RegisterExternalWaypointSource("silverdragon", {
     transient = true,
     iconKey = "silverdragon",
 })
-

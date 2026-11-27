@@ -1,5 +1,11 @@
+-- ============================================================
+-- Queue items and active destination
+-- ============================================================
+--
+-- Builds queue items and keeps the active index consistent when destinations
+-- are removed or reordered.
+
 local NS = _G.AzerothWaypointNS
-local state = NS.State
 local Queue = NS.RouteQueueInternal
 if type(Queue) ~= "table" then
     Queue = {}
@@ -16,6 +22,8 @@ function Queue.NormalizeQueueItemMeta(meta, mapID, x, y)
             sourceAddonIconKey = meta.sourceAddonIconKey,
             searchKind = meta.searchKind,
             manualQuestID = meta.manualQuestID,
+            backendOverride = meta.backendOverride,
+            questContext = meta.questContext,
             mapPinInfo = meta.mapPinInfo,
             queueSourceType = meta.queueSourceType,
         })
@@ -32,6 +40,8 @@ function Queue.NormalizeQueueItemMeta(meta, mapID, x, y)
         sourceAddonIconKey = Queue.TrimString(normalized.sourceAddonIconKey),
         searchKind = Queue.TrimString(normalized.searchKind),
         manualQuestID = type(normalized.manualQuestID) == "number" and normalized.manualQuestID or nil,
+        backendOverride = normalized.backendOverride,
+        questContext = normalized.questContext,
         mapPinInfo = Queue.DeepCopy(normalized.mapPinInfo),
         queueSourceType = Queue.TrimString(normalized.queueSourceType),
     })
@@ -136,6 +146,10 @@ function Queue.GetQuestIDForQueueItem(item)
     return Queue.NormalizeQuestIDCandidate(meta.manualQuestID)
 end
 
+-- ============================================================
+-- Creating queues
+-- ============================================================
+
 function Queue.CreateQueue(kind, sourceType, label)
     local queueID = Queue.AllocateQueueID(kind == "destination_queue" and "mq" or "rq")
     return {
@@ -178,7 +192,8 @@ function Queue.CreateDestinationQueue(entries, sourceType, label)
             )
         end
     end
-    queue.label = Queue.BuildQueueLabel("destination_queue", sourceType, label or queue.items[1] and queue.items[1].title, queue.id)
+    queue.label = Queue.BuildQueueLabel("destination_queue", sourceType, label or queue.items[1] and queue.items[1]
+        .title, queue.id)
     return queue
 end
 
@@ -201,7 +216,18 @@ function Queue.CreateSingleItemQueue(mapID, x, y, title, meta, sourceType)
     return Queue.CreateRouteQueue(mapID, x, y, title, meta, sourceType)
 end
 
-function Queue.QueueItemMatchesDestination(item, mapID, x, y, title)
+-- ============================================================
+-- Matching destinations
+-- ============================================================
+
+local function MatchesBtWQuestsSelection(item, meta)
+    local source = meta and meta.sourceAddon
+    local itemSource = item.meta and item.meta.sourceAddon
+    if source ~= "btwquests" and itemSource ~= "btwquests" then return true end
+    return source == itemSource and Queue.GetQuestIDForQueueItem(item) == meta.manualQuestID
+end
+
+function Queue.QueueItemMatchesDestination(item, mapID, x, y, title, meta)
     if type(item) ~= "table" then
         return false
     end
@@ -215,14 +241,15 @@ function Queue.QueueItemMatchesDestination(item, mapID, x, y, title)
     end
 
     return Queue.NormalizeTitleKey(item.title) == Queue.NormalizeTitleKey(title)
+        and MatchesBtWQuestsSelection(item, meta)
 end
 
-function Queue.FindQueueItemByDestination(queue, mapID, x, y, title)
+function Queue.FindQueueItemByDestination(queue, mapID, x, y, title, meta)
     if type(queue) ~= "table" or type(queue.items) ~= "table" then
         return nil
     end
     for index = 1, #queue.items do
-        if Queue.QueueItemMatchesDestination(queue.items[index], mapID, x, y, title) then
+        if Queue.QueueItemMatchesDestination(queue.items[index], mapID, x, y, title, meta) then
             return index, queue.items[index]
         end
     end
@@ -247,7 +274,8 @@ function Queue.QueueItemMatchesRecord(item, record)
 
     local itemTitle = Queue.NormalizeTitleKey(item.title)
     local recordTitle = Queue.NormalizeTitleKey(record.title)
-    return itemTitle == "" or recordTitle == "" or itemTitle == recordTitle
+    return (itemTitle == "" or recordTitle == "" or itemTitle == recordTitle)
+        and MatchesBtWQuestsSelection(item, record.meta or record)
 end
 
 function Queue.FindQueueItemIndexForRecord(queue, record, preferredIndex)
@@ -264,7 +292,7 @@ function Queue.FindQueueItemIndexForRecord(queue, record, preferredIndex)
         return preferredIndex, queue.items[preferredIndex]
     end
 
-    return Queue.FindQueueItemByDestination(queue, record.mapID, record.x, record.y, record.title)
+    return Queue.FindQueueItemByDestination(queue, record.mapID, record.x, record.y, record.title, record.meta or record)
 end
 
 function Queue.PersistManualAuthorityIfAvailable()
@@ -272,6 +300,10 @@ function Queue.PersistManualAuthorityIfAvailable()
         NS.PersistManualAuthority()
     end
 end
+
+-- ============================================================
+-- Repairing indexes and retiring items
+-- ============================================================
 
 function Queue.RepairActiveManualQueueIndex(queue)
     if type(queue) ~= "table" or type(queue.id) ~= "string" then
@@ -379,18 +411,6 @@ function NS.RemoveQuestBackedManualQueueItems(questID, opts)
     return removed > 0, removed
 end
 
-function NS.ClearManualQueues()
-    local routing = Queue.EnsureQueueState()
-    routing.manualQueuesHydrated = true
-    local manualQueues = routing.manualQueues
-    manualQueues.order = {}
-    manualQueues.byID = {}
-    manualQueues.activeQueueID = nil
-    Queue.PersistManualQueues()
-    Queue.RefreshQueueUI()
-    return true
-end
-
 function NS.IsActiveManualQueueItem(record)
     if type(record) ~= "table" or type(record.queueID) ~= "string" then
         return false
@@ -420,6 +440,26 @@ function NS.IsActiveManualQueueItem(record)
     return queue.activeItemIndex == index and type(recordSig) == "string" and recordSig == itemSig
 end
 
+local function RetireTransientCorpseQueues(keepID, sig)
+    local stack, removed = Queue.GetTransientQueueStack(), false
+    for index = #stack, 1, -1 do
+        local queue = stack[index]
+        local item = queue.items and queue.items[1]
+        if queue.id ~= keepID and item and NS.IsCorpseRoute(item.meta) and (not sig or item.sig == sig) then
+            local above = stack[index + 1]
+            if above and not above.resumeManualQueueID then above.resumeManualQueueID = queue.resumeManualQueueID end
+            Queue.PopTransientQueue(queue.id)
+            removed = true
+        end
+    end
+    if removed then Queue.RefreshQueueUI() end
+    return removed
+end
+
+function NS.RetireTransientCorpseQueues(keepID)
+    return RetireTransientCorpseQueues(keepID)
+end
+
 function NS.NoteQueuedTomTomWaypointCleared(uid)
     if type(uid) ~= "table" or type(uid[1]) ~= "number" or type(uid[2]) ~= "number" or type(uid[3]) ~= "number" then
         return false
@@ -429,6 +469,14 @@ function NS.NoteQueuedTomTomWaypointCleared(uid)
         return false
     end
     local active = type(NS.GetManualAuthority) == "function" and NS.GetManualAuthority() or nil
+    if uid.corpse == true then
+        local identity = active and active.identity
+        if type(identity) == "table" and identity.destinationKind == "corpse"
+            and (identity.externalSig == sig or identity.queueSig == sig or identity.sig == sig) then
+            return false
+        end
+        return RetireTransientCorpseQueues(active and active.queueID, sig)
+    end
     if type(active) == "table" and (active.sig == sig or active.identity and (active.identity.externalSig == sig or active.identity.queueSig == sig)) then
         return false
     end
@@ -498,6 +546,10 @@ local function BuildUniqueQueueIDs(queueIDs)
     end
     return out
 end
+
+-- ============================================================
+-- Bulk edits and reordering
+-- ============================================================
 
 function NS.RemoveQueueItem(queueID, itemIndex)
     local queue = Queue.GetManualQueueByID(queueID)
@@ -706,4 +758,3 @@ function NS.ClearQueueByID(queueID)
     end
     return true
 end
-

@@ -1,3 +1,10 @@
+-- ============================================================
+-- RareScanner waypoints
+-- ============================================================
+--
+-- Registers RareScanner sightings and records which phase of a mouse click
+-- published the waypoint.
+
 local NS = _G.AzerothWaypointNS
 
 NS.RegisterExternalWaypointSource("rarescanner", {

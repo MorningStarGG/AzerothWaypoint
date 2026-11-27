@@ -1,3 +1,10 @@
+-- ============================================================
+-- Zygor resolver coordinator
+-- ============================================================
+--
+-- Coordinates Zygor snapshot resolution, cache reuse and the diagnostic view
+-- of the last result.
+
 local NS = _G.AzerothWaypointNS
 if not NS.IsZygorLoaded() then return end
 
@@ -39,8 +46,10 @@ local Signature = P.Signature
 -- ============================================================
 
 local _resolveContext = {}
+local cachedCoordinateFallback
 
-local function CacheSnapshotResult(snapshot, debug, context, step, currentGoalNum, rawArrowTitle, targetMapID, targetX, targetY, targetSig)
+local function CacheSnapshotResult(snapshot, debug, context, step, currentGoalNum, rawArrowTitle, targetMapID, targetX,
+                                   targetY, targetSig)
     StoreSnapshotCacheKey(context, step, currentGoalNum, rawArrowTitle, targetMapID, targetX, targetY, targetSig)
     resolverState.snapshotCacheValue = snapshot or false
     resolverState.snapshotCacheDebug = debug
@@ -113,7 +122,10 @@ local function ResolveSnapshotInternal(context)
         PrepareGuideResolverSnapshotCache()
     end
 
-    local snapshotCacheMatches = MatchesSnapshotCacheKey(context, step, currentGoalNum, rawArrowTitle, targetMapID, targetX, targetY, targetSig)
+    local showCoordinates = NS.GetWorldOverlaySetting("worldOverlayShowCoordinateFallback") == true
+    local snapshotCacheMatches = cachedCoordinateFallback == showCoordinates
+        and MatchesSnapshotCacheKey(context, step, currentGoalNum, rawArrowTitle, targetMapID, targetX, targetY,
+            targetSig)
     local guideCacheReusable = snapshotCacheMatches
         and (
             type(CanReuseCachedGuideResolverResults) ~= "function"
@@ -133,7 +145,7 @@ local function ResolveSnapshotInternal(context)
         local cachedSnapshot = resolverState.snapshotCacheValue
         UpdateDebugSource(resolverState.snapshotCacheDebug, context)
         ConsumeFullDebugRequest()
-        return cachedSnapshot == false and nil or cachedSnapshot, resolverState.snapshotCacheDebug
+        return cachedSnapshot or nil, resolverState.snapshotCacheDebug
     end
 
     do
@@ -141,7 +153,8 @@ local function ResolveSnapshotInternal(context)
         if churn.active then
             churn.resolveMiss = churn.resolveMiss + 1
             if not snapshotCacheMatches and type(CountSnapshotCacheMissReasons) == "function" then
-                CountSnapshotCacheMissReasons(churn, context, step, currentGoalNum, rawArrowTitle, targetMapID, targetX, targetY, targetSig)
+                CountSnapshotCacheMissReasons(churn, context, step, currentGoalNum, rawArrowTitle, targetMapID, targetX,
+                    targetY, targetSig)
             elseif not guideCacheReusable then
                 churn.resolveMissFactsDirty = (tonumber(churn.resolveMissFactsDirty) or 0) + 1
             elseif not debugCacheReusable then
@@ -164,17 +177,50 @@ local function ResolveSnapshotInternal(context)
     _resolveContext.legKind = context.legKind
     _resolveContext.routeTravelType = context.routeTravelType
     _resolveContext.source = context.source
+    _resolveContext.showCoordinateFallback = showCoordinates
     local snapshot, debug = ResolveFromFacts(_resolveContext)
+    if snapshot then
+        local common = NS.Internal.GuidePresentation
+        local header = facts[debug.headerContextGoal or snapshot.headerGoalNum or debug.headerGoalNum or 0]
+        local subject = header and header.goal
+        local npc = subject and (subject.npc or subject.npcname)
+        local Z = NS.ZGV and NS.ZGV()
+        if header and header.npcid and Z and Z.Localizers and Z.Localizers.GetTranslatedNPC then
+            local ok, name = pcall(Z.Localizers.GetTranslatedNPC, Z.Localizers, header.npcid, npc)
+            if ok then npc = name end
+        end
+        local action, questTitle
+        local function Handoff(index)
+            local fact = facts[index or 0]
+            if fact and snapshot.semanticQuestID and fact.questid == snapshot.semanticQuestID
+                and (fact.action == "accept" or fact.action == "turnin") then
+                return fact
+            end
+        end
+        local selected = Handoff(snapshot.matchedLiveGoalNum) or Handoff(debug.titleOwnerGoal) or Handoff(currentGoalNum)
+        if not selected then
+            for index = debug.blockStart or 1, debug.blockEnd or #facts do
+                local fact = Handoff(index)
+                if fact and fact.status ~= "complete" then
+                    selected = fact; break
+                end
+            end
+        end
+        if selected then action, questTitle = selected.action, selected.questTitle end
+        common.SetDestinationContext(snapshot, npc, "npc", action, snapshot.semanticQuestID, snapshot.mirrorTitle,
+            questTitle)
+    end
+    cachedCoordinateFallback = showCoordinates
 
     debug.rawArrowTitle = rawArrowTitle
     if canonicalResult then
-        debug.rawGoalNum             = canonicalResult.rawGoalNum
-        debug.canonicalGoalNum       = canonicalResult.canonicalGoalNum
-        debug.usedOverride           = canonicalResult.usedOverride
+        debug.rawGoalNum              = canonicalResult.rawGoalNum
+        debug.canonicalGoalNum        = canonicalResult.canonicalGoalNum
+        debug.usedOverride            = canonicalResult.usedOverride
         debug.canonicalOverrideReason = canonicalResult.overrideReason
-        debug.clusterStart           = canonicalResult.clusterStart
-        debug.clusterEnd             = canonicalResult.clusterEnd
-        debug.firstIncompleteGoalNum = canonicalResult.firstIncompleteGoalNum
+        debug.clusterStart            = canonicalResult.clusterStart
+        debug.clusterEnd              = canonicalResult.clusterEnd
+        debug.firstIncompleteGoalNum  = canonicalResult.firstIncompleteGoalNum
     end
     if snapshot ~= nil then
         debug.snapshot = snapshot
@@ -182,7 +228,8 @@ local function ResolveSnapshotInternal(context)
     RetainDebugWeight(debug, facts, step, wantsFullDebug)
     ConsumeFullDebugRequest()
 
-    return CacheSnapshotResult(snapshot, debug, context, step, currentGoalNum, rawArrowTitle, targetMapID, targetX, targetY, targetSig)
+    return CacheSnapshotResult(snapshot, debug, context, step, currentGoalNum, rawArrowTitle, targetMapID, targetX,
+        targetY, targetSig)
 end
 
 -- ============================================================

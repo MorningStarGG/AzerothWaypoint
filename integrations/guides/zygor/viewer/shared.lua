@@ -1,3 +1,10 @@
+-- ============================================================
+-- Shared Zygor Viewer controls
+-- ============================================================
+--
+-- Shares Zygor goal text, chat output and guide controls between the tracker
+-- header and menus.
+
 local NS = _G.AzerothWaypointNS
 local C = NS.Constants
 if not NS.IsZygorLoaded() then return end
@@ -8,191 +15,27 @@ NS.Internal = NS.Internal or {}
 NS.Internal.ZygorTrackerViewer = NS.Internal.ZygorTrackerViewer or {}
 
 local M = NS.Internal.ZygorTrackerViewer
-
-local STATUS_RGB = {
-    complete   = { 0.55, 0.55, 0.55 },
-    incomplete = { 1.00, 1.00, 1.00 },
-    passive    = { 0.93, 0.93, 0.80 },
-    warning    = { 1.00, 0.82, 0.20 },
-    failed     = { 1.00, 0.42, 0.32 },
-    impossible = { 1.00, 0.42, 0.32 },
-    obsolete   = { 0.55, 0.55, 0.55 },
-}
-
-local TIP_RGB = { 0.93, 0.93, 0.80 }
-local COMPLETE_RGB = { 0.58, 0.92, 0.52 }
-
-local COMPLETED_ACTION_RGB = {
-    accept   = COMPLETE_RGB,
-    turnin   = COMPLETE_RGB,
-    complete = COMPLETE_RGB,
-    confirm  = COMPLETE_RGB,
-}
-
-local ACTION_RGB = {
-    accept       = { 1.00, 0.82, 0.30 },
-    turnin       = { 1.00, 0.82, 0.30 },
-    complete     = { 1.00, 0.80, 0.80 },
-    confirm      = { 1.00, 0.82, 0.30 },
-
-    goal         = { 1.00, 0.80, 0.80 },
-    achieve      = { 1.00, 0.80, 0.80 },
-    scenariogoal = { 1.00, 0.80, 0.80 },
-
-    kill         = { 1.00, 0.67, 0.67 },
-    killboss     = { 1.00, 0.67, 0.67 },
-    bosshp       = { 1.00, 0.67, 0.67 },
-    from         = { 1.00, 0.67, 0.67 },
-    avoid        = { 1.00, 0.54, 0.45 },
-
-    goto         = { 1.00, 0.93, 0.47 },
-    fly          = { 1.00, 0.93, 0.47 },
-    fpath        = { 1.00, 0.93, 0.47 },
-    ferry        = { 1.00, 0.93, 0.47 },
-    home         = { 1.00, 0.93, 0.47 },
-    hearth       = { 1.00, 0.93, 0.47 },
-    arrive       = { 1.00, 0.93, 0.47 },
-
-    talk         = { 0, 0.67, 1 },
-    clicknpc     = { 0.67, 1.00, 0.67 },
-    gotonpc      = { 0.67, 1.00, 0.67 },
-
-    buy          = { 0.67, 0.93, 1.00 },
-    cast         = { 0.67, 0.93, 1.00 },
-    click        = { 0.67, 0.93, 1.00 },
-    collect      = { 0.67, 0.93, 1.00 },
-    craft        = { 0.67, 0.93, 1.00 },
-    create       = { 0.67, 0.93, 1.00 },
-    earn         = { 0.67, 0.93, 1.00 },
-    farm         = { 0.67, 0.93, 1.00 },
-    get          = { 0.67, 0.93, 1.00 },
-    goldcollect  = { 0.67, 0.93, 1.00 },
-    use          = { 0.67, 0.93, 1.00 },
-
-    info         = TIP_RGB,
-    note         = TIP_RGB,
-    tip          = TIP_RGB,
-}
-
-local TRACKER_COLOR_STYLES = {}
+local Styles = NS.Internal.GuideTrackerViewer.Styles
 
 local function StripInlineColors(text)
     if type(text) ~= "string" then return text end
     return text:gsub("|[cC]%x%x%x%x%x%x%x%x", ""):gsub("|[rR]", "")
 end
 
-local function GetFlatRGBForMode(mode, customColor)
-    if mode == C.WORLD_OVERLAY_COLOR_AUTO then return nil end
-
-    local color
-    if mode == C.WORLD_OVERLAY_COLOR_CUSTOM then
-        color = customColor
-    else
-        color = C.WORLD_OVERLAY_COLOR_PRESETS and C.WORLD_OVERLAY_COLOR_PRESETS[mode]
-    end
-
-    if type(color) ~= "table" then return 1, 1, 1 end
-    return color.r or 1, color.g or 1, color.b or 1
-end
-
-local function GetConfiguredFlatRGB()
-    if type(NS.GetZygorTrackerViewerSettings) ~= "function" then return nil end
-    local settings = NS.GetZygorTrackerViewerSettings()
-    local mode = settings and settings.textColorMode or C.WORLD_OVERLAY_COLOR_AUTO
-    return GetFlatRGBForMode(mode, settings and settings.textCustomColor)
-end
-
-local function NormalizeAction(goalOrAction)
-    local action = goalOrAction
-    if type(goalOrAction) == "table" then
-        action = goalOrAction.action
-    end
-    if type(action) ~= "string" then return nil end
-    action = action:lower()
-    return action ~= "" and action or nil
-end
-
-local function GetRGBTable(status, kind, goalOrAction)
-    if kind == "tip" then
-        return TIP_RGB
-    end
-    if status == "warning" or status == "failed" or status == "impossible" then
-        return STATUS_RGB[status]
-    end
-
-    local action = NormalizeAction(goalOrAction)
-    if status == "complete" then
-        return (action and COMPLETED_ACTION_RGB[action]) or COMPLETE_RGB
-    end
-    if status == "obsolete" then
-        return STATUS_RGB.obsolete
-    end
-
-    local actionColor = action and ACTION_RGB[action]
-    if actionColor then
-        return actionColor
-    end
-
-    return STATUS_RGB[status] or STATUS_RGB.incomplete
-end
-
-local function Lighten(r, g, b)
-    local amount = 0.18
-    return r + (1 - r) * amount, g + (1 - g) * amount, b + (1 - b) * amount
-end
-
-local function GetTrackerColorStyle(r, g, b)
-    local key = string.format("%.3f:%.3f:%.3f", r, g, b)
-    local style = TRACKER_COLOR_STYLES[key]
-    if style then return style end
-
-    local hr, hg, hb = Lighten(r, g, b)
-    local highlight = { r = hr, g = hg, b = hb }
-    style = { r = r, g = g, b = b, reverse = highlight }
-    highlight.reverse = style
-    TRACKER_COLOR_STYLES[key] = style
-    return style
-end
-
 function M.StatusToRGB(status, kind, goalOrAction)
-    local flatR, flatG, flatB = GetConfiguredFlatRGB()
-    if flatR then
-        return flatR, flatG, flatB
-    end
-
-    local c = GetRGBTable(status, kind, goalOrAction)
-    return c[1], c[2], c[3]
+    return Styles.StatusToRGB(status, kind, goalOrAction, "zygor")
 end
 
 function M.StatusToRGBForColorMode(status, kind, goalOrAction, mode, customColor)
-    local flatR, flatG, flatB = GetFlatRGBForMode(mode or C.WORLD_OVERLAY_COLOR_AUTO, customColor)
-    if flatR then
-        return flatR, flatG, flatB
-    end
-
-    local c = GetRGBTable(status, kind, goalOrAction)
-    return c[1], c[2], c[3]
+    return Styles.StatusToRGBForColorMode(status, kind, goalOrAction, mode, customColor)
 end
 
 function M.ShouldStripZygorInlineColors()
-    return GetConfiguredFlatRGB() ~= nil
+    return Styles.UsesFlatColor("zygor")
 end
 
 function M.GetTrackerColorStyle(status, kind, goalOrAction)
-    local r, g, b = M.StatusToRGB(status, kind, goalOrAction)
-    return GetTrackerColorStyle(r, g, b)
-end
-
--- Base RGB for tracker block headers (current step + sticky blocks). Honors the
--- Tracker Viewer Text option when a flat/custom color is set; otherwise uses
--- AWP's header blue. tracker_render re-asserts this against the host tracker's
--- hover/highlight repaint, which would otherwise force the header to the
--- tracker's own palette (Blizzard gold / Kaliel orange).
-local TRACKER_HEADER_RGB = { 0, 0.67, 1 }
-function M.GetTrackerHeaderRGB()
-    local flatR, flatG, flatB = GetConfiguredFlatRGB()
-    if flatR then return flatR, flatG, flatB end
-    return TRACKER_HEADER_RGB[1], TRACKER_HEADER_RGB[2], TRACKER_HEADER_RGB[3]
+    return Styles.GetTrackerColorStyle(status, kind, goalOrAction, "zygor")
 end
 
 -- Emits one row per goal where GetText returns real text, plus a "tip" row
@@ -252,12 +95,6 @@ function M.OpenZygorGuidePicker(path)
     return false
 end
 
-function M.OpenZygorCurrentStep()
-    -- Compatibility shim: the standalone reader exists internally, but is not
-    -- exposed from the docked tracker UI.
-    return false
-end
-
 function M.GetCurrentStepContext()
     local Z = M.GetZygor()
     if not Z then return nil, nil, nil end
@@ -271,33 +108,12 @@ end
 -- ============================================================
 
 local stepChatState = NS.State.zygorStepChat or {
-    pending = false,
     lastAutoFingerprint = nil,
 }
 NS.State.zygorStepChat = stepChatState
 
-local function ColorHex(r, g, b)
-    return string.format("%02x%02x%02x",
-        math.floor((tonumber(r) or 1) * 255 + 0.5),
-        math.floor((tonumber(g) or 1) * 255 + 0.5),
-        math.floor((tonumber(b) or 1) * 255 + 0.5))
-end
+local Colorize = Styles.Colorize
 
-local function SafeChatText(text)
-    if type(NS.SanitizeDiagnosticText) == "function" then
-        return NS.SanitizeDiagnosticText(text or "")
-    end
-    return tostring(text or "")
-end
-
-local function Colorize(text, r, g, b)
-    return "|cff" .. ColorHex(r, g, b) .. SafeChatText(text) .. "|r"
-end
-
-local function AddStepChatMessage(message)
-    if not DEFAULT_CHAT_FRAME then return end
-    DEFAULT_CHAT_FRAME:AddMessage(message)
-end
 
 local function GetStepNum(step, fallback)
     if type(step) ~= "table" then return fallback end
@@ -493,11 +309,11 @@ local function GetStepChatSettings()
 end
 
 -- Resolves a chat text color: in Flat/Custom mode every content piece collapses
--- to the chosen color; in Auto mode each piece keeps its contextual default.
+-- to the chosen color, in Auto mode each piece keeps its contextual default.
 -- The "[AWP]" tag is never routed through this, so it stays a recognizable
 -- addon prefix regardless of the Chat Step Text setting.
 local function StepChatTextColor(settings, r, g, b)
-    local fr, fg, fb = GetFlatRGBForMode(
+    local fr, fg, fb = Styles.GetFlatRGBForMode(
         (settings and settings.textColorMode) or C.WORLD_OVERLAY_COLOR_AUTO,
         settings and settings.textCustomColor)
     if fr then return fr, fg, fb end
@@ -521,107 +337,64 @@ local function FormatGuideHeader(guide, step, total, settings)
         .. Colorize(stepText, StepChatTextColor(settings, 1.00, 1.00, 1.00))
 end
 
-local function PrintGoalLines(step, settings, indent, skipTitleKey)
-    local printed = 0
+local function CopyChatRows(step, skipTitleKey)
+    local rows = {}
     M.IterateRenderableGoalLines(step, function(goal, text, status, kind)
-        if skipTitleKey and NormalizeStickyTitle(text) == skipTitleKey then
-            return
+        if not skipTitleKey or NormalizeStickyTitle(text) ~= skipTitleKey then
+            rows[#rows + 1] = { text = text, status = status, kind = kind, action = goal and goal.action }
         end
-        local r, g, b = M.StatusToRGBForColorMode(status, kind, goal,
-            settings.textColorMode, settings.textCustomColor)
-        AddStepChatMessage((indent or "  ") .. Colorize(text, r, g, b))
-        printed = printed + 1
     end, true)
-    if printed == 0 and not skipTitleKey then
-        local r, g, b = M.StatusToRGBForColorMode("incomplete", "goal", nil,
-            settings.textColorMode, settings.textCustomColor)
-        AddStepChatMessage((indent or "  ") .. Colorize(GetStepTitle(step), r, g, b))
-        printed = 1
-    end
-    return printed
+    if #rows == 0 and not skipTitleKey then rows[1] = { text = GetStepTitle(step), status = "incomplete", kind = "goal" } end
+    return rows
 end
-
-local function PrintStickySummary(stickySteps, settings)
-    local count = #stickySteps
-    if count == 0 or settings.stickySummary == C.ZYGOR_STEP_CHAT_STICKY_NONE then return false end
-    AddStepChatMessage("|cff33ff99[AWP]|r " .. Colorize(string.format("Sticky steps: %d active", count), StepChatTextColor(settings, 1.00, 0.82, 0.20)))
-    if settings.stickySummary ~= C.ZYGOR_STEP_CHAT_STICKY_TITLES then return true end
-    for _, stickyStep in ipairs(stickySteps) do
-        AddStepChatMessage("    - " .. Colorize(GetStickyStepTitle(stickyStep), StepChatTextColor(settings, 0.00, 0.67, 1.00)))
-    end
-    return true
-end
-
-local function PrintStickyDetails(stickySteps, settings)
-    if #stickySteps == 0 then
-        AddStepChatMessage("|cff33ff99[AWP]|r " .. Colorize("Sticky steps: none active", StepChatTextColor(settings, 1.00, 0.82, 0.20)))
-        return true
-    end
-
-    AddStepChatMessage("|cff33ff99[AWP]|r " .. Colorize(string.format("Sticky steps: %d active", #stickySteps), StepChatTextColor(settings, 1.00, 0.82, 0.20)))
-    for _, stickyStep in ipairs(stickySteps) do
-        local title = GetStickyStepTitle(stickyStep)
-        AddStepChatMessage("    " .. Colorize(title, StepChatTextColor(settings, 0.00, 0.67, 1.00)))
-        PrintGoalLines(stickyStep, settings, "        ", NormalizeStickyTitle(title))
-    end
-    return true
-end
-
 function M.OutputCurrentZygorStepToChat(mode)
     local Z, guide, step = M.GetCurrentStepContext()
     if not Z or not guide or not step then
-        if type(NS.Msg) == "function" then
-            NS.Msg("No active Zygor step to show in chat.")
-        end
+        if NS.Msg then NS.Msg("No active Zygor step to show in chat.") end
         return false
     end
-
     local settings = GetStepChatSettings()
-    local total = GetStepCount(guide)
-    local stickySteps = M.GetActiveStickySteps(Z, step)
-    mode = type(mode) == "string" and mode:lower() or ""
-
-    if mode == "sticky" or mode == "stickies" then
-        PrintStickyDetails(stickySteps, settings)
-        return true
+    local model = {
+        label = "Zygor",
+        title = GetGuideTitle(guide),
+        currentSections = { { rows = CopyChatRows(step) } },
+        stickies = {},
+        header = FormatGuideHeader(guide, step, GetStepCount(guide), settings),
+        stickyHeader = false,
+        currentHeading = true
+    }
+    for _, sticky in ipairs(M.GetActiveStickySteps(Z, step)) do
+        local title = GetStickyStepTitle(sticky)
+        model.stickies[#model.stickies + 1] = { title = title, rows = CopyChatRows(sticky, NormalizeStickyTitle(title)) }
     end
-
-    AddStepChatMessage(FormatGuideHeader(guide, step, total, settings))
-    local stickyPrinted
-    if mode == "full" then
-        stickyPrinted = PrintStickyDetails(stickySteps, settings)
-    else
-        stickyPrinted = PrintStickySummary(stickySteps, settings)
+    model.formatter = function(kind, text, row, indent)
+        if kind == "header" then return text end
+        if kind == "summary" or kind == "current_heading" then
+            return "|cff33ff99[AWP]|r " .. Colorize(text, StepChatTextColor(settings, 1, 0.82, 0.2))
+        end
+        if kind == "sticky_title" or kind == "summary_title" then
+            return (kind == "summary_title" and "    - " or "    ") ..
+            Colorize(text, StepChatTextColor(settings, 0, 0.67, 1))
+        end
+        local r, g, b = M.StatusToRGBForColorMode(row.status, row.kind, row.action, settings.textColorMode,
+            settings.textCustomColor)
+        return string.rep(" ", indent or 4) .. Colorize(text, r, g, b)
     end
-    -- When a sticky section was shown, label the active step so its objective
-    -- lines don't blend into the sticky block above them.
-    if stickyPrinted then
-        AddStepChatMessage("|cff33ff99[AWP]|r " .. Colorize("Current step:", StepChatTextColor(settings, 1.00, 0.82, 0.20)))
-    end
-    PrintGoalLines(step, settings, "    ")
-    return true
+    mode = type(mode) == "string" and mode:lower() or nil
+    if mode == "stickies" then mode = "sticky" end
+    return NS.Internal.GuideTrackerViewer.Chat.Output("zygor", model, mode)
 end
 
+local chatQueue = NS.Internal.Scheduling.CreateCoalescer(function()
+    if not GetStepChatSettings().outputOnChange then return end
+    local _, guide, step = M.GetCurrentStepContext()
+    local fingerprint = GetStepFingerprint(guide, step)
+    if not fingerprint or fingerprint == stepChatState.lastAutoFingerprint then return end
+    stepChatState.lastAutoFingerprint = fingerprint
+    M.OutputCurrentZygorStepToChat()
+end, 0.10)
 function M.QueueStepChatOutputOnStepChange()
-    local settings = GetStepChatSettings()
-    if settings.outputOnChange ~= true then return end
-    if stepChatState.pending then return end
-    stepChatState.pending = true
-
-    local function outputLatestStep()
-        stepChatState.pending = false
-        local _, guide, step = M.GetCurrentStepContext()
-        local fingerprint = GetStepFingerprint(guide, step)
-        if not fingerprint or fingerprint == stepChatState.lastAutoFingerprint then return end
-        stepChatState.lastAutoFingerprint = fingerprint
-        M.OutputCurrentZygorStepToChat()
-    end
-
-    if type(C_Timer) == "table" and type(C_Timer.After) == "function" then
-        C_Timer.After(0.10, outputLatestStep)
-    else
-        outputLatestStep()
-    end
+    if GetStepChatSettings().outputOnChange then chatQueue:Request() end
 end
 
 -- ============================================================
@@ -637,8 +410,8 @@ end
 function M.NextZygorStep()
     local Z = M.GetZygor()
     if Z and type(Z.SkipStep) == "function" then
-        pcall(Z.SkipStep, Z, false, false, true)
-        return true
+        local ok, result = pcall(Z.SkipStep, Z, false, false, true)
+        return ok and result ~= false
     end
     return false
 end
@@ -646,8 +419,8 @@ end
 function M.PreviousZygorStep()
     local Z = M.GetZygor()
     if Z and type(Z.PreviousStep) == "function" then
-        pcall(Z.PreviousStep, Z, false, true)
-        return true
+        local ok, result = pcall(Z.PreviousStep, Z, false, true)
+        return ok and result ~= false
     end
     return false
 end
@@ -660,11 +433,11 @@ function M.ClearCurrentZygorGuide()
     local Z = M.GetZygor()
     if not Z then return false end
     if type(Z.ClearGuide) == "function" then
-        pcall(Z.ClearGuide, Z)
-        return true
+        local ok, result = pcall(Z.ClearGuide, Z)
+        return ok and result ~= false
     elseif type(Z.SetGuide) == "function" then
-        pcall(Z.SetGuide, Z, nil)
-        return true
+        local ok, result = pcall(Z.SetGuide, Z, nil)
+        return ok and result ~= false
     end
     return false
 end
@@ -698,12 +471,16 @@ function M.LoadZygorGuide(guideTitle, step)
     step = tonumber(step) or 1
     if Z.Tabs and type(Z.Tabs.LoadGuideToTab) == "function" then
         local ok = pcall(Z.Tabs.LoadGuideToTab, Z.Tabs, guide, step)
-        if ok then return true end
+        if ok then
+            NS.SelectGuideProvider("zygor", "ZygorViewerGuideSelection")
+            return true
+        end
     end
 
     if type(Z.SetGuide) == "function" then
         local title = type(guide) == "table" and guide.title or guideTitle
         local ok = pcall(Z.SetGuide, Z, title, step, "awp_command")
+        if ok then NS.SelectGuideProvider("zygor", "ZygorViewerGuideSelection") end
         return ok == true
     end
 
@@ -722,15 +499,17 @@ end
 function M.OpenZygorSettings()
     local Z = M.GetZygor()
     if Z and type(Z.OpenOptions) == "function" then
-        pcall(Z.OpenOptions, Z)
-        return true
+        local ok, result = pcall(Z.OpenOptions, Z)
+        return ok and result ~= false
     end
     return M.OpenZygorGuidePicker("Options")
 end
 
 function M.ActivateZygorTab(tab)
     if type(tab) ~= "table" or type(tab.ActivateGuide) ~= "function" then return false end
-    pcall(tab.ActivateGuide, tab, "awp_dropdown")
+    local ok, result = pcall(tab.ActivateGuide, tab, "awp_dropdown")
+    if not ok or result == false then return false end
+    NS.SelectGuideProvider("zygor", "ZygorViewerTabSelection")
     if M.TrackerModule and type(M.TrackerModule.MarkDirty) == "function" then
         pcall(M.TrackerModule.MarkDirty, M.TrackerModule)
     end
@@ -739,7 +518,8 @@ end
 
 function M.CloseZygorTab(tab)
     if type(tab) ~= "table" or type(tab.RemoveTab) ~= "function" then return false end
-    pcall(tab.RemoveTab, tab)
+    local ok, result = pcall(tab.RemoveTab, tab)
+    if not ok or result == false then return false end
     if M.TrackerModule and type(M.TrackerModule.MarkDirty) == "function" then
         pcall(M.TrackerModule.MarkDirty, M.TrackerModule)
     end
@@ -836,7 +616,7 @@ function M.ShowGuideDropdown(anchorFrame)
         return
     end
 
-    MenuUtil.CreateContextMenu(anchorFrame or _G.UIParent, function(_, root)
+    NS.Internal.Menus.CreateContextMenu(anchorFrame or _G.UIParent, function(_, root)
         root:SetTag("MENU_AWP_ZYGOR_GUIDES")
         root:CreateTitle("Open Guides")
         M.AddOpenGuidesSubmenu(root)
@@ -882,8 +662,7 @@ function M.OpenZygorViewerMenu(anchorFrame)
     local EasyFork = rawget(_G, "EasyFork")
     local SetAnchor = rawget(_G, "UIDropDownFork_SetAnchor")
     if not Z or type(EasyFork) ~= "function" or type(SetAnchor) ~= "function" then
-        M.OpenZygorSettings()
-        return
+        return M.OpenZygorSettings()
     end
 
     local host = GetZygorSettingsMenuHost(anchorFrame)
@@ -893,7 +672,7 @@ function M.OpenZygorViewerMenu(anchorFrame)
         and dropdown.dropdown == host
     then
         if type(close) == "function" then close() end
-        return
+        return true
     end
 
     local L = Z.L or {}
@@ -997,8 +776,7 @@ function M.OpenZygorViewerMenu(anchorFrame)
     local anchorOk = pcall(SetAnchor, host, 0, -2, "TOPRIGHT", anchorFrame or _G.UIParent, "BOTTOMRIGHT")
     local menuOk = anchorOk and pcall(EasyFork, compactMenu, host, nil, 0, 0, "MENU", 10)
     if not menuOk then
-        M.OpenZygorSettings()
-        return
+        return M.OpenZygorSettings()
     end
 
     dropdown = rawget(_G, "DropDownForkList1")
@@ -1006,4 +784,5 @@ function M.OpenZygorViewerMenu(anchorFrame)
         dropdown:ClearAllPoints()
         dropdown:SetPoint("TOPRIGHT", anchorFrame, "BOTTOMRIGHT", 0, -2)
     end
+    return true
 end

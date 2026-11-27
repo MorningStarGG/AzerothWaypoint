@@ -1,3 +1,10 @@
+-- ============================================================
+-- Zygor quest dialogue context
+-- ============================================================
+--
+-- Matches the game's current quest dialogue to Zygor goal facts for the
+-- resolver.
+
 local NS = _G.AzerothWaypointNS
 if not NS.IsZygorLoaded() then return end
 
@@ -29,102 +36,13 @@ local function AddDialogSignatureEntry(n, source, kind, questID, title, complete
     return n
 end
 
-local function GetDirectQuestFrameDialogEntry()
-    local questID = type(GetQuestID) == "function" and GetQuestID() or nil
-    if type(questID) ~= "number" or questID <= 0 then
-        return nil
-    end
-
-    local title = nil
-    local questInfoTitleHeader = rawget(_G, "QuestInfoTitleHeader")
-    if questInfoTitleHeader and type(questInfoTitleHeader.GetText) == "function" then
-        title = questInfoTitleHeader:GetText()
-    end
-    if not title and type(C_QuestLog) == "table" and type(C_QuestLog.GetTitleForQuestID) == "function" then
-        title = C_QuestLog.GetTitleForQuestID(questID)
-    end
-
-    local kind = nil
-    local questFrame = rawget(_G, "QuestFrame")
-    local questFrameProgressPanel = rawget(_G, "QuestFrameProgressPanel")
-    local questFrameRewardPanel = rawget(_G, "QuestFrameRewardPanel")
-    local questFrameCompleteQuestButton = rawget(_G, "QuestFrameCompleteQuestButton")
-    local questFrameCompleteButton = rawget(_G, "QuestFrameCompleteButton")
-    local questFrameAcceptButton = rawget(_G, "QuestFrameAcceptButton")
-
-    if questFrame and questFrame.DetailPanel and questFrame.DetailPanel:IsShown() then
-        kind = "accept"
-    elseif questFrameAcceptButton and questFrameAcceptButton:IsVisible() then
-        kind = "accept"
-    elseif (questFrameProgressPanel and questFrameProgressPanel:IsShown())
-        or (questFrameRewardPanel and questFrameRewardPanel:IsShown())
-        or (questFrameCompleteQuestButton and questFrameCompleteQuestButton:IsVisible())
-        or (questFrameCompleteButton and questFrameCompleteButton:IsVisible())
-    then
-        kind = "turnin"
-    end
-
-    if kind == nil and type(C_QuestLog) == "table" and type(C_QuestLog.GetLogIndexForQuestID) == "function" then
-        local logIndex = tonumber(C_QuestLog.GetLogIndexForQuestID(questID) or 0) or 0
-        kind = logIndex > 0 and "turnin" or "accept"
-    end
-
-    if not kind then
-        return nil
-    end
-
-    local complete = false
-    if kind == "turnin" and type(C_QuestLog) == "table" and type(C_QuestLog.IsComplete) == "function" then
-        complete = C_QuestLog.IsComplete(questID) == true
-    end
-
-    return kind, questID, title, complete
-end
+local VisitDialog = NS.Internal.GuideQuestSelection.VisitDialog
 
 local function GetLiveDialogQuestSignature()
     local n = 0
-
-    if type(C_GossipInfo) == "table" then
-        if type(C_GossipInfo.GetAvailableQuests) == "function" then
-            local available = C_GossipInfo.GetAvailableQuests() or {}
-            for _, info in ipairs(available) do
-                n = AddDialogSignatureEntry(n, "gossip", "accept", info.questID, info.title, false)
-            end
-        end
-        if type(C_GossipInfo.GetActiveQuests) == "function" then
-            local active = C_GossipInfo.GetActiveQuests() or {}
-            for _, info in ipairs(active) do
-                n = AddDialogSignatureEntry(n, "gossip", "turnin", info.questID, info.title, info.isComplete)
-            end
-        end
-    end
-
-    if type(GetNumAvailableQuests) == "function" and type(GetAvailableTitle) == "function" then
-        for i = 1, GetNumAvailableQuests() or 0 do
-            local questID = nil
-            if type(GetAvailableQuestInfo) == "function" then
-                local _, _, _, _, infoQuestID = GetAvailableQuestInfo(i)
-                questID = infoQuestID
-            end
-            n = AddDialogSignatureEntry(n, "available", "accept", questID, GetAvailableTitle(i), false)
-        end
-    end
-
-    if type(GetNumActiveQuests) == "function" and type(GetActiveTitle) == "function" then
-        for i = 1, GetNumActiveQuests() or 0 do
-            local questID = nil
-            if type(GetActiveQuestID) == "function" then
-                questID = GetActiveQuestID(i)
-            end
-            n = AddDialogSignatureEntry(n, "active", "turnin", questID, GetActiveTitle(i), false)
-        end
-    end
-
-    local kind, questID, title, complete = GetDirectQuestFrameDialogEntry()
-    if kind then
-        n = AddDialogSignatureEntry(n, "direct", kind, questID, title, complete)
-    end
-
+    VisitDialog(function(source, kind, id, title, complete)
+        n = AddDialogSignatureEntry(n, source, kind, id, title, complete)
+    end)
     local signature = table.concat(_dialogSignatureParts, "\031", 1, n)
     for i = 1, n do
         _dialogSignatureParts[i] = nil
@@ -164,46 +82,13 @@ local function CollectLiveDialogQuestEntries()
         }
     end
 
-    if type(C_GossipInfo) == "table" then
-        if type(C_GossipInfo.GetAvailableQuests) == "function" then
-            local available = C_GossipInfo.GetAvailableQuests() or {}
-            for _, info in ipairs(available) do
-                addEntry(entries, seenEntries, "accept", info.questID, info.title, false)
-            end
+    VisitDialog(function(source, kind, id, title, complete)
+        if source == "direct" then
+            addEntry(directEntries, seenDirectEntries, kind, id, title, complete)
+        else
+            addEntry(entries, seenEntries, kind, id, title, complete)
         end
-        if type(C_GossipInfo.GetActiveQuests) == "function" then
-            local active = C_GossipInfo.GetActiveQuests() or {}
-            for _, info in ipairs(active) do
-                addEntry(entries, seenEntries, "turnin", info.questID, info.title, info.isComplete)
-            end
-        end
-    end
-
-    if type(GetNumAvailableQuests) == "function" and type(GetAvailableTitle) == "function" then
-        for i = 1, GetNumAvailableQuests() or 0 do
-            local questID = nil
-            if type(GetAvailableQuestInfo) == "function" then
-                local _, _, _, _, infoQuestID = GetAvailableQuestInfo(i)
-                questID = infoQuestID
-            end
-            addEntry(entries, seenEntries, "accept", questID, GetAvailableTitle(i), false)
-        end
-    end
-
-    if type(GetNumActiveQuests) == "function" and type(GetActiveTitle) == "function" then
-        for i = 1, GetNumActiveQuests() or 0 do
-            local questID = nil
-            if type(GetActiveQuestID) == "function" then
-                questID = GetActiveQuestID(i)
-            end
-            addEntry(entries, seenEntries, "turnin", questID, GetActiveTitle(i), false)
-        end
-    end
-
-    local kind, questID, title, complete = GetDirectQuestFrameDialogEntry()
-    if kind then
-        addEntry(directEntries, seenDirectEntries, kind, questID, title, complete)
-    end
+    end)
 
     for _, entry in ipairs(directEntries) do
         addEntry(entries, seenEntries, entry.kind, entry.questID, entry.title, entry.isComplete)

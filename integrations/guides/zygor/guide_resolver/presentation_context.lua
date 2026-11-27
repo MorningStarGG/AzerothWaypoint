@@ -1,3 +1,10 @@
+-- ============================================================
+-- Zygor quest presentation context
+-- ============================================================
+--
+-- Determines which Zygor action owns the quest title when a step offers
+-- multiple goals.
+
 local NS = _G.AzerothWaypointNS
 if not NS.IsZygorLoaded() then return end
 
@@ -69,7 +76,8 @@ local function ClusterIsAlternateOrChoice(actionFacts)
     return true
 end
 
-local function RawTitleMatchesBridgeableCompletedCorridor(rawArrowTitle, facts, blockStart, targetMapID, targetX, targetY, targetSig)
+local function RawTitleMatchesBridgeableCompletedCorridor(rawArrowTitle, facts, blockStart, targetMapID, targetX, targetY,
+                                                          targetSig)
     if type(rawArrowTitle) ~= "string" or rawArrowTitle == "" then
         return false
     end
@@ -100,7 +108,8 @@ end
 -- Title ownership
 -- ============================================================
 
-local function BuildAlternateOrPresentationContext(rawArrowTitle, actionFacts, resolvedHeaderFact, currentGoalFact, mirrorTitleOverride)
+local function BuildAlternateOrPresentationContext(rawArrowTitle, actionFacts, resolvedHeaderFact, currentGoalFact,
+                                                   mirrorTitleOverride)
     local titleText
     local titleOwnerReason
 
@@ -115,7 +124,8 @@ local function BuildAlternateOrPresentationContext(rawArrowTitle, actionFacts, r
         titleOwnerReason = "raw_arrow_title"
     end
 
-    local titleOwnerFact = FindActionFactByText(actionFacts, titleText) or resolvedHeaderFact or SelectPrimaryActionFact(actionFacts)
+    local titleOwnerFact = FindActionFactByText(actionFacts, titleText) or resolvedHeaderFact or
+    SelectPrimaryActionFact(actionFacts)
     local semanticOwnerFact = titleOwnerFact ~= resolvedHeaderFact and titleOwnerFact
         or currentGoalFact
         or SelectPrimaryActionFact(actionFacts)
@@ -131,7 +141,8 @@ local function BuildAlternateOrPresentationContext(rawArrowTitle, actionFacts, r
     }
 end
 
-local function BuildNormalQuestTitleOwner(rawArrowTitle, facts, actionFacts, currentGoalFact, blockStart, targetMapID, targetX, targetY, targetSig, mirrorTitleOverride)
+local function BuildNormalQuestTitleOwner(rawArrowTitle, facts, actionFacts, currentGoalFact, blockStart, targetMapID,
+                                          targetX, targetY, targetSig, mirrorTitleOverride)
     if type(mirrorTitleOverride) == "string" and mirrorTitleOverride ~= "" then
         local overrideOwner = FindActionFactByText(actionFacts, mirrorTitleOverride)
             or FindActionFactByIndex(actionFacts, type(currentGoalFact) == "table" and currentGoalFact.index or nil)
@@ -139,7 +150,8 @@ local function BuildNormalQuestTitleOwner(rawArrowTitle, facts, actionFacts, cur
         return mirrorTitleOverride, overrideOwner, "mirror_title_override"
     end
 
-    local currentActionFact = FindActionFactByIndex(actionFacts, type(currentGoalFact) == "table" and currentGoalFact.index or nil)
+    local currentActionFact = FindActionFactByIndex(actionFacts,
+        type(currentGoalFact) == "table" and currentGoalFact.index or nil)
     if type(currentActionFact) == "table"
         and IsQuestActionFact(currentActionFact)
         and currentActionFact.status == "incomplete"
@@ -170,7 +182,9 @@ local function BuildNormalQuestTitleOwner(rawArrowTitle, facts, actionFacts, cur
     return rawArrowTitle, currentActionFact or primaryActionFact, "raw_arrow_title"
 end
 
-local function BuildNormalQuestPresentationContext(rawArrowTitle, facts, actionFacts, blockStart, blockEnd, providedHeaderFact, currentGoalFact, targetMapID, targetX, targetY, targetSig, mirrorTitleOverride)
+local function BuildNormalQuestPresentationContext(rawArrowTitle, facts, actionFacts, blockStart, blockEnd,
+                                                   providedHeaderFact, currentGoalFact, targetMapID, targetX, targetY,
+                                                   targetSig, mirrorTitleOverride)
     local titleText, titleOwnerFact, titleOwnerReason = BuildNormalQuestTitleOwner(
         rawArrowTitle,
         facts,
@@ -231,7 +245,9 @@ end
 -- Main presentation entry point
 -- ============================================================
 
-local function BuildQuestPresentationContext(rawArrowTitle, facts, actionFacts, blockStart, blockEnd, providedHeaderFact, currentGoalFact, targetMapID, targetX, targetY, targetSig, mirrorTitleOverride)
+local function BuildQuestPresentationContext(rawArrowTitle, facts, actionFacts, blockStart, blockEnd, providedHeaderFact,
+                                             currentGoalFact, targetMapID, targetX, targetY, targetSig,
+                                             mirrorTitleOverride)
     if type(actionFacts) ~= "table" or #actionFacts == 0 then
         return nil
     end

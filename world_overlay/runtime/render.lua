@@ -43,8 +43,6 @@ local WAYPOINT_TRANSITION_INTRO_BEACON_DURATION = CFG.WAYPOINT_TRANSITION_INTRO_
 local WAYPOINT_TRANSITION_INTRO_FADE_DURATION = CFG.WAYPOINT_TRANSITION_INTRO_FADE_DURATION
 local WAYPOINT_TRANSITION_OUTRO_BEACON_DURATION = CFG.WAYPOINT_TRANSITION_OUTRO_BEACON_DURATION
 local WAYPOINT_TRANSITION_OUTRO_FADE_DURATION = CFG.WAYPOINT_TRANSITION_OUTRO_FADE_DURATION
-local PINPOINT_PANEL_TEXT_PADDING_X = CFG.PINPOINT_PANEL_TEXT_PADDING_X
-local PINPOINT_TEXT_INSET_X = CFG.PINPOINT_TEXT_INSET_X
 local PINPOINT_CONTEXT_OFFSET_Y = CFG.PINPOINT_CONTEXT_OFFSET_Y
 local PINPOINT_FRAME_EXTRA_HEIGHT = CFG.PINPOINT_FRAME_EXTRA_HEIGHT
 local PINPOINT_HOST_CONTEXT_GAP_Y = CFG.PINPOINT_HOST_CONTEXT_GAP_Y
@@ -110,14 +108,6 @@ local PINPOINT_ARROW_COUNT = 3
 
 local _adjustedBottomCapLayout = {}
 
-local DEFAULT_PINPOINT_PANEL_SPEC = {
-    minW = 140,
-    wrapW = 176,
-    maxW = 224,
-    textInsetX = PINPOINT_TEXT_INSET_X,
-    textPaddingX = PINPOINT_PANEL_TEXT_PADDING_X,
-}
-
 local DEFAULT_PINPOINT_PULSE = {
     speed = math.pi,
     amplitude = 0.15,
@@ -125,22 +115,13 @@ local DEFAULT_PINPOINT_PULSE = {
 }
 
 local function GetDefaultPinpointPanelSpec()
-    local spec = Plaques and Plaques.GetSpec and Plaques.GetSpec(C.WORLD_OVERLAY_PLAQUE_DEFAULT) or nil
-    if type(spec) ~= "table" then
-        return DEFAULT_PINPOINT_PANEL_SPEC
-    end
-
-    return {
-        minW = spec.minW or DEFAULT_PINPOINT_PANEL_SPEC.minW,
-        wrapW = spec.wrapW or DEFAULT_PINPOINT_PANEL_SPEC.wrapW,
-        maxW = spec.maxW or DEFAULT_PINPOINT_PANEL_SPEC.maxW,
-        textInsetX = spec.textInsetX or DEFAULT_PINPOINT_PANEL_SPEC.textInsetX,
-        textPaddingX = spec.textPaddingX or DEFAULT_PINPOINT_PANEL_SPEC.textPaddingX,
-    }
+    return Plaques.GetLayoutSpec()
 end
 
+
 local function GetGlowingGemsGlowDefaults()
-    local specs = PlaqueAnimations and PlaqueAnimations.GetSpec and PlaqueAnimations.GetSpec(C.WORLD_OVERLAY_PLAQUE_GLOWING_GEMS) or nil
+    local specs = PlaqueAnimations and PlaqueAnimations.GetSpec and
+    PlaqueAnimations.GetSpec(C.WORLD_OVERLAY_PLAQUE_GLOWING_GEMS) or nil
     if type(specs) ~= "table" then
         return DEFAULT_PINPOINT_PULSE
     end
@@ -154,29 +135,8 @@ local function GetGlowingGemsGlowDefaults()
     return DEFAULT_PINPOINT_PULSE
 end
 
-local function GetPinpointPlaqueSpec(frame)
-    local defaultSpec = GetDefaultPinpointPanelSpec()
-    if not frame then
-        return defaultSpec
-    end
+local GetPinpointPlaqueSpec = Plaques.GetLayoutSpec
 
-    local spec = frame.__awpPlaqueSpec
-    if type(spec) ~= "table" and frame.Panel then
-        spec = frame.Panel.__awpPlaqueSpec
-    end
-
-    if type(spec) ~= "table" then
-        return defaultSpec
-    end
-
-    return {
-        minW = spec.minW or defaultSpec.minW,
-        wrapW = spec.wrapW or defaultSpec.wrapW,
-        maxW = spec.maxW or defaultSpec.maxW,
-        textInsetX = spec.textInsetX or defaultSpec.textInsetX,
-        textPaddingX = spec.textPaddingX or defaultSpec.textPaddingX,
-    }
-end
 
 -- ============================================================
 -- Panel measurement
@@ -645,11 +605,18 @@ local function RestoreFontStringDefaultColor(fontString)
     fontString:SetTextColor(color.r or 1, color.g or 1, color.b or 1, color.a or 1)
 end
 
-local function ApplyResolvedFontStringColor(fontString, color)
+local function ApplyResolvedFontStringColor(fontString, color, role)
     if not fontString then
         return
     end
 
+    local appearance = NS.Internal.Appearance
+    if appearance then
+        local r, g, b = appearance.GetRGB("plaque", role or "TEXT")
+        if r then
+            fontString:SetTextColor(r, g, b, color and color.a or 1); return
+        end
+    end
     if not color then
         RestoreFontStringDefaultColor(fontString)
         return
@@ -802,7 +769,8 @@ local _beaconVisualStateScratch = {}
 local function ResolveWaypointBeaconVisualState(elapsed)
     local cache = _frameCache.waypoint
     local beaconStyle = _settings.worldOverlayBeaconStyle or C.WORLD_OVERLAY_BEACON_STYLE_BEACON
-    local showBeacon = beaconStyle ~= C.WORLD_OVERLAY_BEACON_STYLE_OFF and overlay.waypoint and overlay.waypoint.Beacon ~= nil
+    local showBeacon = beaconStyle ~= C.WORLD_OVERLAY_BEACON_STYLE_OFF and overlay.waypoint and
+    overlay.waypoint.Beacon ~= nil
     local beaconBaseOnly = beaconStyle == C.WORLD_OVERLAY_BEACON_STYLE_BASE
 
     if not beaconBaseOnly and beaconStyle == C.WORLD_OVERLAY_BEACON_STYLE_DISTANCE then
@@ -1014,7 +982,6 @@ local function UpdateWaypointVisual(alpha, iconScale, beaconMaskScale, elapsed, 
             veilBaseAlpha * 0.85
         )
     end
-
 end
 
 local function FindPinpointAnimationSpec(frame, animType)
@@ -1022,7 +989,7 @@ local function FindPinpointAnimationSpec(frame, animType)
         return nil
     end
 
-    local plaqueType = frame.__awpPlaqueType or C.WORLD_OVERLAY_PLAQUE_DEFAULT
+    local plaqueType = frame.__awpPlaqueType or NS.GetDefaultPlaqueType()
     local specs = PlaqueAnimations.GetSpec(plaqueType)
     if type(specs) ~= "table" then
         return nil
@@ -1062,6 +1029,8 @@ local function UpdatePinpointVisual(alpha, offsetY, arrowTint, animatedTint)
         UpdatePinpointArrowVisual(frame.Arrow2, frame.ArrowSlot2, PINPOINT_ARROW_OFFSETS[2], arrowTint, now, 2)
         UpdatePinpointArrowVisual(frame.Arrow3, frame.ArrowSlot3, PINPOINT_ARROW_OFFSETS[3], arrowTint, now, 3)
     end
+
+    if frame.__awpThemedPlaque then return end
 
     local r, g, b = animatedTint.r or 1, animatedTint.g or 1, animatedTint.b or 1
     local animatedAlpha = animatedTint.a or 1
@@ -1144,9 +1113,17 @@ local function UpdateWaypointFrame(iconSpec, title)
     footer:SetScale(_settings.worldOverlayInfoTextSize)
     footer:SetAlpha(_settings.worldOverlayInfoTextOpacity)
     local subtextOpacity = _settings.worldOverlaySubtextOpacity
-    footer.InfoText:SetTextColor(textTint.r or 1, textTint.g or 1, textTint.b or 1, textTint.a or 1)
-    footer.DistanceText:SetTextColor(textTint.r or 1, textTint.g or 1, textTint.b or 1, subtextOpacity)
-    footer.ArrivalTimeText:SetTextColor(textTint.r or 1, textTint.g or 1, textTint.b or 1, subtextOpacity)
+    local r, g, b, dr, dg, db
+    local appearance = NS.Internal.Appearance
+    if appearance then
+        r, g, b = appearance.GetRGB("waypoint", "TEXT")
+        dr, dg, db = appearance.GetRGB("navigator", "LABEL")
+    end
+    r, g, b = r or textTint.r or 1, g or textTint.g or 1, b or textTint.b or 1
+    dr, dg, db = dr or textTint.r or 1, dg or textTint.g or 1, db or textTint.b or 1
+    footer.InfoText:SetTextColor(r, g, b, textTint.a or 1)
+    footer.DistanceText:SetTextColor(dr, dg, db, subtextOpacity)
+    footer.ArrivalTimeText:SetTextColor(dr, dg, db, subtextOpacity)
 
     if footer:IsShown() then
         local titleText = nil
@@ -1195,18 +1172,9 @@ local function UpdatePinpointFrame(iconSpec, title, subtext)
     end
 
     local showPlaque = _settings.worldOverlayPinpointMode ~= "no_plaque"
-    if cache.showPlaque ~= showPlaque then
-        frame.Panel:SetShown(showPlaque)
-        if frame.PanelHost then frame.PanelHost:SetShown(showPlaque) end
-        frame.TextHost:SetShown(showPlaque)
-        if frame.Gems then frame.Gems:SetShown(showPlaque) end
-        if frame.Overlay then frame.Overlay:SetShown(showPlaque) end
-        if frame.GlowTL then frame.GlowTL:SetShown(showPlaque) end
-        if frame.GlowTR then frame.GlowTR:SetShown(showPlaque) end
-        if frame.GlowBL then frame.GlowBL:SetShown(showPlaque) end
-        if frame.GlowBR then frame.GlowBR:SetShown(showPlaque) end
-        cache.showPlaque = showPlaque
-    end
+    local plaqueAppearance = _settings.plaqueAppearance
+    if plaqueAppearance then M.Plaques.ApplyAppearance(frame.Panel, plaqueAppearance) end
+    M.SyncPinpointPlaqueAppearance(frame, showPlaque)
 
     local arrowTint    = ResolveArrowColor and ResolveArrowColor(iconSpec) or iconSpec.tint or DEFAULT_TINT
     local animatedTint = ResolveAnimatedColor and ResolveAnimatedColor(iconSpec) or iconSpec.tint or DEFAULT_TINT
@@ -1214,12 +1182,14 @@ local function UpdatePinpointFrame(iconSpec, title, subtext)
         local panelTint   = ResolvePlaqueColors and ResolvePlaqueColors(iconSpec) or DEFAULT_TINT
         local titleTint   = ResolvePinpointTitleColor and ResolvePinpointTitleColor() or nil
         local subtextTint = ResolvePinpointSubtextColor and ResolvePinpointSubtextColor() or nil
-        frame.Panel:SetVertexColor(panelTint.r or 1, panelTint.g or 1, panelTint.b or 1, 0.95)
-        if frame.Gems then
+        if not frame.__awpThemedPlaque then
+            frame.Panel:SetVertexColor(panelTint.r or 1, panelTint.g or 1, panelTint.b or 1, 0.95)
+        end
+        if frame.Gems and not frame.__awpThemedPlaque then
             frame.Gems:SetVertexColor(animatedTint.r or 1, animatedTint.g or 1, animatedTint.b or 1, animatedTint.a or 1)
         end
-        ApplyResolvedFontStringColor(frame.Title, titleTint)
-        ApplyResolvedFontStringColor(frame.Subtext, subtextTint)
+        ApplyResolvedFontStringColor(frame.Title, titleTint, "TITLE")
+        ApplyResolvedFontStringColor(frame.Subtext, subtextTint, "LABEL")
 
         local showDestination = _settings.worldOverlayShowDestinationInfo
         local showExtended = _settings.worldOverlayShowExtendedInfo
@@ -1243,9 +1213,6 @@ local function UpdatePinpointFrame(iconSpec, title, subtext)
             cache.panelWidth = panelWidth
         end
 
-        if frame.Panel:GetWidth() ~= panelWidth then
-            frame.Panel:SetWidth(panelWidth)
-        end
         if frame.PanelHost and frame.PanelHost:GetWidth() ~= panelWidth then
             frame.PanelHost:SetWidth(panelWidth)
         end
@@ -1513,7 +1480,8 @@ local function RenderNativeOverlayVisuals(elapsed)
 
     if derived.mode == "waypoint" then
         ShowFrameSet(true, false, showNav)
-        UpdateWaypointVisual(_settings.worldOverlayWaypointOpacity * hoverMultiplier, 1, WAYPOINT_BEACON_MASK_SHOWN_SCALE, elapsed)
+        UpdateWaypointVisual(_settings.worldOverlayWaypointOpacity * hoverMultiplier, 1, WAYPOINT_BEACON_MASK_SHOWN_SCALE,
+            elapsed)
         if navIsFading then
             UpdateNavigatorFrame(iconSpec, navFadeAlpha * _settings.worldOverlayNavigatorOpacity * hoverMultiplier)
         end

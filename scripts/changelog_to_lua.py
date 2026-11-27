@@ -2,12 +2,13 @@
 """
 Convert the recent version entries from CHANGELOG.md into docs/changelog_data.lua format.
 
-Expected markdown shape for modern entries:
+Markdown accepts headings or standalone bold bullets for section titles:
 
-## 2.6
+## 5.0.0
 
-- **Section title**
-  - Entry line
+### Section title
+- Entry line
+- **Group title**
   - Entry line
 
 Usage examples:
@@ -26,6 +27,7 @@ from typing import Iterable
 
 
 VERSION_HEADING_RE = re.compile(r"^##\s+(.+?)\s*$")
+SECTION_HEADING_RE = re.compile(r"^###\s+(.+?)\s*$")
 SECTION_RE = re.compile(r"^-\s+\*\*(.+?)\*\*\s*:?\s*$")
 ENTRY_RE = re.compile(r"^\s*-\s+(.+?)\s*$")
 
@@ -81,7 +83,7 @@ def escape_lua_string(text: str) -> str:
     return text.replace("\\", "\\\\").replace('"', '\\"')
 
 
-def entry_level(line: str) -> int:
+def entry_level(line: str, heading_section: bool) -> int:
     indent = 0
     for char in line:
         if char == " ":
@@ -91,13 +93,14 @@ def entry_level(line: str) -> int:
         else:
             break
 
-    return max(1, indent // 2)
+    return max(1, indent // 2 + int(heading_section))
 
 
 def parse_changelog(markdown: str) -> list[VersionEntry]:
     entries: list[VersionEntry] = []
     current_version: VersionEntry | None = None
     current_section: Section | None = None
+    heading_section = False
 
     for raw_line in markdown.splitlines():
         line = raw_line.rstrip()
@@ -117,12 +120,20 @@ def parse_changelog(markdown: str) -> list[VersionEntry]:
             current_version = VersionEntry(version=version_name)
             entries.append(current_version)
             current_section = None
+            heading_section = False
             continue
 
         if current_version is None:
             continue
 
-        section_match = SECTION_RE.match(line)
+        heading_match = SECTION_HEADING_RE.match(line)
+        if heading_match:
+            heading_section = True
+            current_section = Section(title=normalize_text(heading_match.group(1)))
+            current_version.sections.append(current_section)
+            continue
+
+        section_match = None if heading_section else SECTION_RE.match(line)
         if section_match:
             current_section = Section(title=normalize_text(section_match.group(1)))
             current_version.sections.append(current_section)
@@ -132,7 +143,7 @@ def parse_changelog(markdown: str) -> list[VersionEntry]:
         if entry_match and current_section is not None:
             entry_text = normalize_text(entry_match.group(1))
             if entry_text:
-                current_section.entries.append(Entry(text=entry_text, level=entry_level(line)))
+                current_section.entries.append(Entry(text=entry_text, level=entry_level(line, heading_section)))
             continue
 
     return [entry for entry in entries if entry.sections]

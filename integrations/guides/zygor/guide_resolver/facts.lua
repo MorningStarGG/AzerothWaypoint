@@ -1,3 +1,10 @@
+-- ============================================================
+-- Zygor goal facts
+-- ============================================================
+--
+-- Builds and caches Zygor goal facts for the resolver. A step or goal change
+-- can affect presentation even when the destination coordinates stay the same.
+
 local NS = _G.AzerothWaypointNS
 if not NS.IsZygorLoaded() then return end
 
@@ -702,21 +709,6 @@ end
 -- Fact queries
 -- ============================================================
 
-local resolveCanonicalGuideGoal  -- forward declaration; defined after ExpandActionBlock
-
-local function ResolveCurrentGoalNum(stepOrGoalNum)
-    if type(stepOrGoalNum) == "table" then
-        local canonical = resolveCanonicalGuideGoal(stepOrGoalNum)
-        return canonical and canonical.canonicalGoalNum
-    end
-
-    if type(stepOrGoalNum) == "number" then
-        return stepOrGoalNum
-    end
-
-    return nil
-end
-
 local function IsQuestActionFact(fact)
     return type(fact) == "table" and QUEST_ACTIONS[fact.action] == true
 end
@@ -885,13 +877,14 @@ local function HasSharedActionBlockBridgeContext(facts, startIndex, endIndex, an
     return false
 end
 
-local function IsLocallyBridgedQuestFact(facts, factIndex, bridgeIndex, targetMapID, targetX, targetY, targetSig, anchorIndex, requiredStatus)
+local function IsLocallyBridgedQuestFact(facts, factIndex, bridgeIndex, targetMapID, targetX, targetY, targetSig,
+                                         anchorIndex, requiredStatus)
     local fact = type(facts) == "table" and facts[factIndex] or nil
     if not (fact
-        and IsQuestActionFact(fact)
-        and fact.visible == true
-        and fact.suppressed ~= true
-    ) then
+            and IsQuestActionFact(fact)
+            and fact.visible == true
+            and fact.suppressed ~= true
+        ) then
         return false
     end
 
@@ -931,7 +924,8 @@ local function IsLocallyBridgedQuestFact(facts, factIndex, bridgeIndex, targetMa
     )
 end
 
-local function CanBridgeNearbyActionBlockCandidate(facts, candidateIndex, blockStart, targetMapID, targetX, targetY, anchorIndex)
+local function CanBridgeNearbyActionBlockCandidate(facts, candidateIndex, blockStart, targetMapID, targetX, targetY,
+                                                   anchorIndex)
     return IsLocallyBridgedQuestFact(
         facts,
         candidateIndex,
@@ -945,7 +939,8 @@ local function CanBridgeNearbyActionBlockCandidate(facts, candidateIndex, blockS
     )
 end
 
-local function IsBridgeableCompletedQuestFact(facts, factIndex, bridgeIndex, targetMapID, targetX, targetY, targetSig, anchorIndex)
+local function IsBridgeableCompletedQuestFact(facts, factIndex, bridgeIndex, targetMapID, targetX, targetY, targetSig,
+                                              anchorIndex)
     return IsLocallyBridgedQuestFact(
         facts,
         factIndex,
@@ -982,24 +977,6 @@ local function HasVisibleDialogOrQuestCluster(facts)
     end
 
     return false
-end
-
-local function FindAnchorIndex(stepOrGoalNum, facts)
-    local currentGoalNum = ResolveCurrentGoalNum(stepOrGoalNum)
-    if type(currentGoalNum) == "number" then
-        local fact = facts[currentGoalNum]
-        if fact and fact.visible == true and fact.suppressed ~= true then
-            return currentGoalNum
-        end
-    end
-
-    for _, fact in ipairs(facts) do
-        if IsQuestActionFact(fact) and IsActionableFact(fact) then
-            return fact.index
-        end
-    end
-
-    return nil
 end
 
 local function FindNearestAnchorActionIndex(facts, anchorIndex, targetMapID, targetX, targetY, targetSig)
@@ -1053,6 +1030,10 @@ local function FindNearbyBridgedAnchorActionIndex(facts, anchorIndex, targetMapI
 
     return best and best.index or nil
 end
+
+-- ============================================================
+-- Grouping actions around the selected goal
+-- ============================================================
 
 local function ExpandActionBlock(facts, seedIndex, targetMapID, targetX, targetY, targetSig)
     local startIndex = seedIndex
@@ -1111,7 +1092,8 @@ local function ExpandActionBlock(facts, seedIndex, targetMapID, targetX, targetY
     return startIndex, endIndex
 end
 
-local function IsHandoffClusterCandidate(facts, candidateIndex, referenceIndex, targetMapID, targetX, targetY, requiredAction, requiredQuestID)
+local function IsHandoffClusterCandidate(facts, candidateIndex, referenceIndex, targetMapID, targetX, targetY,
+                                         requiredAction, requiredQuestID)
     local fact = type(facts) == "table" and facts[candidateIndex] or nil
     if not fact then return false end
     if not IsCanonicalHandoffFact(fact) then return false end
@@ -1136,7 +1118,8 @@ local function IsHandoffClusterCandidate(facts, candidateIndex, referenceIndex, 
         )
 end
 
-local function BuildCanonicalGoalResult(rawGoalNum, rawFact, canonicalGoalNum, canonicalFact, usedOverride, overrideReason, clusterStart, clusterEnd, firstIncompleteGoalNum)
+local function BuildCanonicalGoalResult(rawGoalNum, rawFact, canonicalGoalNum, canonicalFact, usedOverride,
+                                        overrideReason, clusterStart, clusterEnd, firstIncompleteGoalNum)
     return {
         rawGoalNum             = rawGoalNum,
         canonicalGoalNum       = canonicalGoalNum,
@@ -1257,7 +1240,7 @@ local function resolveCanonicalGoalFromFacts(facts, rawGoalNum)
     )
 end
 
-resolveCanonicalGuideGoal = function(step)
+local function resolveCanonicalGuideGoal(step)
     if type(step) ~= "table" or type(step.goals) ~= "table" then
         return nil
     end
@@ -1279,6 +1262,37 @@ resolveCanonicalGuideGoal = function(step)
     canonicalCacheFactsEpoch = resolverState.factsEpoch
     canonicalCacheResult = result
     return result
+end
+
+local function ResolveCurrentGoalNum(stepOrGoalNum)
+    if type(stepOrGoalNum) == "table" then
+        local canonical = resolveCanonicalGuideGoal(stepOrGoalNum)
+        return canonical and canonical.canonicalGoalNum
+    end
+
+    if type(stepOrGoalNum) == "number" then
+        return stepOrGoalNum
+    end
+
+    return nil
+end
+
+local function FindAnchorIndex(stepOrGoalNum, facts)
+    local currentGoalNum = ResolveCurrentGoalNum(stepOrGoalNum)
+    if type(currentGoalNum) == "number" then
+        local fact = facts[currentGoalNum]
+        if fact and fact.visible == true and fact.suppressed ~= true then
+            return currentGoalNum
+        end
+    end
+
+    for _, fact in ipairs(facts) do
+        if IsQuestActionFact(fact) and IsActionableFact(fact) then
+            return fact.index
+        end
+    end
+
+    return nil
 end
 
 local function CollectActionFactsInBlock(facts, startIndex, endIndex)
@@ -1339,7 +1353,8 @@ end
 -- Snapshot cache key
 -- ============================================================
 
-local function MatchesSnapshotCacheKey(context, step, currentGoalNum, rawArrowTitle, targetMapID, targetX, targetY, targetSig)
+local function MatchesSnapshotCacheKey(context, step, currentGoalNum, rawArrowTitle, targetMapID, targetX, targetY,
+                                       targetSig)
     local factsEpoch, dialogEpoch = GetGuideResolverCacheToken()
     return step == snapshotCacheStep
         and currentGoalNum == snapshotCacheGoalNum
@@ -1359,7 +1374,8 @@ local function IncrementChurnCounter(churn, key)
     churn[key] = (tonumber(churn[key]) or 0) + 1
 end
 
-local function CountSnapshotCacheMissReasons(churn, context, step, currentGoalNum, rawArrowTitle, targetMapID, targetX, targetY, targetSig)
+local function CountSnapshotCacheMissReasons(churn, context, step, currentGoalNum, rawArrowTitle, targetMapID, targetX,
+                                             targetY, targetSig)
     if type(churn) ~= "table" then
         return
     end
@@ -1403,7 +1419,8 @@ local function CountSnapshotCacheMissReasons(churn, context, step, currentGoalNu
     end
 end
 
-local function StoreSnapshotCacheKey(context, step, currentGoalNum, rawArrowTitle, targetMapID, targetX, targetY, targetSig)
+local function StoreSnapshotCacheKey(context, step, currentGoalNum, rawArrowTitle, targetMapID, targetX, targetY,
+                                     targetSig)
     local factsEpoch, dialogEpoch = GetGuideResolverCacheToken()
     snapshotCacheStep = step
     snapshotCacheGoalNum = currentGoalNum

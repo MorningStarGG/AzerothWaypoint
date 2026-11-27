@@ -1,4 +1,14 @@
+-- ============================================================
+-- TomTom arrow skins
+-- ============================================================
+--
+-- Registers TomTom arrow skins and owns their navigation textures, arrival
+-- animation and temporary suppression. Reusable artwork and animation belong
+-- to the arrow skin. Navigation callbacks update orientation and tint while
+-- TomTom retains its waypoint controls.
+
 local NS = _G.AzerothWaypointNS
+local C = NS.Constants
 local state = NS.State
 
 local registry = {}
@@ -45,7 +55,7 @@ local SKIN_PRESETS = {
         sprite = { spr_w = 256, spr_h = 256, img_w = 2304, img_h = 3072, spritecount = 108, mirror = false },
         arrivalWidth = 80,
         arrivalHeight = 80,
-        -- Modern sheets are pre-colored RGBA; arrival fps matches TomTom's ~62fps rate.
+        -- Modern sheets are pre-colored RGBA, arrival fps matches TomTom's ~62fps rate.
         arrivalSprite = { spr_w = 256, spr_h = 256, img_w = 2304, img_h = 3072, spritecount = 108, fps = 60 },
         specialsTexture = false,
         tint = "none",
@@ -128,6 +138,10 @@ local function ApplyTomTomRootSize(button, width, height)
     end
     return true
 end
+
+-- ============================================================
+-- Skin registry and naming
+-- ============================================================
 
 local function NormalizeKey(key)
     if type(key) ~= "string" then return nil end
@@ -267,6 +281,10 @@ function NS.IsThemeKey(key)
     return NS.IsRegisteredArrowThemeKey(key)
 end
 
+-- ============================================================
+-- Textures and sprite coordinates
+-- ============================================================
+
 local function GetNavTexture(def)
     if def.navTexture then return def.navTexture end
     if def.skinDir then return def.skinDir .. "arrow" end
@@ -387,13 +405,11 @@ local function BuildGridTexCoord(col, row, cols, rows, inset)
     return left, right, top, bottom
 end
 
-local function ApplyTexCoord(texture, coords)
-    if type(coords) == "table" then
-        texture:SetTexCoord(coords[1] or 0, coords[2] or 1, coords[3] or 0, coords[4] or 1)
-    else
-        texture:SetTexCoord(0, 1, 0, 1)
-    end
-end
+local defaultGood, defaultMiddle, defaultBad = { 0, 1, 0 }, { 1, 1, 0 }, { 1, 0, 0 }
+
+-- ============================================================
+-- Direction and arrival colors
+-- ============================================================
 
 local function GetDirectionColor(def, angle)
     if def.tint == "none" then return 1, 1, 1 end
@@ -409,9 +425,9 @@ local function GetDirectionColor(def, angle)
     then
         local arrow = tomtom.db.profile.arrow
         local perc = math.abs((math.pi - math.abs(tonumber(angle) or 0)) / math.pi)
-        local gr, gg, gb = unpack(arrow.goodcolor or { 0, 1, 0 })
-        local mr, mg, mb = unpack(arrow.middlecolor or { 1, 1, 0 })
-        local br, bg, bb = unpack(arrow.badcolor or { 1, 0, 0 })
+        local gr, gg, gb = unpack(arrow.goodcolor or defaultGood)
+        local mr, mg, mb = unpack(arrow.middlecolor or defaultMiddle)
+        local br, bg, bb = unpack(arrow.badcolor or defaultBad)
         r, g, b = tomtom:ColorGradient(perc, br, bg, bb, mr, mg, mb, gr, gg, gb)
         if perc > 0.98 and arrow.exactcolor then
             r, g, b = unpack(arrow.exactcolor)
@@ -470,26 +486,32 @@ local function SetTextureDrawLayer(texture, layer, sublevel)
     end
 end
 
+-- ============================================================
+-- Texture ownership and animation
+-- ============================================================
+
 local function EnsureThemeTextures(theme, button)
     if not button or not theme then return end
+    if theme.textureOwner and theme.textureOwner ~= button then
+        theme.arrowTexture:SetParent(button)
+        if theme.specularTexture then theme.specularTexture:SetParent(button) end
+        if theme.arrivalSpecularTexture then theme.arrivalSpecularTexture:SetParent(button) end
+    end
+    theme.textureOwner = button
 
     if not theme.arrowTexture then
         theme.arrowTexture = button:CreateTexture(nil, "OVERLAY")
+        SetTextureDrawLayer(theme.arrowTexture, "OVERLAY", 0)
     end
-    SetTextureDrawLayer(theme.arrowTexture, "OVERLAY", 0)
 
-    if theme.specularTexturePath then
-        if not theme.specularTexture then
-            theme.specularTexture = button:CreateTexture(nil, "OVERLAY")
-        end
+    if theme.specularTexturePath and not theme.specularTexture then
+        theme.specularTexture = button:CreateTexture(nil, "OVERLAY")
         SetTextureDrawLayer(theme.specularTexture, "OVERLAY", 1)
         SetTextureBlendMode(theme.specularTexture, (theme.def and theme.def.specularBlend) or "ADD")
     end
 
-    if theme.arrivalSpecularTexturePath then
-        if not theme.arrivalSpecularTexture then
-            theme.arrivalSpecularTexture = button:CreateTexture(nil, "OVERLAY")
-        end
+    if theme.arrivalSpecularTexturePath and not theme.arrivalSpecularTexture then
+        theme.arrivalSpecularTexture = button:CreateTexture(nil, "OVERLAY")
         SetTextureDrawLayer(theme.arrivalSpecularTexture, "OVERLAY", 1)
         SetTextureBlendMode(theme.arrivalSpecularTexture, (theme.def and theme.def.arrivalSpecularBlend) or "ADD")
     end
@@ -571,8 +593,7 @@ local function PlayArrivalAnimations(theme)
 end
 
 local function HideThemeTexture(texture)
-    if not texture then return end
-    texture:Hide()
+    if texture and texture:IsShown() then texture:Hide() end
 end
 
 local function SetThemeTextureShown(texture, shown)
@@ -617,68 +638,66 @@ local function ApplyArrivalTexCoord(theme, frame)
     return l, r, t, b
 end
 
+-- ============================================================
+-- Navigation and arrival layouts
+-- ============================================================
+
+-- Layout owns textures and static styling. TomTom calls the navigation update
+-- while standing still too, and a profile or distance change can alter the tint.
+local function UpdateNavigationDirection(theme, angle, force)
+    local arrow, specular = theme.arrowTexture, theme.specularTexture
+    if theme.spriteResolver then
+        local l, r, t, b = theme.spriteResolver(angle)
+        if force or l ~= theme.lastNavL or r ~= theme.lastNavR or t ~= theme.lastNavT or b ~= theme.lastNavB then
+            theme.lastNavL, theme.lastNavR, theme.lastNavT, theme.lastNavB = l, r, t, b
+            arrow:SetTexCoord(l, r, t, b)
+            if specular then specular:SetTexCoord(l, r, t, b) end
+        end
+    else
+        local rotation = angle + (theme.def.rotationOffset or 0)
+        if force or theme.navRotation ~= rotation then
+            theme.navRotation = rotation
+            if arrow.SetRotation then arrow:SetRotation(rotation) end
+            if specular and specular.SetRotation then specular:SetRotation(rotation) end
+        end
+    end
+    local r, g, b = GetDirectionColor(theme.def, angle)
+    if force or r ~= theme.navRed or g ~= theme.navGreen or b ~= theme.navBlue then
+        theme.navRed, theme.navGreen, theme.navBlue = r, g, b
+        arrow:SetVertexColor(r, g, b, 1)
+    end
+end
+
 local function ApplyNavigationLayout(theme, button)
     if not button or not theme then return end
     local def = theme.def
-    local scale = GetThemeScale() * ((def and def.baseScale) or 1)
+    local scale = GetThemeScale() * (def.baseScale or 1)
     EnsureThemeTextures(theme, button)
-
     ApplyTomTomRootSize(button, (def.navWidth or 56) * scale, (def.navHeight or 42) * scale)
 
-    local arrow = theme.arrowTexture
+    local arrow, specular = theme.arrowTexture, theme.specularTexture
     arrow:ClearAllPoints()
     arrow:SetPoint("TOPLEFT", button, "TOPLEFT", 0, 0)
     arrow:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", 0, -((def.navDrop or 0) * scale))
     arrow:SetTexture(theme.navTexture)
-
-    if theme.spriteResolver then
-        arrow:SetTexCoord(theme.spriteResolver(theme.lastAngle or 0))
-        if type(arrow.SetRotation) == "function" then
-            arrow:SetRotation(0)
-        end
-    else
-        arrow:SetTexCoord(0, 1, 0, 1)
-        if type(arrow.SetRotation) == "function" then
-            arrow:SetRotation((theme.lastAngle or 0) + (def.rotationOffset or 0))
-        end
-    end
-
-    local r, g, b = GetDirectionColor(def, theme.lastAngle or 0)
-    arrow:SetVertexColor(r, g, b, 1)
-
-    if themeState.arrowSuppressed then
-        arrow:Hide()
-    else
-        arrow:Show()
-    end
-
-    HideThemeTexture(theme.arrivalSpecularTexture)
-
-    local specular = theme.specularTexture
     if specular then
         specular:ClearAllPoints()
         specular:SetAllPoints(arrow)
         specular:SetTexture(theme.specularTexturePath)
-        if theme.spriteResolver then
-            specular:SetTexCoord(theme.spriteResolver(theme.lastAngle or 0))
-            if type(specular.SetRotation) == "function" then
-                specular:SetRotation(0)
-            end
-        else
-            specular:SetTexCoord(0, 1, 0, 1)
-            if type(specular.SetRotation) == "function" then
-                specular:SetRotation((theme.lastAngle or 0) + (def.rotationOffset or 0))
-            end
-        end
         specular:SetVertexColor(1, 1, 1, 1)
         specular:SetAlpha(def.specularAlpha or 0.7)
-        if themeState.arrowSuppressed then
-            specular:Hide()
-        else
-            specular:Show()
-        end
     end
-
+    if theme.spriteResolver then
+        if arrow.SetRotation then arrow:SetRotation(0) end
+        if specular and specular.SetRotation then specular:SetRotation(0) end
+    else
+        arrow:SetTexCoord(0, 1, 0, 1)
+        if specular then specular:SetTexCoord(0, 1, 0, 1) end
+    end
+    UpdateNavigationDirection(theme, theme.lastAngle or 0, true)
+    SetThemeTextureShown(arrow, not themeState.arrowSuppressed)
+    SetThemeTextureShown(specular, not themeState.arrowSuppressed)
+    HideThemeTexture(theme.arrivalSpecularTexture)
     StopArrivalAnimations(theme)
 end
 
@@ -739,6 +758,10 @@ local function ApplyArrivalLayout(theme, button)
         end
     end
 end
+
+-- ============================================================
+-- TomTom theme callbacks
+-- ============================================================
 
 local function BuildRegisteredTomTomTheme(key, def)
     local navTexture = GetNavTexture(def)
@@ -835,63 +858,23 @@ local function BuildRegisteredTomTomTheme(key, def)
         self.lastAngle = tonumber(angle) or 0
         local button = GetTomTomArrow()
         if not button then return end
-        EnsureThemeTextures(self, button)
-
+        if self.textureOwner ~= button then
+            ApplyNavigationLayout(self, button)
+        end
         if themeState.arrowSuppressed then
             HideThemeTexture(self.arrowTexture)
             HideThemeTexture(self.specularTexture)
             HideThemeTexture(self.arrivalSpecularTexture)
             return
         end
-
-        local arrow = self.arrowTexture
-        HideThemeTexture(self.arrivalSpecularTexture)
-        local l, r, t, b
-        local rotation
-
-        if self.spriteResolver then
-            -- Sprite-sheet mode: pick the frame for this angle, only update on change
-            l, r, t, b = self.spriteResolver(self.lastAngle)
-            if l ~= self.lastNavL or r ~= self.lastNavR
-                or t ~= self.lastNavT or b ~= self.lastNavB
-            then
-                self.lastNavL, self.lastNavR = l, r
-                self.lastNavT, self.lastNavB = t, b
-                arrow:SetTexture(self.navTexture)
-                arrow:SetTexCoord(l, r, t, b)
-                if type(arrow.SetRotation) == "function" then
-                    arrow:SetRotation(0)
-                end
-            end
-        else
-            -- Rotation mode (single image): texture + texcoord set once in
-            -- ApplyNavigationLayout; just update rotation each tick.
-            rotation = self.lastAngle + (def.rotationOffset or 0)
-            if type(arrow.SetRotation) == "function" then
-                arrow:SetRotation(rotation)
-            end
-        end
-
-        local cr, cg, cb = GetDirectionColor(def, self.lastAngle)
-        arrow:SetVertexColor(cr, cg, cb, 1)
+        UpdateNavigationDirection(self, self.lastAngle)
+        local arrow, specular = self.arrowTexture, self.specularTexture
         if not arrow:IsShown() then arrow:Show() end
+        if specular and not specular:IsShown() then specular:Show() end
+    end
 
-        local specular = self.specularTexture
-        if specular then
-            if self.spriteResolver and l then
-                specular:SetTexture(self.specularTexturePath)
-                specular:SetTexCoord(l, r, t, b)
-                if type(specular.SetRotation) == "function" then
-                    specular:SetRotation(0)
-                end
-            elseif rotation and type(specular.SetRotation) == "function" then
-                -- Rotation mode: specular rotates with the arrow
-                specular:SetRotation(rotation)
-            end
-            specular:SetVertexColor(1, 1, 1, 1)
-            specular:SetAlpha(def.specularAlpha or 0.7)
-            if not specular:IsShown() then specular:Show() end
-        end
+    function theme:SetDirection(angle)
+        self:NavigationArrow_OnUpdate(1 / 60, angle)
     end
 
     return theme
@@ -916,6 +899,10 @@ local function RegisterTomTomThemes()
 
     return true
 end
+
+-- ============================================================
+-- Skin switching and suppression
+-- ============================================================
 
 local function RevertToTomTomTheme(handler, wayframe)
     local active = handler and handler:GetActiveTheme()
@@ -1120,8 +1107,8 @@ NS.RegisterArrowSkin("awp_stock", {
     preset          = "single_image",
     skinDir         = "Interface\\AddOns\\AzerothWaypoint\\media\\arrows\\awp_stock\\",
     arrivalTint     = { r = 0.15, g = 1.0, b = 0.15 }, -- Leave out or "none" to use stock arrival arrow
-    specular        = true,                            -- opt in; expects skinDir.."specular"
-    arrivalSpecular = false,                           -- opt in; expects skinDir.."arrival_specular"
+    specular        = true,                            -- opt in, expects skinDir.."specular"
+    arrivalSpecular = false,                           -- opt in, expects skinDir.."arrival_specular"
     baseScale       = 0.8,
     navDrop         = -5,
 })
@@ -1130,20 +1117,20 @@ NS.RegisterArrowSkin("awp_bomber", {
     preset          = "single_image",
     skinDir         = "Interface\\AddOns\\AzerothWaypoint\\media\\arrows\\awp_bomber\\",
     arrivalTint     = { r = 0.15, g = 1.0, b = 0.15 }, -- Leave out or "none" to use stock arrival arrow
-    specular        = true,                            -- opt in; expects skinDir.."specular"
-    arrivalSpecular = true,                            -- opt in; expects skinDir.."arrival_specular"
+    specular        = true,                            -- opt in, expects skinDir.."specular"
+    arrivalSpecular = true,                            -- opt in, expects skinDir.."arrival_specular"
     baseScale       = 0.8,
     navDrop         = -5,
 })
-NS.RegisterArrowSkin("awp_modern", {
+NS.RegisterArrowSkin(C.SKIN_AWP_MODERN, {
     displayName      = "AWP Modern",
     preset           = "single_image",
     skinDir          = "Interface\\AddOns\\AzerothWaypoint\\media\\arrows\\awp_modern\\",
     arrivalTint      = { r = 0.15, g = 1.0, b = 0.15 }, -- Leave out or "none" to use stock arrival arrow
-    specular         = true,                            -- opt in; expects skinDir.."specular"
-    arrivalSpecular  = false,                           -- opt in; expects skinDir.."arrival_specular"
+    specular         = true,                            -- opt in, expects skinDir.."specular"
+    arrivalSpecular  = false,                           -- opt in, expects skinDir.."arrival_specular"
     baseScale        = 0.8,                             -- applies to both nav and arrival
-    arrivalBaseScale = 1,                               -- arrival only — overrides baseScale for arrival
+    arrivalBaseScale = 1,                               -- arrival only â€” overrides baseScale for arrival
     navDrop          = -12,
 })
 NS.RegisterArrowSkin("awp_horde", {
@@ -1153,8 +1140,8 @@ NS.RegisterArrowSkin("awp_horde", {
     specularAlpha   = 1,       -- opacity, default 0.7
     specularBlend   = "BLEND", -- blend mode, default "ADD"
     arrivalTint     = "none",  -- Leave out or "none" to use stock arrival arrow
-    specular        = true,    -- opt in; expects skinDir.."specular"
-    arrivalSpecular = false,   -- opt in; expects skinDir.."arrival_specular"
+    specular        = true,    -- opt in, expects skinDir.."specular"
+    arrivalSpecular = false,   -- opt in, expects skinDir.."arrival_specular"
     navDrop         = -5,
 })
 NS.RegisterArrowSkin("awp_alliance", {
@@ -1164,7 +1151,7 @@ NS.RegisterArrowSkin("awp_alliance", {
     specularAlpha   = 1,       -- opacity, default 0.7
     specularBlend   = "BLEND", -- blend mode, default "ADD"
     arrivalTint     = "none",  -- Leave out or "none" to use stock arrival arrow
-    specular        = true,    -- opt in; expects skinDir.."specular"
-    arrivalSpecular = false,   -- opt in; expects skinDir.."arrival_specular"
+    specular        = true,    -- opt in, expects skinDir.."specular"
+    arrivalSpecular = false,   -- opt in, expects skinDir.."arrival_specular"
     navDrop         = -12,     -- adjusts gap between arrow and navigation text
 })

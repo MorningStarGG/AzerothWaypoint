@@ -1,0 +1,9 @@
+.vscode/
+scripts/
+tools/
+.claude/
+dev/
+__pycache__/
+tools/guide_compiler/out/
+testing.md
+test.md

@@ -1,3 +1,10 @@
+-- ============================================================
+-- Zygor presentation snapshots
+-- ============================================================
+--
+-- Builds the Zygor presentation snapshot from the selected facts, quest
+-- context and travel state.
+
 local NS = _G.AzerothWaypointNS
 if not NS.IsZygorLoaded() then return end
 
@@ -84,62 +91,10 @@ end
 -- Snapshot construction
 -- ============================================================
 
-local function BuildSemanticInfo(semanticKind, semanticTravelType, semanticQuestID)
-    local resolvedQuestID = type(semanticQuestID) == "number" and semanticQuestID > 0 and semanticQuestID or nil
-    local resolvedTravelType = type(semanticTravelType) == "string" and semanticTravelType or nil
-    local resolvedKind = type(semanticKind) == "string" and semanticKind or nil
-
-    if resolvedTravelType then
-        resolvedKind = "travel"
-    elseif resolvedQuestID and resolvedKind == nil then
-        resolvedKind = "quest"
-    end
-
-    if resolvedKind == nil and resolvedTravelType == nil and resolvedQuestID == nil then
-        return nil
-    end
-
-    return {
-        semanticKind = resolvedKind,
-        semanticTravelType = resolvedTravelType,
-        semanticQuestID = resolvedQuestID,
-    }
-end
-
-local _contentSigParts = {}
-
-local function UpdateSnapshotContentSig(snapshot)
-    if type(snapshot) ~= "table" then
-        return
-    end
-
-    _contentSigParts[1] = tostring(snapshot.mirrorTitle or "")
-    _contentSigParts[2] = tostring(snapshot.pinpointSubtext or "")
-    _contentSigParts[3] = tostring(snapshot.clusterKind or "")
-    _contentSigParts[4] = tostring(snapshot.subtextReason or "")
-    _contentSigParts[5] = tostring(snapshot.semanticKind or "")
-    _contentSigParts[6] = tostring(snapshot.semanticTravelType or "")
-    _contentSigParts[7] = tostring(snapshot.semanticQuestID or "")
-    snapshot.contentSig = table.concat(_contentSigParts, "\031", 1, 7)
-end
-
-local function BuildSnapshot(rawArrowTitle, mirrorTitle, pinpointSubtext, clusterKind, subtextReason, headerFact, matchedLiveGoalNum, semanticInfo)
-    local snapshot = {
-        rawArrowTitle = rawArrowTitle,
-        mirrorTitle = mirrorTitle or rawArrowTitle,
-        pinpointSubtext = pinpointSubtext,
-        clusterKind = clusterKind,
-        subtextReason = subtextReason,
-        headerGoalNum = headerFact and headerFact.index,
-        matchedLiveGoalNum = matchedLiveGoalNum,
-        resolverBypassed = false,
-        semanticKind = semanticInfo and semanticInfo.semanticKind,
-        semanticTravelType = semanticInfo and semanticInfo.semanticTravelType,
-        semanticQuestID = semanticInfo and semanticInfo.semanticQuestID,
-    }
-    UpdateSnapshotContentSig(snapshot)
-    return snapshot
-end
+local CommonPresentation = NS.Internal.GuidePresentation
+local BuildSemanticInfo = CommonPresentation.BuildSemanticInfo
+local UpdateSnapshotContentSig = CommonPresentation.UpdateSnapshotContentSig
+local BuildSnapshot = CommonPresentation.BuildSnapshot
 
 -- ============================================================
 -- Subtext resolution
@@ -180,7 +135,8 @@ local function ShouldPreferHeaderContextForNormalQuestSubtext(actionFacts)
     return type(actionFacts) == "table" and #actionFacts >= 2
 end
 
-local function ResolveNormalQuestSubtext(facts, actionFacts, anchorIndex, blockStart, blockEnd, presentationContext, targetMapID, targetX, targetY, targetSig, liveCurrentness)
+local function ResolveNormalQuestSubtext(facts, actionFacts, anchorIndex, blockStart, blockEnd, presentationContext,
+                                         targetMapID, targetX, targetY, targetSig, liveCurrentness)
     local mirrorTitle = presentationContext and presentationContext.titleText
     local resolvedHeaderFact = presentationContext and presentationContext.headerFact
     local headerReason = presentationContext and presentationContext.headerReason
@@ -240,7 +196,8 @@ end
 
 local function ResolveSemanticQuestID(facts, actionFacts, semanticOwnerFact, currentGoalFact, matchedLiveGoalNum)
     local semanticQuestID = nil
-    local matchedLiveFact = type(matchedLiveGoalNum) == "number" and type(facts) == "table" and facts[matchedLiveGoalNum] or nil
+    local matchedLiveFact = type(matchedLiveGoalNum) == "number" and type(facts) == "table" and facts
+    [matchedLiveGoalNum] or nil
     if type(matchedLiveFact) == "table" then
         semanticQuestID = matchedLiveFact.questid
     end
@@ -275,7 +232,9 @@ end
 -- Main presentation entry point
 -- ============================================================
 
-local function BuildQuestPresentationSnapshot(rawArrowTitle, facts, actionFacts, anchorIndex, blockStart, blockEnd, headerFact, currentGoalFact, targetMapID, targetX, targetY, targetSig, liveCurrentness, mirrorTitleOverride)
+local function BuildQuestPresentationSnapshot(rawArrowTitle, facts, actionFacts, anchorIndex, blockStart, blockEnd,
+                                              headerFact, currentGoalFact, targetMapID, targetX, targetY, targetSig,
+                                              liveCurrentness, mirrorTitleOverride, showCoordinateFallback)
     if type(actionFacts) ~= "table" or #actionFacts == 0 then
         return nil
     end
@@ -309,7 +268,8 @@ local function BuildQuestPresentationSnapshot(rawArrowTitle, facts, actionFacts,
     local liveMatchedReason = nil
 
     if clusterKind == "alternate_or_choice" then
-        pinpointSubtext, subtextReason, matchedLiveGoalNum, liveEntries = ResolveAlternateOrSubtext(facts, actionFacts, blockEnd, liveCurrentness)
+        pinpointSubtext, subtextReason, matchedLiveGoalNum, liveEntries = ResolveAlternateOrSubtext(facts, actionFacts,
+            blockEnd, liveCurrentness)
         if type(liveCurrentness) == "table" then
             liveMatchedReason = liveCurrentness.matchedLiveReason
         end
@@ -333,22 +293,19 @@ local function BuildQuestPresentationSnapshot(rawArrowTitle, facts, actionFacts,
         end
     end
 
-    if not pinpointSubtext
-        and NS.GetWorldOverlaySetting("worldOverlayShowCoordinateFallback")
-    then
+    if not pinpointSubtext and showCoordinateFallback then
         pinpointSubtext = FormatCoordinateSubtext(targetX, targetY)
         if pinpointSubtext then
             subtextReason = "coordinate_fallback"
         end
     end
 
-    local semanticQuestID = ResolveSemanticQuestID(
-        facts,
-        actionFacts,
-        presentationContext.semanticOwnerFact,
-        currentGoalFact,
-        matchedLiveGoalNum
-    )
+    local ambiguous = clusterKind == "alternate_or_choice" and matchedLiveGoalNum == nil
+    local semanticQuestID
+    if not ambiguous then
+        semanticQuestID = ResolveSemanticQuestID(facts, actionFacts, presentationContext.semanticOwnerFact,
+            currentGoalFact, matchedLiveGoalNum)
+    end
     local semanticTravelType = ResolveSemanticTravelType(
         presentationContext.semanticOwnerFact,
         mirrorTitle,
@@ -364,6 +321,7 @@ local function BuildQuestPresentationSnapshot(rawArrowTitle, facts, actionFacts,
         matchedLiveGoalNum,
         BuildSemanticInfo("quest", semanticTravelType, semanticQuestID)
     )
+    if ambiguous then snapshot.iconHintKind = "quest" end
 
     return snapshot, {
         headerFact = resolvedHeaderFact,
@@ -398,42 +356,8 @@ local function IsFallbackRoutePresentationAllowed(snapshot, context, currentGoal
 end
 
 local function ApplyRoutePresentationPolicy(snapshot, context, currentGoalNum, facts)
-    if type(snapshot) ~= "table" or type(context) ~= "table" or context.kind ~= "route" then
-        return snapshot
-    end
-
-    local routeTravelType = type(context.routeTravelType) == "string" and context.routeTravelType or nil
-    local snapshotTravelType = type(snapshot.semanticTravelType) == "string" and snapshot.semanticTravelType or nil
-
-    if context.legKind == "carrier"
-        and snapshotTravelType ~= nil
-        and snapshot.rawArrowTitle
-        and snapshot.mirrorTitle ~= snapshot.rawArrowTitle
-    then
-        snapshot.mirrorTitle = snapshot.rawArrowTitle
-        UpdateSnapshotContentSig(snapshot)
-    end
-
-    if context.legKind == "carrier"
-        and snapshot.pinpointSubtext ~= nil
-        and not NS.IsInstanceRouteTravelType(routeTravelType)
-        and (snapshotTravelType ~= nil or snapshot.semanticKind == "quest")
-    then
-        snapshot.pinpointSubtext = nil
-        snapshot.subtextReason = "carrier_leg_suppressed"
-        snapshot.routePresentationAllowed = false
-        UpdateSnapshotContentSig(snapshot)
-        return snapshot
-    end
-
-    if routeTravelType ~= nil then
-        snapshot.semanticKind = "travel"
-        snapshot.semanticTravelType = routeTravelType
-        UpdateSnapshotContentSig(snapshot)
-    end
-
-    snapshot.routePresentationAllowed = IsFallbackRoutePresentationAllowed(snapshot, context, currentGoalNum, facts)
-    return snapshot
+    return CommonPresentation.ApplyRoutePolicy(snapshot, context,
+        IsFallbackRoutePresentationAllowed(snapshot, context, currentGoalNum, facts))
 end
 
 -- ============================================================

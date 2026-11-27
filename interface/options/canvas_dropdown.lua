@@ -1,3 +1,10 @@
+-- ============================================================
+-- Settings dropdown
+-- ============================================================
+--
+-- Renders the settings dropdown and fits its pooled rows within the visible
+-- scroll viewport.
+
 local NS = _G.AzerothWaypointNS
 
 NS.Internal.Interface = NS.Internal.Interface or {}
@@ -51,7 +58,18 @@ local function SetRowOption(row, option, selected, args)
     else
         row.label:SetPoint("RIGHT", row, "RIGHT", -8, 0)
     end
+    local appearance = NS.Internal.Appearance
+    local surface = appearance and appearance.FindSurface(row)
+    if appearance and surface then
+        appearance.RegisterVisual(row, {kind="menuRow",surface=surface,regions={row.highlight},selected=selected==true})
+        appearance.Text(row.label, surface, option and option.disabled and "OFF" or selected and "TITLE" or "TEXT", "shell")
+        appearance.Text(row.check, surface, "TITLE", "shell")
+    end
 end
+
+-- ============================================================
+-- Row rendering
+-- ============================================================
 
 local function RenderRows(popup)
     local args = popup.args
@@ -70,6 +88,9 @@ local function RenderRows(popup)
             local option = options[offset + index - 1]
             row:SetShown(option ~= nil)
             SetRowOption(row, option, option and option.value == currentValue, args)
+            local pad = NS.Internal.Controller
+            if pad then pad.RegisterControl(row, { id = "option:" .. tostring(option and option.value),
+                disabled = function() return row.option and row.option.disabled end }) end
         else
             row:Hide()
         end
@@ -108,6 +129,10 @@ local function FindScrollViewport(anchor)
     end
     return nil
 end
+
+-- ============================================================
+-- Popup placement
+-- ============================================================
 
 local function ResolvePopupPlacement(anchor, preferredRows)
     local viewport = FindScrollViewport(anchor) or UIParent
@@ -151,17 +176,30 @@ local function EnsurePopup()
         popup:EnableMouseWheel(true)
     end
     popup:Hide()
+    local pad = NS.Internal.Controller
+    if pad then
+        pad.RegisterWindow(popup, { first = function()
+            for _, row in ipairs(popup.rows or {}) do
+                if row.option and not row.option.disabled and row.option.value == popup.args.currentValue then return row end
+            end
+            for _, row in ipairs(popup.rows or {}) do if row.option and not row.option.disabled and row:IsVisible() then return row end end
+        end })
+    end
 
-    if type(popup.SetBackdrop) == "function" then
-        popup:SetBackdrop({
+    local background = CreateFrame("Frame", nil, popup, BackdropTemplateMixin and "BackdropTemplate" or nil)
+    background:SetAllPoints(popup)
+    background:EnableMouse(false)
+    popup.background = background
+    if type(background.SetBackdrop) == "function" then
+        background:SetBackdrop({
             bgFile = "Interface\\Buttons\\WHITE8X8",
             edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
             edgeSize = 10,
         })
-        popup:SetBackdropColor(0.025, 0.019, 0.015, 0.98)
-        popup:SetBackdropBorderColor(0.62, 0.42, 0.20, 0.82)
+        background:SetBackdropColor(0.025, 0.019, 0.015, 0.98)
+        background:SetBackdropBorderColor(0.62, 0.42, 0.20, 0.82)
     else
-        popup.bg = popup:CreateTexture(nil, "BACKGROUND")
+        popup.bg = background:CreateTexture(nil, "BACKGROUND")
         popup.bg:SetAllPoints()
         ColorTexture(popup.bg, { 0.025, 0.019, 0.015, 0.98 })
     end
@@ -230,6 +268,22 @@ local function EnsurePopup()
         end)
 
         popup.rows[index] = row
+        if pad then
+            pad.RegisterControl(row, { navigate = function(direction)
+                if direction ~= "UP" and direction ~= "DOWN" then return end
+                local options = popup.args and popup.args.options
+                if not options then return true end
+                local target = (popup.offset or 1) + index - 1
+                local delta = direction == "DOWN" and 1 or -1
+                repeat target = target + delta until not options[target] or not options[target].disabled
+                if not options[target] then return true end
+                local count = popup.visibleRows or MAX_ROWS
+                popup.offset = math.max(1, math.min(popup.offset or 1, target))
+                if target >= popup.offset + count then popup.offset = target - count + 1 end
+                RenderRows(popup)
+                return popup.rows[target - popup.offset + 1]
+            end })
+        end
     end
 
     popup.topMore = popup:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
@@ -257,17 +311,27 @@ local function EnsurePopup()
     end)
 
     Dropdown.popup = popup
+    popup:SetScript("OnHide", function(self)
+        self.anchor = nil
+        self.args = nil
+        self:ClearAllPoints()
+    end)
     return popup
 end
 
-function Dropdown.Close()
-    if Dropdown.popup then
+-- ============================================================
+-- Opening and closing
+-- ============================================================
+
+function Dropdown.Close(anchor)
+    if Dropdown.popup and (not anchor or Dropdown.popup.anchor == anchor) then
         Dropdown.popup:Hide()
     end
 end
 
 function Dropdown.Open(anchor, args)
     if not anchor or type(args) ~= "table" then return end
+    local pad = NS.Internal.Controller
 
     local popup = EnsurePopup()
     if popup:IsShown() and popup.anchor == anchor then
@@ -284,9 +348,25 @@ function Dropdown.Open(anchor, args)
     popup.args = args
     popup.visibleRows = rowCount
     popup.offset = 1
+    if NS.Internal.Controller and NS.Internal.Controller.Enabled() then
+        local selected, firstEnabled
+        for index, option in ipairs(options) do
+            if not option.disabled then
+                firstEnabled = firstEnabled or index
+                if option.value == args.currentValue then selected = index; break end
+            end
+        end
+        popup.offset = math.max(1, (selected or firstEnabled or 1) - rowCount + 1)
+    end
     popup:SetParent(UIParent)
     popup:SetFrameLevel((anchor:GetFrameLevel() or 1) + 30)
     popup:SetSize(width, rowCount * ROW_H + POPUP_PADDING_Y)
+    local appearance = NS.Internal.Appearance
+    local surface = appearance and appearance.FindSurface(anchor)
+    if appearance and surface then
+        appearance.Tag(popup, surface)
+        appearance.Shell(popup, surface, { popup.background }, nil, "menu")
+    end
     popup:ClearAllPoints()
     if direction == "up" then
         popup:SetPoint("BOTTOMLEFT", anchor, "TOPLEFT", 0, POPUP_GAP)
@@ -295,4 +375,5 @@ function Dropdown.Open(anchor, args)
     end
     popup:Show()
     RenderRows(popup)
+    if pad then pad.Enter(popup) end
 end

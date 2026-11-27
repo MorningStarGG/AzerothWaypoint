@@ -159,7 +159,7 @@ end
 
 local function UpdateCachedNavFrame()
     -- Nav frame is managed by NAVIGATION_FRAME_CREATED/DESTROYED events.
-    -- This only returns the cached value; do not poll C_Navigation.GetFrame() here.
+    -- This only returns the cached value, do not poll C_Navigation.GetFrame() here.
     return overlay.cachedNavFrame
 end
 
@@ -234,6 +234,11 @@ local function IsSameWaypoint(mapA, xA, yA, mapB, xB, yB)
 
     local epsilon = 1e-5
     return math.abs(xA - xB) <= epsilon and math.abs(yA - yB) <= epsilon
+end
+
+function M.MatchesNavigationHost(carrierSig, mapID, x, y)
+    return carrierSig ~= nil and overlay.hostTargetSig == carrierSig
+        and IsSameWaypoint(overlay.hostMapID, overlay.hostX, overlay.hostY, mapID, x, y)
 end
 
 -- ============================================================
@@ -315,11 +320,7 @@ end
 -- Host waypoint management
 -- ============================================================
 
-local function TrySetNativeHostWaypoint(mapID, x, y, title)
-    local churn = NS.State.churn
-    if churn and churn.active then
-        churn.trySetHost = churn.trySetHost + 1
-    end
+local function TrySetNativeWaypoint(mapID, x, y, label, title)
     if not (type(mapID) == "number" and type(x) == "number" and type(y) == "number") then
         return false
     end
@@ -329,7 +330,7 @@ local function TrySetNativeHostWaypoint(mapID, x, y, title)
 
     local currentMapID, currentX, currentY = GetCurrentUserWaypoint()
     if IsSameWaypoint(mapID, x, y, currentMapID, currentX, currentY) then
-        NS.Log("Native overlay host set", tostring(mapID), tostring(x), tostring(y), title or "", "existing")
+        NS.Log(label, tostring(mapID), tostring(x), tostring(y), title or "", "existing")
         return true
     end
 
@@ -338,6 +339,7 @@ local function TrySetNativeHostWaypoint(mapID, x, y, title)
         return false
     end
 
+    local churn = NS.State.churn
     if churn and churn.active then
         churn.setUserWaypointCall = churn.setUserWaypointCall + 1
     end
@@ -348,15 +350,82 @@ local function TrySetNativeHostWaypoint(mapID, x, y, title)
 
     currentMapID, currentX, currentY = GetCurrentUserWaypoint()
     if IsSameWaypoint(mapID, x, y, currentMapID, currentX, currentY) then
-        NS.Log("Native overlay host set", tostring(mapID), tostring(x), tostring(y), title or "", "confirmed")
+        NS.Log(label, tostring(mapID), tostring(x), tostring(y), title or "", "confirmed")
         return true
     end
 
     -- Blizzard may apply the user waypoint and create the navigation frame on a later
     -- event tick. Treat a successful SetUserWaypoint call as a pending success and let
     -- USER_WAYPOINT_UPDATED / NAVIGATION_FRAME_CREATED complete the state transition.
-    NS.Log("Native overlay host set pending", tostring(mapID), tostring(x), tostring(y), title or "")
+    NS.Log(label, tostring(mapID), tostring(x), tostring(y), title or "", "pending")
     return true
+end
+
+local function TrySetNativeHostWaypoint(mapID, x, y, title)
+    local churn = NS.State.churn
+    if churn and churn.active then
+        churn.trySetHost = churn.trySetHost + 1
+    end
+    return TrySetNativeWaypoint(mapID, x, y, "Native overlay host set", title)
+end
+
+local function StopTrackingUserWaypoint()
+    if C_SuperTrack.IsSuperTrackingUserWaypoint() then
+        if type(NS.WithInternalSuperTrackMutation) == "function" then
+            NS.WithInternalSuperTrackMutation(C_SuperTrack.SetSuperTrackedUserWaypoint, false)
+        else
+            C_SuperTrack.SetSuperTrackedUserWaypoint(false)
+        end
+    end
+end
+
+local function SetClickedWaypoint(click)
+    if TrySetNativeWaypoint(click.mapID, click.x, click.y, "Blizzard map click")
+        and IsSameWaypoint(click.mapID, click.x, click.y, GetCurrentUserWaypoint()) then
+        StopTrackingUserWaypoint()
+    end
+end
+
+-- The user waypoint and the navigation host share one Blizzard slot. When a
+-- leg releases it, the selected map click resumes at its original map point.
+local function ReleaseUserWaypoint(mapID, x, y)
+    StopTrackingUserWaypoint()
+    -- Untracking can dispatch events. A different waypoint installed by a
+    -- listener now owns the slot.
+    if not IsSameWaypoint(mapID, x, y, GetCurrentUserWaypoint()) then return end
+    local routing = NS.State.routing
+    local click = NS.GetWorldMapClickIdentity(routing.pendingManualAuthority or routing.manualAuthority)
+    if click then
+        SetClickedWaypoint(click)
+    else
+        CallInternalUserWaypointMutation(C_Map.ClearUserWaypoint)
+    end
+end
+
+function M.OnManualAuthorityChanged(previous, current, releasedPending)
+    local click = NS.GetWorldMapClickIdentity(current)
+    local previousClick = NS.GetWorldMapClickIdentity(previous)
+    if not click and not previousClick then return end
+    local mapID, x, y = GetCurrentUserWaypoint()
+    if IsSameWaypoint(overlay.hostMapID, overlay.hostX, overlay.hostY, mapID, x, y) then
+        local carrier = NS.State.routing.carrierState
+        if not current and carrier and carrier.authority == previous
+            and M.MatchesNavigationHost(carrier.sig, mapID, x, y) then
+            ClearNativeNavigationHost()
+        end
+        return
+    end
+    -- On rollback a different addon may already have replaced the parked
+    -- click. Only restore the previous destination while we own this slot.
+    if releasedPending and mapID and (not previousClick
+            or not IsSameWaypoint(previousClick.mapID, previousClick.x, previousClick.y, mapID, x, y)) then
+        return
+    end
+    if click then
+        SetClickedWaypoint(click)
+    elseif IsSameWaypoint(previousClick.mapID, previousClick.x, previousClick.y, mapID, x, y) then
+        ReleaseUserWaypoint(mapID, x, y)
+    end
 end
 
 local function ProbeInstanceWaypointCapability(targetMapID, targetX, targetY, title)
@@ -522,7 +591,8 @@ local function SetSeededHostTarget(mapID, x, y, realDistance, isSurrogate, surro
                 )
             then
                 surrogateNavigationNoticeLastAt = now
-                NS.Msg("Using an intermediate navigation point because Blizzard may not reliably supertrack the requested waypoint from this distance.")
+                NS.Msg(
+                    "Using an intermediate navigation point because Blizzard may not reliably supertrack the requested waypoint from this distance.")
             end
         elseif previousSeedSig ~= sig then
             NS.Log(
@@ -833,7 +903,7 @@ local function GetSeededHostWaypoint(force)
     local surrogateSourceX = type(target.x) == "number" and target.x or targetX
     local surrogateSourceY = type(target.y) == "number" and target.y or targetY
     local surrogateMapID, surrogateX, surrogateY, _, surrogateWorldX, surrogateWorldY,
-        surrogateFailureReason, surrogateFailureA, surrogateFailureB, surrogateFailureC, surrogateFailureD =
+    surrogateFailureReason, surrogateFailureA, surrogateFailureB, surrogateFailureC, surrogateFailureD =
         ResolveWorldSpaceSurrogateUserWaypoint(
             surrogateSourceMapID,
             surrogateSourceX,
@@ -1161,6 +1231,12 @@ end
 -- Navigation host lifecycle
 -- ============================================================
 
+local function YieldToCorpseNavigation()
+    if not M.CorpseOwnsNavigationFrame() then return false end
+    if overlay.hostMapID then ClearNativeNavigationHost() end
+    return true
+end
+
 local function EnsureNativeNavigationHost()
     local churn = NS.State.churn
     if churn and churn.active then
@@ -1169,6 +1245,7 @@ local function EnsureNativeNavigationHost()
     if not target.active then
         return false
     end
+    if YieldToCorpseNavigation() then return false end
     if IsNativeSpecialTravelSuppressed() then
         ClearNativeNavigationHost()
         return false
@@ -1206,6 +1283,7 @@ local function EnsureNativeNavigationHost()
     end
 
     if IsNativeHostFullySatisfied(targetMapID, targetX, targetY) then
+        overlay.hostTargetSig = target.sig
         RecordNativeHostEnsure(targetMapID, targetX, targetY)
         ApplySuperTrackedFrameVisibility()
         return true
@@ -1221,13 +1299,12 @@ local function EnsureNativeNavigationHost()
     RecordNativeHostEnsure(targetMapID, targetX, targetY)
 
     if not TrySetNativeHostWaypoint(targetMapID, targetX, targetY, target.title) then
-        overlay.hostMapID = nil
-        overlay.hostX = nil
-        overlay.hostY = nil
+        ClearNativeNavigationHost()
         NS.Log("Native overlay host unavailable", tostring(target.mapID), tostring(target.x), tostring(target.y))
         return false
     end
 
+    overlay.hostTargetSig = target.sig
     overlay.hostMapID = targetMapID
     overlay.hostX = targetX
     overlay.hostY = targetY
@@ -1246,9 +1323,7 @@ local function EnsureNativeNavigationHost()
             -- Map immediately rejected the supertrack — it does not support user waypoint
             -- navigation. Clear the host state we just recorded and block further retries
             -- until the player changes maps or the target changes.
-            overlay.hostMapID = nil
-            overlay.hostX = nil
-            overlay.hostY = nil
+            ClearNativeNavigationHost()
             local playerMapID = GetPlayerMapID()
             if type(playerMapID) == "number" then
                 MarkNativeRouteProbe(false, playerMapID)
@@ -1264,6 +1339,7 @@ end
 
 ClearNativeNavigationHost = function()
     local hostMapID, hostX, hostY = overlay.hostMapID, overlay.hostX, overlay.hostY
+    overlay.hostTargetSig = nil
     overlay.hostMapID = nil
     overlay.hostX = nil
     overlay.hostY = nil
@@ -1282,17 +1358,8 @@ ClearNativeNavigationHost = function()
         return
     end
 
-    if C_SuperTrack.IsSuperTrackingUserWaypoint() then
-        if type(NS.WithInternalSuperTrackMutation) == "function" then
-            NS.WithInternalSuperTrackMutation(C_SuperTrack.SetSuperTrackedUserWaypoint, false)
-        else
-            C_SuperTrack.SetSuperTrackedUserWaypoint(false)
-        end
-    end
-
-    CallInternalUserWaypointMutation(C_Map.ClearUserWaypoint)
-
-    NS.Log("Native overlay host cleared", tostring(hostMapID), tostring(hostX), tostring(hostY))
+    ReleaseUserWaypoint(hostMapID, hostX, hostY)
+    NS.Log("Native overlay host released", tostring(hostMapID), tostring(hostX), tostring(hostY))
     ApplySuperTrackedFrameVisibility()
 end
 
@@ -1302,6 +1369,10 @@ function NS.OnNativeNavFrameCreated()
     overlay.routeProbeSig = nil
     overlay.routeProbePlayerMapID = nil
     overlay.routeProbeValid = nil
+    if M.CorpseOwnsNavigationFrame() then
+        NS.UpdateNativeWorldOverlay()
+        return
+    end
     local targetMapID, targetX, targetY = GetSeededHostWaypoint(false)
     if target.active and type(targetMapID) == "number" then
         SetInstanceCapability(targetMapID, true, false)
@@ -1319,6 +1390,12 @@ end
 -- Called by NAVIGATION_FRAME_DESTROYED event: no routable path, hide everything.
 function NS.OnNativeNavFrameDestroyed()
     overlay.cachedNavFrame = nil
+    -- On resurrection the priority can change before the corpse frame is
+    -- destroyed. Its disappearance says nothing about the next user waypoint.
+    if not overlay.hostMapID or M.CorpseOwnsNavigationFrame() then
+        NS.UpdateNativeWorldOverlay()
+        return
+    end
     local targetMapID = GetSeededHostWaypoint(false)
     if target.active and type(targetMapID) == "number" then
         local allowed, pending = GetCurrentInstanceCapability(targetMapID)
@@ -1358,6 +1435,9 @@ local function ExitHidden(reason, ...)
 end
 
 local function ResolveMode()
+    if YieldToCorpseNavigation() then
+        return ExitHidden("blizzard_corpse")
+    end
     derived.distance = GetTargetDistance()
     UpdateArrivalState(derived.distance)
 

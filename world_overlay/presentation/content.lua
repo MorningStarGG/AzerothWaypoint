@@ -5,7 +5,6 @@ local overlay = M.overlay
 local target = M.target
 local arrival = M.arrival
 local questIconCache = M.questIconCache
-local questSubtextCache = M.questSubtextCache
 local fontStringTextCache = M.fontStringTextCache
 local _settings = M.settingsSnapshot
 local CFG = M.Config
@@ -387,7 +386,8 @@ local function BuildQuestIconSpec(typeKey, statusPrefix)
     _questIconCacheKeyParts[6] = tostring(explicitTexture or "")
     _questIconCacheKeyParts[7] = tostring(GetQuestIconTintCacheKey(resolvedTint, resolvedTintKey))
     _questIconCacheKeyParts[8] = tostring(
-        resolvedWaypointTextTint and GetQuestWaypointTextTintCacheKey(resolvedWaypointTextTint, resolvedWaypointTextTintKey)
+        resolvedWaypointTextTint and
+        GetQuestWaypointTextTintCacheKey(resolvedWaypointTextTint, resolvedWaypointTextTintKey)
         or ""
     )
     _questIconCacheKeyParts[9] = tostring(iconOffsetX or "")
@@ -626,7 +626,22 @@ local function IsCarrierRouteLeg(contentSnapshot)
     return type(contentSnapshot) == "table" and contentSnapshot.routeLegKind == "carrier"
 end
 
+local vehicleIconSpecs = {}
 local function ResolveTravelIconSpec(travelType)
+    travelType = NS.NormalizeTravelType(travelType)
+    if NS.IsVehicleTravelType(travelType) then
+        local spec = vehicleIconSpecs[travelType]
+        if spec == nil then
+            spec = ICON_SPECS[travelType]
+            local ok, info = false, nil
+            if spec and C_Texture and type(C_Texture.GetAtlasInfo) == "function" then
+                ok, info = pcall(C_Texture.GetAtlasInfo, spec.atlas)
+            end
+            spec = ok and info and spec or ICON_SPECS.travel
+            vehicleIconSpecs[travelType] = spec
+        end
+        return spec
+    end
     if travelType == "taxi" then
         return ICON_SPECS.taxi
     end
@@ -654,15 +669,6 @@ local function ResolveTravelIconSpec(travelType)
     if travelType == "travel" then
         return ICON_SPECS.travel
     end
-    if travelType == "carrier"
-        or travelType == "walk"
-        or travelType == "fly"
-        or travelType == "ship"
-        or travelType == "zeppelin"
-    then
-        return ICON_SPECS.travel
-    end
-
     return nil
 end
 
@@ -1066,7 +1072,8 @@ local function ResolveGossipIconSpec(typeKey)
         end
         if not resolved and (typeKey == fallbackKey or IsDerivedGossipTypeKey(typeKey) or type(typeDef) == "table") then
             resolved = GetGossipFallbackIconSpec()
-            directBaseOverride = type(resolved) == "table" and resolved.key == fallbackKey and ICON_SPECS[fallbackKey] == nil
+            directBaseOverride = type(resolved) == "table" and resolved.key == fallbackKey and
+            ICON_SPECS[fallbackKey] == nil
         end
     end
 
@@ -1120,7 +1127,8 @@ local function ResolveSnapshotIconSpec(contentSnapshot)
         and contentSnapshot.iconHintQuestID
         or nil
 
-    if iconHintKind == "quest" and iconHintQuestID then
+    if iconHintKind == "quest" then
+        if not iconHintQuestID then return BuildQuestIconSpec("Default", "Available") end
         local questIcon = GetQuestIconSpec(iconHintQuestID)
         if questIcon then
             return questIcon
@@ -1237,6 +1245,8 @@ local function ResolveQueueIconHintKind(record, meta, identity, mapPinInfo, manu
         return ResolveTravelIconSpec(routeTravelType) and routeTravelType or "travel"
     end
 
+    if type(identity) == "table" and identity.destinationKind == "corpse" then return "corpse" end
+
     if type(manualQuestID) == "number" and manualQuestID > 0 then
         return "quest"
     end
@@ -1300,7 +1310,8 @@ local function BuildQueueIconCacheKey(record, opts)
     _queueIconCacheKeyParts[3] = tostring(record.routeLegKind or "")
     _queueIconCacheKeyParts[4] = tostring(record.routeTravelType or "")
     _queueIconCacheKeyParts[5] = tostring(record.plannerLegKind or "")
-    _queueIconCacheKeyParts[6] = tostring(record.sourceAddon or meta and meta.sourceAddon or identity and identity.sourceAddon or "")
+    _queueIconCacheKeyParts[6] = tostring(record.sourceAddon or meta and meta.sourceAddon or
+    identity and identity.sourceAddon or "")
     _queueIconCacheKeyParts[7] = tostring(record.searchKind or meta and meta.searchKind or "")
     _queueIconCacheKeyParts[8] = tostring(manualQuestID or "")
     _queueIconCacheKeyParts[9] = tostring(questTypeKey or "")
@@ -1334,7 +1345,8 @@ local function BuildQueueIconCacheKey(record, opts)
         and NS.GetGuideProviderRegistryRevision()
         or ""
     )
-    return table.concat(_queueIconCacheKeyParts, "\031", 1, 34)
+    _queueIconCacheKeyParts[35] = tostring(identity and identity.destinationKind or "")
+    return table.concat(_queueIconCacheKeyParts, "\031", 1, 35)
 end
 
 local function CacheQueueIconSpec(cacheKey, spec)
@@ -1391,6 +1403,7 @@ local function ResolveWaypointIconSpec(record, opts)
     FillQueueIconMapPinSnapshot(_queueIconSnapshot, mapPinInfo)
 
     local kind = TrimIconString(opts.kind)
+        or (_queueIconSnapshot.iconHintKind == "corpse" and "corpse")
         or (_queueIconSnapshot.routeLegKind == "carrier" and "route")
         or (TrimIconString(record.entryType) == "travel" and "route")
         or "manual"
@@ -1573,6 +1586,8 @@ local function UpdateDistanceFontString(footer, fontString, distanceYards)
         return true
     end
 
+    -- A formatted write replaces any plain text remembered for this label.
+    fontStringTextCache[fontString] = nil
     if unitKey == "km" then
         fontString:SetFormattedText("%.1f km", valueKey / 10)
     elseif unitKey == "m" then
@@ -1607,6 +1622,7 @@ local function UpdateArrivalFontString(footer, fontString, seconds)
     local hours = math.floor(valueKey / 3600)
     local minutes = math.floor((valueKey % 3600) / 60)
     local secs = math.floor(valueKey % 60)
+    fontStringTextCache[fontString] = nil
     if hours > 0 then
         fontString:SetFormattedText("%d:%02d:%02d", hours, minutes, secs)
     else
@@ -1671,7 +1687,7 @@ local function UpdateArrivalState(distance)
 
     local instantSpeed = deltaDistance / deltaTime
     arrival.averageSpeed = arrival.averageSpeed and
-    (arrival.averageSpeed + ARRIVAL_ALPHA * (instantSpeed - arrival.averageSpeed)) or instantSpeed
+        (arrival.averageSpeed + ARRIVAL_ALPHA * (instantSpeed - arrival.averageSpeed)) or instantSpeed
     if not arrival.averageSpeed or arrival.averageSpeed <= ARRIVAL_MIN_SPEED then
         arrival.seconds = -1
         return
@@ -1725,19 +1741,6 @@ end
 -- Content resolution
 -- ============================================================
 
-local function NormalizeQuestSubtext(text)
-    if type(text) ~= "string" then
-        return nil
-    end
-
-    text = text:gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
-    if text == "" then
-        return nil
-    end
-
-    return text
-end
-
 local function GetQuestBackedManualQuestID(contentSnapshot)
     local questID = type(contentSnapshot) == "table" and contentSnapshot.manualQuestID or nil
     if type(questID) == "number" and questID > 0 then
@@ -1745,43 +1748,6 @@ local function GetQuestBackedManualQuestID(contentSnapshot)
     end
 
     return nil
-end
-
-local function ResolveQuestBackedManualSubtext(questID)
-    if type(questID) ~= "number" then
-        return nil
-    end
-
-    local cachedEntry = type(questSubtextCache) == "table" and questSubtextCache[questID] or nil
-    if type(cachedEntry) == "table" then
-        return cachedEntry.text
-    end
-
-    local resolvedText = nil
-    if type(C_QuestLog) == "table" then
-        if type(C_QuestLog.ReadyForTurnIn) == "function" and C_QuestLog.ReadyForTurnIn(questID) == true then
-            resolvedText = "Ready to turn in"
-        elseif type(C_QuestLog.GetQuestObjectives) == "function" then
-            local objectives = C_QuestLog.GetQuestObjectives(questID)
-            if type(objectives) == "table" then
-                for _, objective in ipairs(objectives) do
-                    if type(objective) == "table" and objective.finished ~= true then
-                        local objectiveText = objective.text or rawget(objective, "description")
-                        resolvedText = NormalizeQuestSubtext(objectiveText)
-                        if resolvedText then
-                            break
-                        end
-                    end
-                end
-            end
-        end
-    end
-
-    if type(questSubtextCache) == "table" then
-        questSubtextCache[questID] = { text = resolvedText }
-    end
-
-    return resolvedText
 end
 
 local function GetTargetSubtext()
@@ -1797,14 +1763,9 @@ local function GetTargetSubtext()
             or (target.kind == "route" and not IsCarrierRouteLeg(contentSnapshot))
         )
     then
-        local questSubtext = ResolveQuestBackedManualSubtext(manualQuestID)
-        if questSubtext then
-            return questSubtext
-        end
-
-        if target.mapID and target.x and target.y
-            and (target.kind == "manual" or _settings.worldOverlayShowCoordinateFallback)
-        then
+        local detail = type(contentSnapshot) == "table" and contentSnapshot.pinpointSubtext or nil
+        if detail then return detail end
+        if _settings.worldOverlayShowCoordinateFallback and target.x and target.y then
             return FormatCoordinateSubtext(target.x, target.y)
         end
         return nil
@@ -1902,18 +1863,7 @@ M.NormalizeText = NormalizeText
 M.BuildQuestIconSpec = BuildQuestIconSpec
 
 function M.InvalidateQuestSubtextCache(questID)
-    if type(questSubtextCache) ~= "table" then
-        return
-    end
-
-    if type(questID) == "number" and questID > 0 then
-        questSubtextCache[questID] = nil
-        return
-    end
-
-    for cachedQuestID in pairs(questSubtextCache) do
-        questSubtextCache[cachedQuestID] = nil
-    end
+    if NS.InvalidateQuestPresentation then NS.InvalidateQuestPresentation(questID) end
 end
 
 function M.InvalidateQuestIconSpecCache(questID)

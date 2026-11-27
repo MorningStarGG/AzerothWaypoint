@@ -1,3 +1,10 @@
+-- ============================================================
+-- Vignette waypoints
+-- ============================================================
+--
+-- Resolves a supertracked vignette to its location and adopts or clears the
+-- corresponding manual route.
+
 local NS = _G.AzerothWaypointNS
 local state = NS.State
 NS.Internal.BlizzardTakeovers = NS.Internal.BlizzardTakeovers or {}
@@ -7,7 +14,6 @@ local GetActiveManualDestination = NS.GetActiveManualDestination
 local ClearActiveManualDestination = NS.ClearActiveManualDestination
 local GetGuideVisibilityState = NS.GetGuideVisibilityState
 local ReadWaypointCoords = NS.ReadWaypointCoords
-local Signature = NS.Signature
 
 state.bridgeVignetteTakeover = state.bridgeVignetteTakeover or {
     adoptionRetrySerial = 0,
@@ -20,7 +26,7 @@ local VIGNETTE_ADOPTION_RETRY_DELAY_SECONDS = 0.05
 local VIGNETTE_ADOPTION_RETRY_MAX_ATTEMPTS = 4
 
 -- ============================================================
--- Local helpers
+-- Vignette identifiers and map candidates
 -- ============================================================
 
 local function NormalizeVignetteGUID(vignetteGUID)
@@ -29,54 +35,14 @@ local function NormalizeVignetteGUID(vignetteGUID)
     end
 end
 
-local function GetWaypointSignature(mapID, x, y)
-    if type(Signature) ~= "function" then
-        return nil
-    end
-    if type(mapID) ~= "number" or type(x) ~= "number" or type(y) ~= "number" then
-        return nil
-    end
-    return Signature(mapID, x, y)
-end
+local GetWaypointSignature = NS.GetWaypointSignatureForCoords
 
-local function ReadMapPositionCoords(position)
-    if type(position) ~= "table" then
-        return nil, nil
-    end
-    if type(position.GetXY) == "function" then
-        local ok, x, y = pcall(position.GetXY, position)
-        if ok and type(x) == "number" and type(y) == "number" then
-            return x, y
-        end
-    end
-    local x = type(position.x) == "number" and position.x or nil
-    local y = type(position.y) == "number" and position.y or nil
-    return x, y
-end
+local ReadMapPositionCoords = NS.Internal.ReadMapPositionCoords
 
-local function ResolveMapTitle(mapID, x, y)
-    local mapInfo = type(C_Map) == "table"
-        and type(C_Map.GetMapInfo) == "function"
-        and C_Map.GetMapInfo(mapID)
-        or nil
-    local mapName = mapInfo and mapInfo.name or nil
-    if type(mapName) == "string" and mapName ~= "" then
-        if type(x) == "number" and type(y) == "number" then
-            return string.format("%s %.0f, %.0f", mapName, x * 100, y * 100)
-        end
-        return mapName
-    end
-    if type(mapID) == "number" then
-        if type(x) == "number" and type(y) == "number" then
-            return string.format("Waypoint %d %.0f, %.0f", mapID, x * 100, y * 100)
-        end
-        return "Waypoint " .. tostring(mapID)
-    end
-    return "Waypoint"
-end
+local ResolveMapTitle = M.ResolveMapTitle
 
 -- ============================================================
--- GetCurrentSuperTrackedVignetteGUID
+-- Current supertracked vignette
 -- ============================================================
 
 local function GetCurrentSuperTrackedVignetteGUID()
@@ -235,7 +201,7 @@ local function GetActiveBlizzardVignetteManual()
 end
 
 -- ============================================================
--- Metadata builder
+-- Destination metadata
 -- ============================================================
 
 local function BuildBlizzardVignetteMeta(vignetteGUID, mapID, x, y, explicit, vignetteInfo)
@@ -373,7 +339,7 @@ local function ScheduleVignetteAdoptionRetry(vignetteGUID, preferredMapID, expli
 end
 
 -- ============================================================
--- Clear
+-- Clearing a vignette route
 -- ============================================================
 
 local function ClearBlizzardVignetteBackedManual(clearReason)
@@ -458,7 +424,7 @@ function NS.HandleSuperTrackedVignetteChanged(vignetteGUID)
 end
 
 -- ============================================================
--- NS exports
+-- Public takeover handlers
 -- ============================================================
 
 function NS.GetBlizzardVignetteGUID(destination)
@@ -474,7 +440,7 @@ function NS.ClearSuperTrackedVignetteIfCurrent(vignetteGUID)
 end
 
 -- ============================================================
--- Kind registration
+-- Pin type registration
 -- ============================================================
 
 M.BlizzardKinds["vignette"] = {
@@ -486,7 +452,9 @@ M.BlizzardKinds["vignette"] = {
     commitPending = function(pending)
         local adopted, reason = AdoptBlizzardVignetteAsManual(
             pending.vignetteGUID, pending.preferredMapID, true)
-        if adopted then CancelVignetteAdoptionRetry(); return true end
+        if adopted then
+            CancelVignetteAdoptionRetry(); return true
+        end
         if reason == "unresolved" then
             ScheduleVignetteAdoptionRetry(pending.vignetteGUID, pending.preferredMapID, true)
         end

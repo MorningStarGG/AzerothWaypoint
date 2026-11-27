@@ -1,3 +1,10 @@
+-- ============================================================
+-- Release note formatting
+-- ============================================================
+--
+-- Formats release entries for the in-game changelog, including inline emphasis
+-- and nested bullets.
+
 local NS = _G.AzerothWaypointNS
 
 NS.ChangelogFormat = NS.ChangelogFormat or {}

@@ -1,3 +1,10 @@
+-- ============================================================
+-- Zygor guide provider
+-- ============================================================
+--
+-- Registers Zygor's guide target and maps explicit goal clicks to guide
+-- selection in AWP.
+
 local NS = _G.AzerothWaypointNS
 if not NS.IsZygorLoaded() then return end
 
@@ -6,6 +13,7 @@ local state = NS.State
 local PROVIDER = "zygor"
 local EXPLICIT_GUIDE_REASSERT_DELAYS = { 0, 0.05 }
 local explicitGuideActivationSerial = 0
+local destinationCache
 
 local function TrimText(value)
     if type(value) ~= "string" then
@@ -49,6 +57,30 @@ local function ExtractTarget()
     end
     target.kind = target.kind or "guide_goal"
     target.guideProvider = PROVIDER
+    local Z = GetZygor()
+    local facts, dialog = NS.GetGuideResolverCacheToken()
+    local cached = destinationCache
+    if not cached or cached.step ~= Z.CurrentStep or cached.map ~= target.mapID or cached.x ~= target.x
+        or cached.y ~= target.y or cached.title ~= target.title or cached.facts ~= facts or cached.dialog ~= dialog then
+        cached = { step = Z.CurrentStep, map = target.mapID, x = target.x, y = target.y, title = target.title, facts =
+        facts, dialog = dialog }
+        local context = NS.ResolveGuideContentSnapshot({
+            rawArrowTitle = target.title,
+            mapID = target.mapID,
+            x = target.x,
+            y = target.y,
+            kind = "guide",
+            legKind = "destination",
+            source = target.source
+        })
+        if context then
+            cached.name, cached.kind, cached.action, cached.purpose = context.destinationName, context.destinationKind,
+                context.destinationAction, context.destinationPurpose
+        end
+        destinationCache = cached
+    end
+    target.destinationName, target.destinationKind, target.destinationAction, target.destinationPurpose = cached.name,
+        cached.kind, cached.action, cached.purpose
     return target, false
 end
 
@@ -65,6 +97,10 @@ local function GetActivationToken()
         tostring(step and (step.num or step.stepnum) or Z.CurrentStepNum or "-"),
     }, "\031", 1, 2)
 end
+
+-- ============================================================
+-- Clicked goal destinations
+-- ============================================================
 
 local function CallTextMethod(target, methodName, ...)
     if type(target) ~= "table" or type(target[methodName]) ~= "function" then
@@ -228,6 +264,10 @@ local function HookHiddenGuideAutoLoadGuard(Z)
     tabs._awpHiddenGuideAutoLoadGuarded = true
 end
 
+-- ============================================================
+-- Guide refresh and registration
+-- ============================================================
+
 local function ScheduleZygorPresentationRefresh(reason)
     if type(NS.MarkGuideResolverFactsDirty) == "function" then
         NS.MarkGuideResolverFactsDirty(reason or "zygor_goal_progress")
@@ -243,7 +283,10 @@ local function InstallHooks(schedule)
         return
     end
 
-    local switchOpts = { allowProviderSwitch = true }
+    local function guideIdentity()
+        local guide = Z.CurrentGuide
+        return type(guide) == "table" and (guide.title or guide.guid or guide.name) or nil
+    end
 
     HookExplicitGuideGoalClicks(Z)
     HookHiddenGuideAutoLoadGuard(Z)
@@ -257,33 +300,54 @@ local function InstallHooks(schedule)
         end
     end
 
-    local function scheduleGuideStateChanged(reason, opts)
-        schedule(reason, opts)
+    local function scheduleGuideStateChanged(reason)
+        -- Restoring tabs and automatic chapter changes also change identity.
+        -- Loading flags and identity changes cannot establish user intent.
+        schedule(reason)
         if type(NS.After) == "function" then
             NS.After(0.05, function()
-                schedule((reason or "guide_changed") .. "_settled", opts)
+                schedule((reason or "guide_changed") .. "_settled")
             end)
         end
     end
 
+    local function selectClickedGuide(guide, reason)
+        local current = Z.CurrentGuide
+        local identity = type(guide) == "table" and (guide.title or guide.guid or guide.name) or nil
+        if current and (guide == current or identity and identity == guideIdentity())
+            and type(NS.SelectGuideProvider) == "function" then
+            NS.SelectGuideProvider(PROVIDER, reason)
+        end
+    end
+    if type(Z.GuideMenu) == "table" and type(Z.GuideMenu.ActivateGuide) == "function" then
+        hooksecurefunc(Z.GuideMenu, "ActivateGuide", function(_, guide)
+            selectClickedGuide(guide, "ZygorGuidePickerSelection")
+        end)
+    end
+    if type(Z.Tabs) == "table" and type(Z.Tabs.HandleClick) == "function" then
+        hooksecurefunc(Z.Tabs, "HandleClick", function(tab)
+            selectClickedGuide(tab and tab.guide, "ZygorNativeTabSelection")
+        end)
+    end
+
     if type(Z.SetCurrentStep) == "function" then
-        hooksecurefunc(Z, "SetCurrentStep", scheduleFor("SetCurrentStep", switchOpts))
+        hooksecurefunc(Z, "SetCurrentStep", scheduleFor("SetCurrentStep"))
     end
     if type(Z.FocusStep) == "function" then
-        hooksecurefunc(Z, "FocusStep", scheduleFor("FocusStep", switchOpts))
+        hooksecurefunc(Z, "FocusStep", scheduleFor("FocusStep"))
     end
     if type(Z.GoalProgress) == "function" then
         hooksecurefunc(Z, "GoalProgress", scheduleFor("GoalProgress"))
     end
     if type(Z.Tabs) == "table" and type(Z.Tabs.LoadGuideToTab) == "function" then
-        hooksecurefunc(Z.Tabs, "LoadGuideToTab", scheduleFor("LoadGuideToTab", switchOpts))
+        hooksecurefunc(Z.Tabs, "LoadGuideToTab", function() scheduleGuideStateChanged("LoadGuideToTab") end)
     end
     if type(Z.Tabs) == "table"
         and type(Z.Tabs.RemoveTab) == "function"
         and not Z.Tabs._awpGuideRemoveTabHooked
     then
         hooksecurefunc(Z.Tabs, "RemoveTab", function()
-            scheduleGuideStateChanged("RemoveTab", switchOpts)
+            scheduleGuideStateChanged("RemoveTab")
         end)
         Z.Tabs._awpGuideRemoveTabHooked = true
     end
@@ -292,7 +356,7 @@ local function InstallHooks(schedule)
             schedule("LIBROVER_TRAVEL_REPORTED")
         end)
         pcall(Z.AddMessageHandler, Z, "GUIDE_CHANGED", function()
-            scheduleGuideStateChanged("GUIDE_CHANGED", switchOpts)
+            scheduleGuideStateChanged("GUIDE_CHANGED")
         end)
         pcall(Z.AddMessageHandler, Z, "ZGV_GOAL_PROGRESS", function()
             ScheduleZygorPresentationRefresh("ZGV_GOAL_PROGRESS")
@@ -308,7 +372,7 @@ local function InstallHooks(schedule)
         end)
     end
     if Z.Frame and type(Z.Frame.HookScript) == "function" then
-        Z.Frame:HookScript("OnShow", scheduleFor("GuideFrameOnShow", switchOpts))
+        Z.Frame:HookScript("OnShow", scheduleFor("GuideFrameOnShow"))
         Z.Frame:HookScript("OnHide", scheduleFor("GuideFrameOnHide"))
     end
 end

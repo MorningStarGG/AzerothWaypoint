@@ -1,6 +1,13 @@
-local NS = _G.AzerothWaypointNS
+-- ============================================================
+-- Help pages and links
+-- ============================================================
+--
+-- Defines the help pages, linked sections, screenshots and integration
+-- descriptions shown in game.
 
-local ADDON_NAME = NS.ADDON_NAME or "AzerothWaypoint"
+local NS = _G.AzerothWaypointNS
+local C = NS.Constants
+
 local MEDIA_ROOT = "Interface\\AddOns\\AzerothWaypoint\\media\\"
 local MEDIA = "Interface\\AddOns\\AzerothWaypoint\\media\\help\\"
 
@@ -8,20 +15,44 @@ local function JoinLines(lines)
     return table.concat(lines, "\n")
 end
 
+local function Capture(name, width, height, caption)
+    return {
+        type = "image",
+        align = "CENTER",
+        texture = MEDIA .. name,
+        width = width,
+        height = height,
+        placeholder = caption,
+        caption = caption
+    }
+end
+
+local function PlaqueSample(plaqueType, caption, height)
+    return { width = 236, height = height or 64, frameless = true, plaqueType = plaqueType, caption = caption }
+end
+
+-- Content helpers only: all blocks use the existing Help renderer schema.
+local function Heading(text, id) return { type = "heading", text = text, id = id } end
+local function Link(text, pageID, sectionID)
+    return "[[help:" .. pageID .. (sectionID and "#" .. sectionID or "") .. "|" .. text .. "]]"
+end
+local function Text(lines) return { type = "text", text = JoinLines(lines) } end
+local function Note(text) return { type = "note", text = text } end
+local function Row(items, gap) return { type = "image_row", items = items, gap = gap or 12 } end
+
+-- ============================================================
+-- Integration help content
+-- ============================================================
+
 local function BuildIntegrationHelpBlocks()
     local blocks = {
-        {
-            type = "heading",
-            text = "How AWP Integrates",
-        },
-        {
-            type = "text",
-            text = JoinLines({
-                "AzerothWaypoint keeps integrations source-aware: guide addons, route backends, map/POI addons, flight-map helpers, and Blizzard sources can all provide destinations without forcing every route to behave the same way.",
-                "",
-                "Open /awp options and choose the Integrations tab for the same list with load status and Copy Link buttons when addon links are available.",
-            }),
-        },
+        Heading("Only TomTom is required"),
+        Text({
+            "Install other addons only for the features you want. Guides provide destinations, travel planners find routes, tracker addons host Guide Viewers, and AWP can match the look of supported UI addons.",
+            "",
+            "Open /awp options > Integrations to see which integrations are loaded and copy addon links where available.",
+        }),
+        Heading("Supported integrations"),
     }
 
     local entries, order = {}, {}
@@ -71,1556 +102,932 @@ local function BuildIntegrationHelpBlocks()
     return blocks
 end
 
--- Help page schema:
--- Each page supports:
---   id      = unique page key used by NS.ShowHelp("page_id")
---   title   = page title shown in the help frame
---   hideTitle = true hides the in-page title while keeping title metadata
---   intro   = optional short intro line shown under the title
---   blocks  = ordered content blocks rendered top-to-bottom
---
--- Supported block types:
---   { type = "heading", text = "Section Title" }
---   { type = "text", text = "Body text" }
---   { type = "note", text = "Smaller secondary text", align = "CENTER", accent = false }
---   { type = "divider" }
---   {
---       type = "image",
---       width = 700,
---       height = 220,
---       texture = MEDIA .. "MainShot",
---       texCoord = { 0, 1, 0, 1 },
---       align = "CENTER",
---       placeholder = "Shown when texture is missing",
---       caption = "Optional caption below the image",
---   }
---   {
---       type = "image_row",
---       gap = 12,
---       items = {
---           {
---               width = 330,
---               height = 150,
---               texture = MEDIA .. "Starlight",
---               placeholder = "Fallback label",
---               caption = "Optional caption",
---           },
---       },
---   }
---   { type = "recent_changelog", limit = 3 }
---
--- Texture notes:
---   - Use WoW texture paths, not Windows file paths.
---   - Omit the file extension in Lua.
---   - Texture files do not need to be listed in the TOC.
---
--- New placeholder image names added in this pass:
---   MEDIA .. "QueuePanel"
---   MEDIA .. "QueueDetails"
---   MEDIA .. "BlizzardTakeover"
---   MEDIA .. "ExternalSource"
---
+-- ============================================================
+-- Help page definitions
+-- ============================================================
+
+-- Existing page IDs are retained for NS.ShowHelp callers. New pages split long topics.
 NS.HELP_PAGES = {
     {
         id = "overview",
         title = "Overview",
         hideTitle = true,
         blocks = {
-            {
-                type = "image",
-                texture = MEDIA_ROOT .. "banner.png",
-                align = "CENTER",
-                width = 768,
-                height = 256,
-                frameless = true,
-                spacingAfter = 14,
-            },
-            {
-                type = "heading",
-                text = "What AWP Does",
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    ADDON_NAME ..
-                    " takes destinations from multiple sources and presents the active route through TomTom, the queue UI, and the 3D world overlay.",
-                    "",
-                    "Common sources include:",
-                    "",
-                    "- TomTom waypoints and /way commands.",
-                    "- Guide steps from Azeroth Pilot Reloaded, WoWPro, and Zygor",
-                    "- Blizzard map clicks, quest POIs, supertracked quests, tracked quests, area POIs, taxi nodes, vignettes, dig sites, gossip POIs, and housing plots.",
-                    "- Imported /ttpaste waypoint batches.",
-                    "- Supported external addon waypoints from HandyNotes, SilverDragon, RareScanner, and similar transient sources.",
-                    "",
-                    "Simple rule:",
-                    "",
-                    "TomTom shows the arrow.",
-                    "AWP controls the route flow.",
-                    "Optional integrations provide richer routing and guide data.",
-                }),
-            },
-            {
-                type = "heading",
-                text = "Where To Start",
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "- Use /awp options to configure routing, queues, the TomTom arrow, and the world overlay.",
-                    "- Use /awp status to check the active backend, loaded integrations, and key toggles.",
-                    "- Use /awp queue to manage manual queues, imported routes, and guide queue projections.",
-                    "- Use /awp changelog to see recent changes.",
-                    "",
-                    "The next help pages explain integrations, routing, queues, the TomTom arrow, Zygor integration, the Zygor tracker viewer, the 3D overlay, customization, and commands.",
-                }),
-            },
+            { type = "image", texture = MEDIA_ROOT .. "banner.png", align = "CENTER", width = 768, height = 256, frameless = true, spacingAfter = 14 },
+            Heading("One arrow. More ways to explore Azeroth."),
+            Text({
+                "AzerothWaypoint (AWP) brings quests, guides, map pins and personal waypoints together in one navigation experience. TomTom provides the arrow, AWP plans the route and adds in-world guidance and waypoint management.",
+                "TomTom is the only required addon. Optional integrations add smarter travel routes, guide controls and more ways to customize your UI.",
+            }),
+            Heading("Get started"),
+            Text({
+                "1. Install and enable TomTom and AzerothWaypoint.",
+                "2. Open /awp options and choose General > Routing Backend. AWP can use an available travel planner or TomTom Direct.",
+                "3. Set a map waypoint, select a quest or load a supported guide. Follow the arrow and world markers.",
+                "4. To show a guide in your objective tracker, open its settings page > Tracker Viewer and enable the Viewer.",
+                "5. Open /awp queue (or use the world map tab) to manage saved destinations.",
+            }),
+            Capture("MainShot", 630, 350, "Example of the TomTom arrow and in-world destination guidance."),
+            Heading("Make it your own"),
+            Text({
+                "- Travel smarter: use flights, portals, teleports and supported walking paths.",
+                "- Find nearby services: open Search Nearby from the minimap menu to locate vendors, trainers and more.",
+                "- Keep multiple destinations: save, import and switch between waypoint queues.",
+                "- Follow your guides: show multiple Guide Viewers, with one guide directing navigation at a time.",
+                "- Customize navigation: choose arrow skins, world markers, plaques and optional UI appearance matching.",
+                "- Save your setup: use Profiles to share settings or keep a different setup for each character.",
+            }),
+            Note(
+            "Use the minimap button for quick access. /awp help opens this guide, /awp status shows your current setup, and /awp changelog shows release notes."),
         },
     },
     {
-        id = "integrations",
-        title = "Integrations",
-        intro = "What AzerothWaypoint works with, and what each supported addon or source adds.",
-        blocks = BuildIntegrationHelpBlocks(),
+        id = "routing_guides",
+        title = "Navigation and Routing",
+        intro = "Choose how AWP gets you to a destination.",
+        blocks = {
+            Heading("How navigation works"),
+            Text({
+                "A destination can come from a map pin, quest, guide, imported waypoint list or another addon. The Routing Backend decides how to get there, and TomTom and the world overlay show the next part of the route.",
+                "",
+                "For example, you can follow a RestedXP guide using Zygor travel routing, or follow a personal waypoint using Mapzeroth. Your guide and travel planner do not have to be the same addon.",
+                "Selecting another destination changes the active route without necessarily deleting your saved queues.",
+            }),
+            Heading("Choose a route planner"),
+            Text({
+                "Open General > Routing Backend. Only available planners can be used.",
+                "",
+                "- TomTom Direct: points straight to the destination, without travel planning.",
+                "- Zygor: uses Zygor travel data (LibRover).",
+                "- Farstrider: uses FarstriderLib and its travel data.",
+                "- Mapzeroth: plans travel and supported walking routes.",
+                "- Dugi: uses Dugi's Taxi System preferences.",
+                "- Polestar (Forever): uses its travel settings and terrain data.",
+                "- QuestieRouter (Forever): uses its travel settings.",
+                "",
+                "Choose a travel-aware planner if you want help finding flights, portals, transports or teleport actions. The available travel methods depend on the planner and your character.",
+                "If you set a waypoint inside a dungeon or raid, supported routes can guide you to a known entrance first and keep your original waypoint inside. Farstrider's data can fill in a missing entrance.",
+            }),
+            Heading("If a planner cannot find a route"),
+            Text({
+                "AWP tries other available planners before falling back to TomTom Direct. Your preferred planner stays selected, and AWP can return to it when a route becomes available. Current guidance stays visible while a replacement is calculated. AWP notifies of a fallback or return to your preferred planner.",
+                "",
+                "Intentional direct or walking-only settings are respected. Some planners can update routes during combat, others must wait. Loading or active travel can also delay updates.",
+            }),
+            Heading("Walking routes"),
+            Capture("WalkingRoute", 630, 437, "Example of a ground route with several walking points."),
+            Text({
+                "Mapzeroth can follow supported roads and city streets. Polestar and QuestieRouter can provide terrain paths on Forever with the appropriate navigation packs. Configure walking preferences in the planner itself.",
+                "",
+                "The arrow points to the next walking point, not necessarily the final destination. Named walking instructions can include the destination and quest purpose. AWP can advance past ordinary corners and recalculate a missed approach, required crossings and stops are kept.",
+                "Missing map or terrain coverage keeps ordinary guidance. A route may not know the exact floor or final approach.",
+            }),
+            Note(
+            "Follow ground paths while flying (General) is off by default. When off, a supported planner may bypass ordinary ground points during self-flight if it confirms a valid shortcut. Required stops remain."),
+        },
     },
     {
-        id = "routing_guides",
-        title = "Routing and Guide Providers",
-        intro = "AWP separates where a destination came from, how the route is planned, and how it is shown.",
+        id = "quest_navigation",
+        title = "Quests and Map Waypoints",
+        intro = "Route to quests, points of interest and destinations from other addons.",
         blocks = {
-            {
-                type = "image",
-                texture = MEDIA .. "OptionsGeneral",
-                align = "CENTER",
-                width = 512,
-                height = 315,
-                placeholder = "Options panel screenshot placeholder",
-                caption = "General options control routing backend, queues, quest tracking, and addon waypoint adoption.",
-            },
-            {
-                type = "heading",
-                text = "The Navigation Model",
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "AWP tracks three separate pieces of navigation state:",
-                    "",
-                    "- Source: where the destination came from.",
-                    "- Backend: how the route is planned.",
-                    "- Carrier: what displays the route.",
-                    "",
-                    "Examples:",
-                    "",
-                    "- Source: manual click, guide provider, quest, POI, addon waypoint, or imported queue.",
-                    "- Backend: Farstrider, Mapzeroth, Zygor, or TomTom directly, ",
-                    "- Carrier: TomTom Arrow and the AWP 3D world overlay.",
-                    "",
-                    "Keeping these separate helps prevent navigation sources from constantly overwriting each other. A guide queue can stay visible while a manual route is active, and a manual queue can survive when a guide temporarily takes control.",
-                }),
-            },
-            {
-                type = "heading",
-                text = "Routing Backends",
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "Routing Backend controls how AWP plans the active destination.",
-                    "",
-                    "- TomTom Direct: this is PURE TomTom making it always available. Routes straight to the selected target no pathfinding. Not advised for most users.",
-                    "- Farstrider: uses FarstriderLib and FarstriderLibData when available. This I would say is second only to Zygor. Highly recommended.",
-                    "- Mapzeroth: uses Mapzeroth pathfinding data when available. This one works well but is not as comprehensive as Farstrider at the moment.",
-                    "- Zygor: uses Zygor and LibRover when Zygor is installed. This is the GOLD standard for routing.",
-                    "",
-                    "If the selected backend is missing or not enabled AWP falls back safely.",
-                    "",
-                    "Slash command examples:",
-                    "",
-                    "/awp backend direct",
-                    "/awp backend farstrider",
-                    "/awp backend mapzeroth",
-                    "/awp backend zygor",
-                }),
-            },
-            {
-                type = "note",
-                text =
-                "Use TomTom Direct if you want simple point-to-point navigation with no pathfinding. Use Farstrider, Mapzeroth, or Zygor when you want travel-aware routing with flights, portals, transports, items, spells, or other travel nodes.",
-            },
-            {
-                type = "heading",
-                text = "Flight Map Assist",
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "When the active route uses a flight path, AWP can mark the intended destination on the flight map.",
-                    "",
-                    "- Exact Zygor / LibRover taxi destinations can match by Blizzard taxi node ID.",
-                    "- Mapzeroth and Farstrider can use strong coordinate/name matches where visible flight-map data is clear enough.",
-                    "- The marker is visual-only. It does not create routes or supertrack taxi nodes.",
-                    "- Auto Take Flight Paths mode for exact matches or strong matches. `Auto Take Flight Paths` is disabled by default and pressing `Alt` suppresses it for the current flight-map interaction.",
-                    "- Show Flight Map Taxi List adds an AWP side list with the route destination, favorites, recent flights, current-zone flights, search, and reachable destinations grouped by zone.",
-                    "- Flight Map Taxi List Text Size adjusts font size for readability in that attached list.",
-                    "- If InFlight is installed and has timing data, the taxi list can show exact or estimated flight times.",
-                    "",
-                    "Options:",
-                    "",
-                    "General > Routing > Show Flight Map Route Marker",
-                    "General > Routing > Auto Take Flight Paths",
-                    "General > Routing > Show Flight Map Taxi List",
-                    "General > Routing > Flight Map Taxi List Side",
-                    "General > Routing > Flight Map Taxi List Text Size",
-                }),
-            },
-            {
-                type = "heading",
-                text = "Guide Providers",
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "AWP can read guide targets from:",
-                    "",
-                    "- Zygor Guides Viewer",
-                    "- Azeroth Pilot Reloaded",
-                    "- WoWPro",
-                    "",
-                    "Zygor remains the deepest integration because it can provide LibRover routing, richer guide metadata, search data, Zygor-style arrow skins, native viewer controls, and the optional AWP tracker viewer. APR and WoWPro still provides guide targets, step text, objective context, and actionable overlay text when their data is available.",
-                }),
-            },
-            {
-                type = "note",
-                text =
-                "A guide appearing in the queue does not always mean it currently owns navigation. Manual queues, transient addon routes, quest routes, and active guide providers can all take turns controlling the active route.",
-            },
-            {
-                type = "heading",
-                text = "Blizzard Map and Quest Sources",
-            },
-            {
-                type = "image",
-                texture = MEDIA .. "BlizzardPOI",
-                align = "CENTER",
-                width = 512,
-                height = 485,
-                caption = "Blizzard quest pins, POIs, and map sources can be adopted into AWP routing.",
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "AWP can adopt supported Blizzard navigation sources and route them through the active backend.",
-                    "",
-                    "Supported Blizzard sources include:",
-                    "",
-                    "- user waypoints",
-                    "- quest POIs",
-                    "- supertracked quests",
-                    "- tracked quests",
-                    "- area POIs",
-                    "- vignettes",
-                    "- taxi nodes",
-                    "- gossip POIs",
-                    "- dig sites",
-                    "- housing plots",
-                    "",
-                    "Quest-backed destinations can use quest-aware titles, icons, progress text, and clearing behavior when Blizzard exposes the needed data.",
-                }),
-            },
-            {
-                type = "note",
-                text =
-                "Use Blizzard takeover support when you want map clicks, quest pins, tracked quests, or supertracked quests to route through AWP instead of behaving like unrelated one-off waypoints.",
-            },
-            {
-                type = "heading",
-                text = "External Addon Sources",
-            },
-            {
-                type = "image",
-                texture = MEDIA .. "SilverDragon",
-                align = "CENTER",
-                width = 512,
-                height = 472,
-                caption =
-                "Supported external addons such as SilverDragon waypoints can temporarily take over navigation without destroying manual queues.",
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "AWP includes source-aware handling for supported addon-created waypoints.",
-                    "",
-                    "Current source-aware integrations include:",
-                    "",
-                    "- HandyNotes",
-                    "- SilverDragon",
-                    "- RareScanner",
-                    "",
-                    "These are handled as transient manual sources, so a POI, rare scan, or similar temporary route can briefly take over navigation without deleting your persistent manual queues.",
-                }),
-            },
-            {
-                type = "note",
-                text =
-                "Use addon waypoint adoption when you want known or approved addon-created TomTom waypoints to appear as temporary AWP routes. Use the allowlist and blocklist if unknown addon callers need stricter control.",
-            },
+            Heading("Set a destination"),
+            Capture("BlizzardPOI", 360, 341, "Example of quest and point-of-interest pins on the world map."),
+            Text({
+                "Set a supported map waypoint or select a quest destination to use AWP navigation. Supported sources include user waypoints, quest pins, tracked and supertracked quests, area POIs, rare/vignette pins, flight masters, gossip destinations, dig sites and housing plots where available.",
+                "",
+                "Quest destinations can show quest icons, objectives and progress when the necessary information is available.",
+            }),
+            Heading("Choose how quests are followed"),
+            Text({
+                "Under General:",
+                "- Auto-Route Tracked Quests: start routing newly tracked quests. Active guide steps are protected.",
+                "- Auto-Clear Untracked Quests: remove matching quest routes and queue entries when you untrack a quest.",
+                "- Auto-Clear Supertracked Quests on Arrival: stop the matching route when you reach its destination.",
+                "",
+                "On Forever, DaylightUI's quest menu can offer Route with AzerothWaypoint without changing your watched quests.",
+            }),
+            Heading("Extra quest information"),
+            Text({
+                "On Forever, the optional separate QuestieDB download can provide NPC, object and item information for identified quests, even without Questie running. On both clients, loaded BtWQuests packs can fill missing quest names and known acceptance or NPC/object details. AWP does not automatically load extra packs. Missing or uncertain information falls back to normal client guidance and preserves explicitly selected coordinates.",
+            }),
+            Heading("Waypoints from other addons"),
+            Capture("SilverDragon", 350, 323, "Example of a rare-spawn destination from SilverDragon."),
+            Text({
+                "HandyNotes, SilverDragon and RareScanner can create temporary routes without deleting your saved manual queues. WorldQuestTab can also provide world quest destinations.",
+                "",
+                "For other addons, use General > Addon Waypoint Adoption. Review Detected Addon Callers and use the allowlist or blocklist to decide which unknown addons may create AWP routes.",
+            }),
+            Heading("Corpse navigation"),
+            Text({
+                "TomTom corpse waypoints can temporarily guide you to your body. Your saved queues remain available. If you clear the corpse waypoint while dead, the arrow clears, the interrupted route can resume on resurrection. You can also choose a new manual destination while ghosted.",
+            }),
+        },
+    },
+    {
+        id = "search_nearby",
+        title = "Search Nearby",
+        intro = "Find nearby services and let AWP guide you there.",
+        blocks = {
+            Heading("Find a vendor, trainer or other service", "setup"),
+            Text({
+                "1. Left-click the AWP minimap button.",
+                "2. Open Search Nearby and choose a service. Vendor and trainer categories have submenus when available.",
+                "3. Follow the TomTom arrow and world markers to the result using your selected Routing Backend.",
+                "",
+                "Available services depend on your installed addons and current client. Common examples include repair merchants, auctioneers, bankers, mailboxes, innkeepers, profession trainers and workshops. Specific vendor, class trainer and weapon master categories may also be available.",
+            }),
+            Capture("MinimapButton", 280, 250, "The minimap menu with Search Nearby open."),
+            Heading("Which addons provide search results?", "providers"),
+            Text({
+                "AWP searches available service data from Zygor, Dugi and Polestar (Forever). You do not need to make the guide active or enable its Tracker Viewer.",
+                "",
+                "General > Guide Viewer Order also determines which search provider is checked first. AWP uses the first matching result from the available providers in that order. Your selected travel planner then routes to that destination, even if another addon supplied the result.",
+                "",
+                "Specific searches stay specific: a request for an alchemy trainer or a blacksmithing workshop does not fall back to an unrelated service. Class searches skip providers that only support your own class when you request another class. Each guide's own Find Nearest menu still searches that guide alone.",
+            }),
+            Heading("Search with a command"),
+            Text({
+                "/awp search help - list available searches.",
+                "/awp search vendor - find a supported vendor.",
+                "/awp search repair - find repairs.",
+                "/awp search mailbox - find a mailbox.",
+                "/awp search trainer alchemy - find an alchemy trainer.",
+                "/awp search trainer mage - find a mage trainer.",
+                "/awp search weapon master swords - find sword training.",
+                "/awp search workshop blacksmithing - find a blacksmithing workshop.",
+            }),
+            Note(
+            "If a service is missing, check that Zygor, Dugi or Polestar is installed and ready. Not every provider supports every search. TomTom alone does not provide service-location data."),
         },
     },
     {
         id = "queues",
         title = "Waypoint Queues",
-        intro =
-        "Queues let manual routes, imported waypoint batches, transient addon routes, and guide projections coexist.",
+        intro = "Save destinations, build itineraries and switch between routes.",
         blocks = {
-            {
-                type = "image",
-                texture = MEDIA .. "QueueUIMain",
-                align = "CENTER",
-                width = 273,
-                height = 350,
-                placeholder = "Queue panel screenshot placeholder",
-                caption =
-                "The queue panel shows manual queues, guide queues, imported waypoint lists (ttpaste), and transient routes.",
-            },
-            {
-                type = "heading",
-                text = "What Queues Are For",
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "Queues let AWP keep track of destinations without treating every waypoint as a throwaway TomTom point.",
-                    "",
-                    "Open it from the world map side tab or with:",
-                    "",
-                    "/awp queue",
-                }),
-            },
-            {
-                type = "note",
-                text =
-                "Use the queue panel when you want to inspect what currently owns navigation, reactivate an older queue, manage imported waypoints such as those from ttpaste, or remove queues.",
-            },
-            {
-                type = "heading",
-                text = "Queue Types",
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "- Manual queues are created from map clicks, /way commands, Blizzard user waypoints, and imports.",
-                    "- Imported queues preserve /ttpaste order and can advance as you clear each point.",
-                    "- Transient queues are short-lived sources such as HandyNotes, SilverDragon, RareScanner, gossip POIs such as guard directions, or other temporary navigation sources.",
-                    "- Guide queues are provided by the guide providers and are read-only and auto update with the guide.",
-                }),
-            },
-            {
-                type = "heading",
-                text = "Manual Click Queue Behavior",
-            },
-            {
-                type = "image",
-                texture = MEDIA .. "ManualQueueAsk",
-                align = "CENTER",
-                width = 590,
-                height = 236,
-                placeholder = "Manual queue prompt screenshot placeholder",
-                caption = "Ask mode lets each manual click create, replace, or append.",
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "Manual Click Queue Behavior controls what happens when you click a destination on the map:",
-                    "",
-                    "- Create New Queue: put the clicked destination in its own new queue.",
-                    "- Replace Active: replace the currently active manual queue.",
-                    "- Append: add the clicked destination to the current queue.",
-                    "- Ask: show a prompt each time.",
-                    "",
-                    "Use Activate Queue when you want a queue to control navigation. Use Deactivate Queue when you want to stop using it without deleting it.",
-                }),
-            },
-            {
-                type = "note",
-                text =
-                "Use Replace Active if you usually want each new map click to become your current destination. Use Append if you are building a route with multiple stops. Use Ask if you switch between both behaviors often.",
-            },
-            {
-                type = "heading",
-                text = "Queue Details",
-            },
-            {
-                type = "image",
-                texture = MEDIA .. "QueueUIDetails",
-                align = "CENTER",
-                width = 273,
-                height = 350,
-                placeholder = "Queue detail page screenshot placeholder",
-                caption =
-                "Queue details let you inspect destinations, activate queues, delete entries, and show the final destination on the map.",
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "Queue detail pages are useful when a route has more than one destination or when you want to review what AWP imported from /ttpaste or another source.",
-                }),
-            },
-            {
-                type = "heading",
-                text = "Bulk Management",
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "Queue rows and destination rows can be selected with checkboxes.",
-                    "",
-                    "The delete icon removes selected queues or selected destinations. Guide queues remain protected from destructive actions and are read-only.",
-                }),
-            },
-            {
-                type = "note",
-                text =
-                "Imported /ttpaste routes are always routed as AWP queues. If an import is not forming a queue, use /awp status and /awp queue to confirm what AWP detected.",
-            },
+            Heading("Open Waypoint Queues"),
+            Text({
+                "Use the world map side tab, the minimap menu or /awp queue. The active queue is the one currently directing navigation. Other queues can remain saved for later.",
+                "",
+                "- Manual queues: personal waypoints and multi-stop routes.",
+                "- Imported queues: waypoint lists imported from /ttpaste, in their original order.",
+                "- Temporary routes: short-lived destinations such as rare spawns or guard directions.",
+                "- Guide queues: automatically updated, read-only destinations from loaded guides.",
+            }),
+            Heading("What happens when I set another waypoint?"),
+            Capture("ManualQueueAsk", 590, 236, "Ask mode lets you choose how to add a destination."),
+            Text({
+                "General > Manual Click Queue Behavior applies to supported map clicks, quest shortcuts and single TomTom /way commands.",
+                "",
+                "- Create New Queue: save the destination in a new queue.",
+                "- Replace Active: replace the current queue. With Preserve Imported and Multi-Stop Queues enabled (default), imported and multi-stop queues stay saved at their current stop.",
+                "- Append: add the destination to the current queue.",
+                "- Ask: choose the behavior each time.",
+            }),
+            Note(
+            "Use Replace Active for everyday single destinations, Append for an itinerary, or Ask if you frequently switch between the two."),
+            Heading("Manage or share a queue"),
+            Text({
+                "Open queue details to review destinations and travel steps, reorder or remove manual destinations, or show the final destination on the map. Select rows with checkboxes to delete several at once. Guide queues cannot be edited or deleted like manual queues.",
+                "",
+                "Activate resumes a saved route. Deactivate stops the route and keeps it saved. Export the open queue or all saved manual waypoints as copyable TomTom commands.",
+            }),
+            Row({
+                Capture("QueueUIMain", 224, 343, "Queue list"),
+                Capture("QueueUIDetails", 224, 343, "Queue details"),
+            }),
+            Heading("When a waypoint is cleared"),
+            Text({
+                "Enable Auto-Clear Manual Waypoints on Arrival and adjust Manual Waypoint Clear Distance in General to clear destinations when you reach them. Removing a TomTom waypoint or using its Remove all waypoints control can cancel the active manual route. When a guide advances while a manual route is active, clearing that manual route will return you to the guide's current step.",
+            }),
+            Note("If /ttpaste does not form a queue, open /awp queue and /awp status to check what AWP detected."),
         },
     },
     {
         id = "arrow_guide",
         title = "TomTom Arrow and Travel Actions",
-        intro = "TomTom remains the arrow. AWP controls which route owns it and how travel actions are presented.",
+        intro = "Choose your arrow style and use travel actions when a route calls for them.",
         blocks = {
-            {
-                type = "heading",
-                text = "TomTom Arrow Bridge",
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "AWP uses TomTom as the main navigation arrow instead of creating another competing arrow.",
-                    "",
-                    "AWP can:",
-                    "",
-                    "- send guide, quest, POI, queue, and addon destinations to TomTom.",
-                    "- preserve normal TomTom behavior for direct waypoints.",
-                    "- apply custom TomTom arrow skins.",
-                    "- show secure travel buttons for route legs that require a click action.",
-                }),
-            },
-            {
-                type = "note",
-                text =
-                "AWP allows you to use TomTom as your navigation arrow with richer sources, routes, queues, and a 3D overlay.",
-            },
-            {
-                type = "heading",
-                text = "TomTom Arrow Skins",
-            },
-            {
-                type = "image_row",
-                gap = 10,
-                items = {
-                    { width = 132, height = 183, texture = MEDIA .. "AWP",       placeholder = "AWP",        caption = "AWP" },
-                    { width = 132, height = 183, texture = MEDIA .. "AWPBomber", placeholder = "AWP Bomber", caption = "Bomber" },
-                    { width = 132, height = 212, texture = MEDIA .. "AWPModern", placeholder = "AWP Modern", caption = "Modern" },
-                    { width = 132, height = 208, texture = MEDIA .. "Alliance",  placeholder = "Alliance",   caption = "Alliance" },
-                    { width = 132, height = 208, texture = MEDIA .. "Horde",     placeholder = "Horde",      caption = "Horde" },
-                },
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "Built-in AWP skins include AWP, AWP Bomber, AWP Modern, Alliance, and Horde.",
-                    "",
-                    "When Zygor is installed and enabled, Starlight and Stealth will be available so TomTom can visually match Zygor's style.",
-                }),
-            },
-            {
-                type = "image_row",
-                items = {
-                    { width = 330, height = 150, texture = MEDIA .. "Starlight", placeholder = "Starlight arrow screenshot placeholder", caption = "Zygor Starlight" },
-                    { width = 330, height = 150, texture = MEDIA .. "Stealth",   placeholder = "Stealth arrow screenshot placeholder",   caption = "Zygor Stealth" },
-                },
-            },
-            {
-                type = "heading",
-                text = "Special Travel Button",
-            },
-            {
-                type = "image",
-                texture = MEDIA .. "TravelButton",
-                align = "CENTER",
-                width = 297,
-                height = 102,
-                placeholder = "Special travel button screenshot placeholder",
-                caption =
-                "Shown when the current route leg needs an item, spell, toy, portal, hearthstone, or similar action.",
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "Some travel routes require items, spells, toys, hearthstones, portals, or similar route steps.",
-                    "",
-                    "When the current route leg needs one of those actions, AWP will show a special travel button in place of the TomTom arrow.",
-                    "",
-                    "Use Special Travel Button Scale if the button is too large or too small for your UI.",
-                }),
-            },
-            {
-                type = "note",
-                text =
-                "The special travel button is used when a routing backend identifies that the next route leg is not normal travel. It is expected to appear only for route legs that provide a usable action.",
-            },
+            Heading("Arrow appearance"),
+            Text({
+                "Open TomTom Arrow in settings. Enable Use Custom Arrow Skin, choose Arrow Skin and adjust TomTom Arrow Scale. Turn custom styling off to use TomTom's normal Crazy Arrow. AWP Modern is the default custom skin.",
+            }),
+            Row({
+                Capture("AWP", 112, 156, "AWP"),
+                Capture("AWPBomber", 112, 155, "Bomber"),
+                Capture("AWPModern", 112, 180, "Modern"),
+                Capture("Alliance", 112, 176, "Alliance"),
+                Capture("Horde", 112, 176, "Horde"),
+            }, 10),
+            Text({
+                "With Zygor installed and enabled, Starlight and Stealth are also available.",
+            }),
+            Row({
+                Capture("Starlight", 270, 149, "Zygor Starlight"),
+                Capture("Stealth", 270, 149, "Zygor Stealth"),
+            }, 12),
+            Heading("Special travel button"),
+            Capture("TravelButton", 297, 102, "Example of a travel action replacing the arrow."),
+            Text({
+                "Some routes need a click to use an item, spell, toy or other travel action. When the planner provides a usable action, AWP shows a special travel button instead of the arrow. Adjust Special Travel Button Scale to change its size.",
+                "",
+                "This is separate from " ..
+                Link("Guide Actions", "guide_actions", "action_buttons") ..
+                ", which help you perform the current guide's instructions. The travel button hides during combat so an outdated travel action cannot be used.",
+            }),
+            Note("General > Hide During Combat controls which other navigation displays are temporarily hidden."),
+        },
+    },
+    {
+        id = "flight_assist",
+        title = "Flight Map Assist",
+        intro = "Find the right flight on Retail and WoW Forever.",
+        blocks = {
+            Heading("Follow a planned flight"),
+            Capture("FlightHighlight", 195, 289, "Example of a highlighted flight destination."),
+            Text({
+                "When your route includes a flight path, Show Flight Map Route Marker highlights the intended landing point. The marker is only a visual guide, it does not create another route.",
+                "",
+                "Auto Take Flight Paths is off by default.",
+                "- Disabled lets you select every flight yourself.",
+                "- Exact requires a confirmed match to the destination's flight node.",
+                "- Strong also accepts a reliable match by position and name.",
+                "",
+                "Both automatic modes wait until the route is ready for the flight and AWP confirms the departure flight master. If AWP highlights a destination without confirming the departure, select the flight yourself.",
+                "",
+                "Hold Alt while opening the flight map to skip automatic selection for that interaction.",
+            }),
+            Note("A RestedXP guide-only flight suggestion is labelled separately and always requires a manual click."),
+            Heading("Use the Taxi List"),
+            Capture("TaxiList", 350, 282, "Recent and reachable flights with fares and flight times."),
+            Text({
+                "Enable Show Flight Map Taxi List under General > Routing. Browse the route destination, favorites, recent flights, current-zone flights and reachable destinations grouped by zone. Hover a row to highlight the matching map node, select a reachable flight to take it.",
+                "",
+                "Reachable flights show fares. InFlight can supply times on both clients. On Forever, AWP can also use times from DaylightUI, Farstrider or Ellesmere UI. A ~ indicates an estimate.",
+                "Use Flight Map Taxi List Side to choose Left, Right or Auto (available screen space), and Flight Map Taxi List Text Size to improve readability.",
+            }),
+        },
+    },
+    {
+        id = "guide_providers",
+        title = "Guide Addons",
+        intro = "Use supported guides independently of your selected travel planner.",
+        blocks = {
+            Heading("Choose a guide"),
+            Text({
+                "Supported guide addons on Retail and Forever: Zygor, Dugi, RestedXP, Azeroth Pilot Reloaded (APR) and WoWPro. Polestar and QuestieRouter are supported on Forever. Install only the guides you want to use.",
+                "",
+                "Load a guide normally, or open its picker from AWP's minimap menu or Tracker Viewer. Each guide has its own settings page when loaded. Multiple guides can be open, but only one directs navigation at a time. Use Make Active or the guide's supported selection controls to switch.",
+            }),
+            Heading("Guide navigation and progress"),
+            Text({
+                "AWP follows each guide addon's own navigation and completion rules. Step controls may behave differently depending on the guide.",
+                "",
+                "Use the guide title or dropdown menu in the " ..
+                Link("Tracker Viewer", "tracker_viewer", "header_controls") ..
+                " to switch, open or close guides where supported. Previewing steps or having a guide update in the background does not automatically make it active.",
+            }),
+            Heading("Zygor"),
+            Text({
+                "Previous Step returns to an earlier step. Next, Skip This Step and the step checkbox advance to the next valid step.",
+                "",
+                "Zygor provides optional travel planning and nearby service searches. AWP also offers additional display options for Zygor's original guide window. See " ..
+                Link("Zygor Native Viewer", "zygor_integration") .. " for details.",
+            }),
+            Heading("Dugi"),
+            Text({
+                "Previous Step returns to an earlier step. Next and the step checkbox advance to the next valid step.",
+                "",
+                "Dugi supports up to six numbered guide slots, including separate copies of the same guide. Closing an inactive slot keeps the current guide open. If all slots are occupied, choose which one to close before opening another.",
+                "",
+                "Dugi provides optional travel planning using its own Taxi System preferences, along with nearby service searches.",
+            }),
+            Heading("RestedXP"),
+            Text({
+                "Back can return to an earlier step to recover a missing quest acceptance or open Go to Step when the appropriate step is unclear. RestedXP's own pause setting is respected.",
+                "",
+                "Switch between up to six recently used unique guides. Removing a guide from this list does not delete its progress. Open New Guide opens RestedXP's own guide chooser.",
+            }),
+            Heading("Azeroth Pilot Reloaded (APR)"),
+            Text({
+                "Next and the step checkbox skip the current step. Back uses APR's undo feature.",
+                "",
+                "Open New Guide opens APR's own route browser, where you can choose another route.",
+            }),
+            Heading("WoWPro"),
+            Text({
+                "Back can reopen an earlier step to recover a missing quest acceptance or let you choose an earlier step. Skipping a step that affects other steps requires confirmation.",
+                "",
+                "Switch between up to six recently used unique guides without losing their progress. Open New Guide opens WoWPro's own guide selector, while Current Guide Steps lets you review the steps in the loaded guide.",
+            }),
+            Heading("Polestar (Forever)"),
+            Text({
+                "Back and Next preview guide steps. The step checkbox skips the entire step, while individual goal checkboxes follow Polestar's own completion rules.",
+                "",
+                "When Polestar asks about an escort or group quest, choose whether to attempt or skip it directly from the Viewer. Step explanations, escort notes, warnings about difficult encounters and the optional left-out quest summary are also available.",
+                "",
+                "When a guide requires a higher level to continue, the Level with ... meanwhile suggestion opens the appropriate leveling guide while keeping the original guide open.",
+                "",
+                "Polestar provides optional travel planning, terrain-aware walking and nearby service searches. Configure Plan travel routes, Class teleports, Walk real paths and walking style in Polestar's own settings.",
+            }),
+            Heading("QuestieRouter (Forever)"),
+            Text({
+                "Unlike traditional step-by-step guides, QuestieRouter dynamically organizes quests into tasks. Follow its automatic task order or choose which eligible task to work on.",
+                "",
+                "- Choose Task: select an eligible task to follow.",
+                "- Make This Task Active: select a task directly from its Viewer menu.",
+                "- Return to Automatic Order: let QuestieRouter resume choosing tasks for you.",
+                "- Task Actions: open QuestieRouter's own menu to skip quests.",
+            }),
+            Capture("QuestieRouterChooseTask", 240, 305, "Choose Task shows which tasks are eligible."),
+            Text({
+                "The Tracker Viewer displays quest descriptions, objectives and progress. Visible Tasks controls how many current and upcoming tasks appear, from one to fourteen (one by default). Future tasks can be previewed but cannot be selected until they become eligible.",
+                "",
+                "The optional zone banner displays guide artwork and quest progress and is disabled by default. Progress counts completed quests rather than guide steps.",
+                "",
+                "QuestieRouter also provides optional travel planning and terrain-aware walking with the appropriate navigation packs. Travel and walking preferences are configured in QuestieRouter itself.",
+            }),
+        },
+    },
+    {
+        id = "tracker_viewer",
+        title = "Tracker Viewer",
+        intro = "Show your guides directly in your objective tracker.",
+        blocks = {
+            Heading("Set up a Viewer"),
+            Text({
+                "1. Open /awp options and choose your installed guide > Tracker Viewer.",
+                "2. Enable Tracker Viewer. Repeat for each guide you want to see.",
+                "3. Load a guide and make sure your objective tracker is visible.",
+                "4. Use General > Guide Viewer Order to arrange your Viewers. The order is saved with your profile and also sets " ..
+                Link("Search Nearby provider priority", "search_nearby", "providers") .. ".",
+                "",
+                "You can display multiple guides at once. The green active indicator identifies the guide currently directing navigation when multiple Viewers are enabled.",
+            }),
+            Capture("GuideViewerOrder", 320, 237, "Drag guide addons to change their order."),
+            Heading("Supported trackers", "supported_trackers"),
+            Text({
+                "AWP supports several objective trackers for displaying Guide Viewers. Dedicated tracker integrations are recommended to avoid the limitations of experimental Blizzard docking.",
+                "",
+                "Dedicated tracker integrations:",
+                "- Kaliel's Tracker (Retail and Forever)",
+                "- GW2 UI Tracker (Retail and Forever)",
+                "- Ellesmere UI Quest Tracker (Forever, with custom tracker enabled)",
+                "- DaylightUI Quests (Forever)",
+                "- Questie Tracker (Forever)",
+                "",
+                "AWP automatically prefers Kaliel's Tracker when available.",
+                "",
+                "Experimental tracker integrations:",
+                "- Blizzard Objective Tracker (Retail and Forever)",
+                "- Ellesmere UI Quest Tracker (Retail, or Forever with custom tracker disabled)",
+                "",
+                "In shared scrolling trackers, Guide Viewers appear above quests. Scroll back up to return to your guides. With Questie, enable Always Show Tracker to keep Viewers visible when no quests are tracked.",
+            }),
+            Note(
+            "Experimental Blizzard docking can cause blocked actions or other UI errors. This also applies when UI addons such as ElvUI style Blizzard's tracker rather than replace it. For the best experience, use a tracker with dedicated docking support. Show Native Docking Warning Popup controls the reminder."),
+            Heading("Use the header controls", "header_controls"),
+            Text({
+                "- Guide title or guide dropdown: switch or open guides and access guide actions.",
+                "- Back / Next: navigate where supported by the guide. QuestieRouter instead provides task selection and automatic ordering.",
+                "- Progress bar: view progress, hover for details.",
+                "- Settings button: open the guide's menu or settings.",
+                "- Collapse: hide this Viewer's rows without disabling the guide.",
+                "",
+                "Long notes may be grouped under a hoverable row. Click a confirmation instruction when the guide asks you to proceed. Right-click a quest row and choose Open Quest Details to view a quest in your log without advancing the guide or changing tracking.",
+            }),
+            Capture("QuestDetailsMenu", 280, 206, "Open Quest Details in a Polestar goal menu."),
+            Heading("Customize each Viewer", "customize_viewer"),
+            Text({
+                "Open the guide's AWP settings > Tracker Viewer to customize its progress bar, text and header independently. Hide Guide Addon Name removes the addon name beside the controls. Hide Guide Title removes the current guide's title. Both names remain in the progress and guide-menu tooltips. Compact Active Indicator uses a green dot instead of the Active label. Narrow headers adapt to available space.",
+            }),
+            Row({
+                Capture("TrackerSquareBorder", 300, 25, "Square"),
+                Capture("TrackerRoundedBorder", 300, 24, "Rounded"),
+            }, 12),
+            Capture("TrackerNoProgress", 300, 24, "None (no progress bar)"),
+            Heading("Guide text colors", "text_colors"),
+            Text({
+                "Tracker Viewer Text controls how this guide's instructions are colored:",
+                "- Auto: use consistent colors across guides for NPC headings, training and learning, warnings, completed objectives and skipped work. UI text-color settings do not override Auto.",
+                "- UI colors: use the text colors supplied by your selected appearance style.",
+                "- Fixed or Custom color: use a chosen color instead of contextual colors.",
+            }),
+            Row({
+                Capture("TrackerAutoColor", 320, 122, "Auto: colors follow guide context."),
+                Capture("TrackerWhiteColor", 320, 122, "Example: fixed white text."),
+            }, 12),
+            Heading("Guide text sizes", "text_sizes"),
+            Text({
+                "Open the guide's AWP settings > Tracker Viewer and enable Use custom Viewer text sizes to adjust these four sizes independently:",
+                "- Heading: guide titles and headings.",
+                "- Goal: main instructions and objectives.",
+                "- Notes / context: supporting information and tips.",
+                "- Progress: progress text.",
+                "",
+                "Leave this option off to keep the existing tracker or UI sizes. Custom sizes keep the selected font, outline and shadow, and guide rows adjust to fit the text. Each guide's sizes are included when importing or exporting its guide settings.",
+            }),
+            Text({
+                "When Kaliel's Tracker is active, you can optionally match its header texture, background color, font, title/icon color and button color.",
+            }),
+            Note(
+            "Tracker Viewer and Hide Native Guide Frame are separate settings. You can show both the AWP Viewer and the original guide window."),
+        },
+    },
+    {
+        id = "guide_actions",
+        title = "Guide Actions and Chat",
+        intro = "Keep useful guide actions nearby and see instructions in your own chat.",
+        blocks = {
+            Heading("Guide action buttons", "action_buttons"),
+            Row({
+                Capture("GuideActionsPanel", 237, 132, "Movable action panel"),
+                Capture("GuideActionsTracker", 260, 178, "Inline buttons beside Zygor objectives"),
+            }),
+            Text({
+                "Open your guide > Guide Actions.",
+                "- Enable Guide Action Panel: show a movable panel, drag its title bar to position it. Each guide remembers its own position.",
+                "- Show Actions Beside Steps: show supported item, spell or target buttons beside matching Viewer instructions outside combat.",
+                "- Grouped Actions Position: place step-wide buttons above or below objectives where supported (Below is the default).",
+                "- Action filters: choose which categories appear in AWP's panel and inline buttons. Inventory Cleanup is off by default.",
+                "",
+                "Hover an action to see its item or spell tooltip and guide context. Enabled tooltip addons can supply their usual appearance and comparisons.",
+            }),
+            Heading("Combat and native controls"),
+            Text({
+                "Prepared standard actions can remain usable during combat. If a guide changes, a pending indicator identifies the update, the replacement takes effect after combat. Native helpers and inline actions retain their normal combat restrictions.",
+                "",
+                "Hide Native Action Controls is independent of both AWP action displays and filters. If you hide the native controls and turn both AWP displays off, you may have no visible action buttons. Hiding the entire original guide frame is a separate setting. APR, WoWPro and QuestieRouter check embedded action coverage before hiding the whole frame unless native controls are explicitly hidden.",
+            }),
+            Note(
+            "Polestar's optional bag-space helper can be shown through Helpers when enabled in Polestar. Spare bags are equipped first, junk deletion retains its two-click confirmation. AWP does not automatically enable or execute this helper."),
+            Heading("Chat Output", "chat_output"),
+            Text({
+                "Open your guide > Chat Output to show instructions in your own chat when the step changes. Nothing is sent to other players. Chat Step Text chooses contextual or fixed colors. Chat Sticky Summary chooses whether to show no summary, counts only, or counts with titles. Polestar counts along-the-way goals.",
+                "",
+                "Use /awp <provider> output to show the current step on demand. Add full to include expanded tips and sticky instructions, or sticky to show only sticky instructions, where supported.",
+            }),
+            Capture("ChatCountTitles", 500, 214, "Example of local guide instructions with a sticky summary."),
         },
     },
     {
         id = "zygor_integration",
-        title = "Zygor Integration",
-        intro =
-        "AWP can use Zygor guide state, route data, search data, arrow skins, and viewer controls without taking over Zygor's guide engine.",
+        title = "Zygor Native Viewer",
+        intro = "Optional display controls specific to Zygor's own guide window.",
         blocks = {
-            {
-                type = "heading",
-                text = "What AWP Uses",
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "Zygor remains active while AWP adds navigation and display options around it.",
-                    "",
-                    "- Routing backend: AWP can use Zygor routing data when selected.",
-                    "- Guide state: AWP can mirror the active guide target and current step.",
-                    "- Search data: service and profession searches can use Zygor data when available.",
-                    "- Arrow skins: Zygor-style arrow skins are available for TomTom arrow styling.",
-                    "- Viewer controls: AWP can compact or hide Zygor's native viewer without disabling guide logic.",
-                }),
-            },
-            {
-                type = "heading",
-                text = "Native Viewer Options",
-            },
-            {
-                type = "image_row",
-                items = {
-                    { width = 220, height = 80, texture = MEDIA .. "Normal",                  placeholder = "Normal guide view",           caption = "Normal" },
-                    { width = 220, height = 80, texture = MEDIA .. "MinimalMode",             placeholder = "Compact guide mode",          caption = "Compact" },
-                    { width = 220, height = 80, texture = MEDIA .. "MinimalModeHideBGColors", placeholder = "Compact mode without colors", caption = "Hide Backgrounds + Colors" },
-                },
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "Open /awp options, then go to Zygor.",
-                    "",
-                    "- Show Only Guide Steps Until Mouseover: keeps visible guide steps on screen while compacting the rest of Zygor's viewer until mouseover.",
-                    "- Hide Step Backgrounds Until Mouseover: controls which guide step row backgrounds or line colors fade while compacted.",
-                    "- Hide Zygor's Native Frame: visually hides Zygor's full-size guide frame while keeping guide state, waypoints, guide picker, and settings available.",
-                    "",
-                    "Hide Zygor's Native Frame is independent from Tracker Viewer. Use /awp zygorviewer show, the minimap button menu, /awp zygor commands, or Zygor controls from the tracker header to access Zygor again.",
-                }),
-            },
-            {
-                type = "heading",
-                text = "Zygor Controls in AWP Menu",
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "When Zygor is loaded, the AWP minimap button menu includes Zygor-specific controls.",
-                    "",
-                    "- Toggle Tracker Viewer.",
-                    "- Hide or show Zygor's native frame.",
-                    "- Zygor Guide submenu: next, previous, skip, guide picker, open guide switching, guide closing, Zygor Guide Menu, and Zygor Settings.",
-                    "- Macro-friendly /awp zygor commands expose the same guide controls when you do not want to use the minimap button.",
-                    "",
-                    "The minimap button itself is an AWP-wide control. Its general behavior is covered on the Options and Customization page.",
-                }),
-            },
-            {
-                type = "heading",
-                text = "Chat Step Display",
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "AWP can show the current Zygor step in your own chat when Zygor changes steps, or on demand with /awp zygor output.",
-                    "This is local-only and does not send anything to say, party, raid, guild, or public channels.",
-                    "",
-                    "- Show Step in Chat Frame on Step Change: shows a chat message for each Zygor step change.",
-                    "- Chat Step Text: Auto uses contextual text colors, or force displayed step text to one selected color.",
-                    "- Chat Sticky Summary: choose whether the chat display hides the sticky summary, shows sticky step count only, or sticky step count plus their titles.",
-                    "",
-                    "Automatic display uses duplicate protection for the same guide step. Manual /awp zygor output always shows the current step in your own chat.",
-                }),
-            },
-            {
-                type = "heading",
-                text = "Useful Commands",
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "/awp backend zygor",
-                    "- Use Zygor as the routing backend when available.",
-                    "",
-                    "/awp compact on|off|toggle",
-                    "- Toggle Zygor guide-frame compact mode.",
-                    "",
-                    "/awp zygorviewer show|hide|toggle|status",
-                    "- Show or visually hide Zygor's native viewer.",
-                    "",
-                    "/awp zygor next|prev|skip|picker|load <title>|output [full|sticky]|menu|settings|list|switch <index>|close [index]",
-                    "- Control Zygor guides while Zygor's native viewer is hidden.",
-                    "",
-                    "/awp trackerviewer on|off|toggle|status",
-                    "- Toggle the objective-tracker Zygor viewer described on the Zygor Tracker Viewer page.",
-                }),
-            },
-            {
-                type = "note",
-                text =
-                "AWP's Zygor viewer options are visual controls. They do not turn off Zygor guide state, active waypoints, guide loading, or Zygor settings.",
-            },
-        },
-    },
-    {
-        id = "zygor_tracker_viewer",
-        title = "Zygor Tracker Viewer",
-        intro =
-        "Tracker Viewer shows the current Zygor guide step inside the objective tracker while keeping Zygor's guide data active.",
-        blocks = {
-            {
-                type = "image",
-                texture = MEDIA .. "TrackerViewer",
-                align = "CENTER",
-                width = 253,
-                height = 154,
-                placeholder = "Tracker viewer screenshot placeholder",
-                caption = "The current Zygor guide step can appear in the objective tracker.",
-            },
-            {
-                type = "heading",
-                text = "What It Does",
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "Tracker Viewer is for players who want Zygor guide steps in the objective tracker instead of using Zygor's full-size guide window.",
-                    "",
-                    "It mirrors the active Zygor guide step, keeps Zygor guide state and waypoints alive, and can dock into Kaliel's Tracker or the native Blizzard objective tracker.",
-                    "",
-                    "Kaliel's Tracker is the recommended tracker and is selected automatically when installed. Blizzard native docking remains available as an experimental fallback.",
-                    "",
-                    "Long Zygor tip blocks are collapsed by section when a step has many tips. Hover the section row to read the collapsed tips without letting one step overflow the tracker.",
-                    "",
-                    "Confirm rows are clickable, so Click Here to Proceed advances the guide from the tracker.",
-                }),
-            },
-            {
-                type = "note",
-                text = JoinLines({
-                    "Tracker Viewer depends on Zygor being loaded. It replaces the guide display, not Zygor's guide engine, guide picker, options menu, routing data, or waypoints.",
-                    "",
-                    "Blizzard native docking has a confirmed WoW 12.1 taint issue. It can produce protected-action or secret-value errors, may stop working entirely after a future patch, and may be removed from AWP in favor of Kaliel's Tracker-only docking. The combat quest-click proxy mitigates one path but does not make native docking taint-free.",
-                }),
-            },
-            {
-                type = "heading",
-                text = "Header Controls",
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "The tracker header contains compact guide controls:",
-                    "",
-                    "- Guide title: click it to switch between open guides. If no guide is loaded, click the welcome row to open Zygor's guide picker.",
-                    "- Back and Next: move through Zygor steps.",
-                    "- Progress bar: shows percent complete. Hover it to see the current step number.",
-                    "- Guide dropdown: switch open guides, close guides, or use Open New Guide.",
-                    "- Settings button: opens the Zygor menu used by Zygor's native frame.",
-                    "- Minimize: collapses only the tracker section.",
-                }),
-            },
-            {
-                type = "heading",
-                text = "Tracker Viewer Settings",
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "Open /awp options, then go to Zygor > Tracker Viewer.",
-                    "",
-                    "- Enable Tracker Viewer: shows Zygor Guides in Kaliel's Tracker when available; otherwise it uses the experimental Blizzard native docking path.",
-                    "- Show Native Docking Warning Popup: controls the login/reload warning shown only when Tracker Viewer attaches to Blizzard's native tracker.",
-                    "- Tracker Viewer Progress Bar: choose square, rounded, or no progress bar.",
-                    "- Tracker Viewer Text: use contextual tracker viewer text colors or make all step text a single selected color.",
-                    "",
-                    "When Kaliel's Tracker is active, Kaliel Header Styling adds five independent opt-in matches for header texture, background color, font, title/collapse-icon color, and AWP header-button color. Every match defaults off, and disabling one restores that part of AWP's normal appearance immediately.",
-                    "",
-                    "The native warning's Okay, remind me later button repeats it next login/reload. Don't remind me again disables it account-wide; turn Show Native Docking Warning Popup back on to restore it.",
-                }),
-            },
-            {
-                type = "image_row",
-                gap = 14,
-                items = {
-                    { width = 335, height = 26, texture = MEDIA .. "TrackerSquareBorder",  placeholder = "Square tracker progress bar",  caption = "Square" },
-                    { width = 335, height = 26, texture = MEDIA .. "TrackerRoundedBorder", placeholder = "Rounded tracker progress bar", caption = "Rounded" },
-                },
-            },
-            {
-                type = "image",
-                align = "CENTER",
-                width = 335,
-                height = 26,
-                texture = MEDIA .. "TrackerNoProgress",
-                placeholder = "No progress bar",
-                caption = "None",
-                spacingBefore = 4,
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "Square has no border and looks flat. Rounded has a Blizzard style border. None hides the progress bar.",
-                }),
-            },
-            {
-                type = "image_row",
-                gap = 14,
-                items = {
-                    { width = 392, height = 150, texture = MEDIA .. "TrackerAutoColor",  placeholder = "Tracker auto color mode",  caption = "Auto" },
-                    { width = 392, height = 150, texture = MEDIA .. "TrackerWhiteColor", placeholder = "Tracker selected color mode", caption = "White Color example" },
-                },
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "Auto shows contextual text colors. Selecting a fixed color will force viewer text to the chosen color.",
-                }),
-            },
-            {
-                type = "note",
-                text = JoinLines({
-                    "If the tracker section is missing, check that Zygor is enabled, Enable Tracker Viewer is on, and your objective tracker is visible. AWP warns on login/reload if the active tracker is hidden, or if it appears transparent due to opacity or mouseover tracker addons.",
-                }),
-            },
+            Heading("Compact the original window"),
+            Row({
+                Capture("Normal", 220, 80, "Normal"),
+                Capture("MinimalMode", 220, 80, "Compact"),
+                Capture("MinimalModeHideBGColors", 220, 80, "Compact without backgrounds or colors"),
+            }, 12),
+            Text({
+                "Open the Zygor settings page in AWP.",
+                "- Show Only Guide Steps Until Mouseover: keep the instructions visible and reveal the rest of the window on hover.",
+                "- Hide Step Backgrounds Until Mouseover: optionally hide row backgrounds or both backgrounds and line colors while compacted.",
+                "- Hide Zygor's Native Frame: hide the original window without stopping guide progress or navigation.",
+                "",
+                "Use the AWP minimap menu, /awp zygor native show or the " ..
+                Link("Tracker Viewer controls", "tracker_viewer", "header_controls") .. " to access Zygor again.",
+            }),
+            Note("For shared " .. Link("Viewer", "tracker_viewer", "customize_viewer") .. ", "
+                .. Link("Guide Actions", "guide_actions", "action_buttons") .. " and "
+                .. Link("chat settings", "guide_actions", "chat_output")
+                .. ", see the corresponding Help pages. Use /awp zygor compact on|off|toggle|status."),
         },
     },
     {
         id = "overlay_overview",
         title = "World Overlay",
-        intro =
-        "The world overlay shows the active destination in-world and changes mode based on distance and camera view.",
+        intro = "See the active destination directly in the game world.",
         blocks = {
-            {
-                type = "image_row",
-                items = {
-                    { width = 330, height = 330, texture = MEDIA .. "Overlay",     placeholder = "Overlay screenshot placeholder",      caption = "Overlay" },
-                    { width = 330, height = 330, texture = MEDIA .. "OverlayFade", placeholder = "Overlay fade screenshot placeholder", caption = "Fade on hover" },
-                },
-            },
-            {
-                type = "heading",
-                text = "Overlay Modes",
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "The world overlay has three main presentation modes:",
-                    "",
-                    "- Waypoint: long-range in-world destination marker.",
-                    "- Pinpoint: close-range destination marker and optional plaque.",
-                    "- Navigator: off-screen directional arrow.",
-                    "",
-                    "The overlay can react to destination context. Quests, route types, services, travel actions, guide providers, and source addons can all affect icons, title text, subtext, and colors.",
-                }),
-            },
-            {
-                type = "note",
-                text =
-                "Use the 3D world overlay when you want destination context in the game world instead of only relying on the TomTom arrow. Disable or reduce opacity if you prefer a cleaner screen.",
-            },
-            {
-                type = "heading",
-                text = "Context Display",
-            },
-            {
-                type = "image_row",
-                items = {
-                    { width = 220, height = 114, texture = MEDIA .. "FullContext",   placeholder = "Context diamond and icon", caption = "Diamond + Icon" },
-                    { width = 220, height = 114, texture = MEDIA .. "IconOnly",      placeholder = "Icon only",                caption = "Icon Only" },
-                    { width = 220, height = 114, texture = MEDIA .. "ContextHidden", placeholder = "Context hidden",           caption = "Hidden" },
-                },
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "Context Display controls the icon frame above the waypoint:",
-                    "",
-                    "- Diamond + Icon shows both the context diamond and icon.",
-                    "- Icon Only removes the backing diamond.",
-                    "- Hidden removes both the diamond and icon.",
-                }),
-            },
-            {
-                type = "note",
-                text =
-                "Use Diamond + Icon for the clearest source/type indicator. Use Icon Only for a cleaner look. Use Hidden if you only want the marker and text without extra context art.",
-            },
-            {
-                type = "heading",
-                text = "Beacon",
-            },
-            {
-                type = "image_row",
-                items = {
-                    { width = 220, height = 151, texture = MEDIA .. "Beacon",    placeholder = "Beacon enabled",  caption = "Beacon" },
-                    { width = 220, height = 151, texture = MEDIA .. "BaseOnly",  placeholder = "Base only",       caption = "Base Only" },
-                    { width = 220, height = 151, texture = MEDIA .. "BeaconOff", placeholder = "Beacon disabled", caption = "Off" },
-                },
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "Beacon settings control the vertical light column and base marker used by the long-range waypoint display.",
-                    "",
-                    "You can adjust beacon style, base distance, opacity, vertical offset, and color from the Waypoint options page.",
-                }),
-            },
+            Row({
+                Capture("Overlay", 300, 300, "World marker"),
+                Capture("OverlayFade", 300, 300, "Fade on hover"),
+            }, 12),
+            Heading("Three ways to find your destination"),
+            Text({
+                "- Waypoint: the long-range marker in the game world.",
+                "- Pinpoint: the close-range marker and optional information plaque.",
+                "- Navigator: points toward the destination when it is outside your view.",
+                "",
+                "Enable 3D World Overlay in World Overlay settings. Fade on Hover reduces the overlay's visibility while your mouse is over it. You can use TomTom alone if you prefer.",
+            }),
+            Heading("Context Display"),
+            Row({
+                Capture("FullContext", 220, 113, "Diamond + Icon"),
+                Capture("IconOnly", 220, 113, "Icon Only"),
+                Capture("ContextHidden", 220, 113, "Hidden"),
+            }, 12),
+            Text({
+                "Choose whether to show a backing diamond and destination icon, just the icon, or neither. Icons and colors can reflect quests, travel steps, services and other destination types.",
+            }),
+            Note(
+            "Auto colors follow available destination context. Choose a preset or Custom to keep a consistent color across destinations."),
         },
     },
     {
         id = "overlay_waypoint_navigator",
         title = "Waypoint and Navigator",
-        intro =
-        "Waypoint handles long-range destination display. Navigator points toward destinations that are off screen.",
+        intro = "Adjust long-distance guidance and off-screen direction.",
         blocks = {
-            {
-                type = "image_row",
-                items = {
-                    { width = 320, height = 317, texture = MEDIA .. "Waypoint",  placeholder = "Waypoint screenshot placeholder",  caption = "Waypoint" },
-                    { width = 360, height = 235, texture = MEDIA .. "Navigator", placeholder = "Navigator screenshot placeholder", caption = "Navigator" },
-                },
-            },
-            {
-                type = "heading",
-                text = "Waypoint Settings",
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "Waypoint controls the long-range marker shown in the 3D world.",
-                    "",
-                    "- Waypoint Mode turns the long-range marker on or off.",
-                    "- Waypoint Size, Min Size, and Max Size control dynamic scaling.",
-                    "- Waypoint Opacity controls marker visibility.",
-                    "- Vertical Offset moves the marker up or down in the world.",
-                    "- Beacon settings control the vertical light column and base marker.",
-                    "- Use Meters instead of Yards changes footer distance formatting.",
-                }),
-            },
-            {
-                type = "note",
-                text =
-                "Use a larger max size when you want distant markers to stay readable. Use lower opacity or disable the beacon if the long-range marker feels too visually heavy.",
-            },
-            {
-                type = "heading",
-                text = "Footer Text",
-            },
-            {
-                type = "image_row",
-                gap = 10,
-                items = {
-                    { width = 130, height = 78, texture = MEDIA .. "WaypointFooterAll",             placeholder = "All footer",       caption = "All" },
-                    { width = 130, height = 78, texture = MEDIA .. "WaypointFooterDistance",        placeholder = "Distance footer",  caption = "Distance" },
-                    { width = 130, height = 78, texture = MEDIA .. "WaypointFooterArrivalTime",     placeholder = "Arrival footer",   caption = "Arrival Time" },
-                    { width = 130, height = 78, texture = MEDIA .. "WaypointFooterDestinationName", placeholder = "Destination name", caption = "Destination" },
-                    { width = 130, height = 78, texture = MEDIA .. "WaypointFooterNone",            placeholder = "No footer",        caption = "None" },
-                },
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "Footer Text controls the small text below the waypoint marker.",
-                    "",
-                    "It can show destination name, distance, arrival time, all supported footer details, or no footer at all.",
-                    "",
-                    "Footer size and opacity are controlled separately.",
-                }),
-            },
-            {
-                type = "note",
-                text =
-                "Use Distance or Arrival Time for simple travel guidance. Use Name when destination identity matters more than distance. Use None if you only want the visual marker.",
-            },
-            {
-                type = "heading",
-                text = "Navigator Settings",
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "Navigator is the off-screen arrow that points toward the active destination when it is outside your current view.",
-                    "",
-                    "- Enable Navigator toggles the off-screen arrow.",
-                    "- Navigator Size and Opacity control visual weight.",
-                    "- Navigator Distance moves it closer to or farther from the screen center.",
-                    "- Navigator Dynamic Distance adjusts placement based on camera zoom.",
-                    "- Navigator Arrow color controls the navigator arrow tint.",
-                }),
-            },
-            {
-                type = "note",
-                text =
-                "Use Navigator Dynamic Distance if the off-screen arrow feels good at one camera zoom but too close or too far away at another.",
-            },
+            Row({
+                Capture("Waypoint", 300, 303, "Waypoint"),
+                Capture("Navigator", 330, 215, "Navigator"),
+            }, 12),
+            Heading("Waypoint"),
+            Text({
+                "Use the Waypoint section to enable or disable the long-range marker, change its size and minimum/maximum dynamic size, adjust opacity, or move it vertically. Use Meters instead of Yards changes the overlay's distance units.",
+            }),
+            Heading("Beacon"),
+            Row({
+                Capture("Beacon", 220, 150, "Beacon"),
+                Capture("BaseOnly", 220, 150, "Base Only"),
+                Capture("BeaconOff", 220, 150, "Off"),
+            }, 12),
+            Text({
+                "Choose the full light column, just the ground marker, a distance-based switch from beacon to base, or Off. Beacon Base Distance sets the switch distance. Adjust the beacon's opacity, base height and color separately.",
+            }),
+            Heading("Footer Text"),
+            Row({
+                Capture("WaypointFooterAll", 126, 76, "All"),
+                Capture("WaypointFooterDistance", 126, 76, "Distance"),
+                Capture("WaypointFooterArrivalTime", 126, 76, "Arrival Time"),
+                Capture("WaypointFooterDestinationName", 126, 76, "Destination"),
+                Capture("WaypointFooterNone", 126, 76, "None"),
+            }, 8),
+            Text({
+                "Choose the destination name, distance, estimated arrival time, all available details or no footer. Info Text Size, Info Text Opacity and Distance/Arrival Time Opacity let you fine-tune the display.",
+            }),
+            Heading("Navigator"),
+            Text({
+                "Enable Navigator shows the directional arrow for off-screen destinations. Adjust its size, opacity, distance from screen center and color. Navigator Dynamic Distance adjusts placement with camera zoom.",
+            }),
+            Note("For a less distracting display, try a smaller marker, lower opacity or a base-only beacon."),
         },
     },
     {
         id = "overlay_pinpoint_plaque",
         title = "Pinpoint and Plaque",
-        intro =
-        "Pinpoint is the close-range destination marker. Plaques can show title, subtext, coordinates, and extra context.",
+        intro = "Customize what appears as you approach your destination.",
         blocks = {
-            {
-                type = "image_row",
-                items = {
-                    { width = 220, height = 168, texture = MEDIA .. "Pinpoint",          placeholder = "Pinpoint full",      caption = "Full" },
-                    { width = 220, height = 168, texture = MEDIA .. "PinpointPlaqueOff", placeholder = "Pinpoint no plaque", caption = "No Plaque" },
-                    { width = 220, height = 168, texture = MEDIA .. "PinpointOff",       placeholder = "Pinpoint disabled",  caption = "Disabled" },
-                },
-            },
-            {
-                type = "heading",
-                text = "Pinpoint Settings",
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "Pinpoint controls what appears when you are close to the destination.",
-                    "",
-                    "- Pinpoint Mode chooses full, no plaque, or disabled.",
-                    "- Show Pinpoint At controls when close-range mode begins.",
-                    "- Hide Pinpoint At controls when arrival hides the close-range display.",
-                    "- Pinpoint Size and Opacity control the marker.",
-                    "- Show Destination Info controls the title/subtext plaque.",
-                    "- Show Extended Info adds extra context when available.",
-                    "- Show Coordinate Fallback allows coordinates when no better label is available.",
-                    "- Show Pinpoint Arrows toggles the close-range arrow indicators.",
-                    "- Base Pinpoint Height and Camera Pinpoint Height control vertical placement.",
-                }),
-            },
-            {
-                type = "note",
-                text =
-                "Use Full if you want close-range destination labels. Use No Plaque if you like the arrival marker but not the text panel. Use Disabled if TomTom's arrow is enough for close-range arrival.",
-            },
-            {
-                type = "heading",
-                text = "Plaque Styles",
-            },
-            {
-                type = "image",
-                align = "CENTER",
-                width = 396,
-                height = 112,
-                texture = MEDIA .. "PlaqueDefault",
-                placeholder = "Default plaque screenshot placeholder",
-                caption = "Default",
-            },
-            {
-                type = "image",
-                align = "CENTER",
-                width = 397,
-                height = 135,
-                texture = MEDIA .. "PlaqueGlowingGems",
-                placeholder = "Glowing Gems plaque screenshot placeholder",
-                caption = "Glowing Gems",
-            },
-            {
-                type = "image_row",
-                items = {
-                    { width = 226, height = 95, texture = MEDIA .. "PlaqueAlliance", placeholder = "Alliance plaque", caption = "Alliance" },
-                    { width = 226, height = 95, texture = MEDIA .. "PlaqueHorde",    placeholder = "Horde plaque",    caption = "Horde" },
-                    { width = 226, height = 95, texture = MEDIA .. "PlaqueModern",   placeholder = "Modern plaque",   caption = "Modern" },
-                },
-            },
-            {
-                type = "image",
-                align = "CENTER",
-                width = 412,
-                height = 162,
-                texture = MEDIA .. "PlaqueSteampunk",
-                placeholder = "Steampunk plaque screenshot placeholder",
-                caption = "Steampunk",
-            },
-            {
-                type = "note",
-                text =
-                "Animate Plaque Effects toggles glow and pulse effects for plaque styles that support them. Not every plaque style has animated parts.",
-            },
+            Row({
+                Capture("Pinpoint", 220, 168, "Full"),
+                Capture("PinpointPlaqueOff", 220, 168, "No Plaque"),
+                Capture("PinpointOff", 220, 168, "Disabled"),
+            }, 12),
+            Heading("Close-range guidance"),
+            Text({
+                "Pinpoint Mode chooses the full marker and plaque, the marker without the plaque, or no close-range display. Show Pinpoint At sets when it appears, Hide Pinpoint At sets when it disappears at arrival. These visual distances are separate from manual waypoint clearing.",
+                "",
+                "Use Show Destination Info, Show Extended Info and Show Coordinate Fallback to control the information shown. Show Pinpoint Arrows toggles downward chevrons. Adjust Pinpoint Size, Opacity, Base Pinpoint Height and Camera Pinpoint Height to suit your camera and UI.",
+            }),
+            Heading("Choose a plaque style"),
+            Text({
+                "All standalone designs work on Retail and Forever.",
+            }),
+            Row({
+                PlaqueSample(C.WORLD_OVERLAY_PLAQUE_MINIMAL, "Minimal"),
+                PlaqueSample(C.WORLD_OVERLAY_PLAQUE_FOREVER, "Forever"),
+                PlaqueSample(C.WORLD_OVERLAY_PLAQUE_BLIZZARD, "Blizzard"),
+            }, 12),
+            Row({
+                PlaqueSample(C.WORLD_OVERLAY_PLAQUE_CLASSIC, "Classic"),
+                PlaqueSample(C.WORLD_OVERLAY_PLAQUE_CLEAN, "Clean"),
+                PlaqueSample(C.WORLD_OVERLAY_PLAQUE_MODERN, "Modern"),
+            }, 12),
+            Row({
+                PlaqueSample(C.WORLD_OVERLAY_PLAQUE_FANTASY, "Fantasy", 102),
+                PlaqueSample(C.WORLD_OVERLAY_PLAQUE_GLOWING_GEMS, "Glowing Gems", 102),
+                PlaqueSample(C.WORLD_OVERLAY_PLAQUE_FUTURE, "Future", 102),
+            }, 12),
+            Row({
+                PlaqueSample(C.WORLD_OVERLAY_PLAQUE_ALLIANCE, "Alliance", 102),
+                PlaqueSample(C.WORLD_OVERLAY_PLAQUE_HORDE, "Horde", 102),
+                PlaqueSample(C.WORLD_OVERLAY_PLAQUE_STEAMPUNK, "Steampunk", 102),
+            }, 12),
+            Heading("Fine-tune the plaque"),
+            Text({
+                "Minimal, Forever, Blizzard, Classic, Clean and Modern support independent Plaque Background Opacity and Plaque Border Opacity. Text and the context diamond stay independent. Minimal, Clean and Modern also support Plaque Border Thickness (1-8 pixels). Each style remembers its own adjustments. Overall Pinpoint Opacity fades the whole marker.",
+                "",
+                "Animate Plaque Effects toggles glow or pulse effects on designs that support them. If a supported UI styles AWP, disable that UI's styling to use the standalone artwork and supported border controls.",
+            }),
+            Note(
+            "Forever and Blizzard are the default plaques on their respective clients. Fantasy is the former Default artwork, Future is the former image-based Modern style."),
         },
     },
     {
         id = "customization",
-        title = "Options and Customization",
-        intro = "The options panel is searchable and includes previews for visual and behavior settings.",
+        title = "Settings and Customization",
+        intro = "Find settings, preview changes and restore individual defaults.",
         blocks = {
-            {
-                type = "image",
-                align = "CENTER",
-                width = 567,
-                height = 350,
-                texture = MEDIA .. "Options",
-                placeholder = "Options panel screenshot placeholder",
-                caption = "Game Menu > Options > AddOns > AzerothWaypoint",
-            },
-            {
-                type = "heading",
-                text = "Option Sections",
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "- About: addon summary, help, release notes, and author links.",
-                    "- General: routing backend, manual queues, tracked quests, addon adoption, and cleanup settings.",
-                    "- TomTom Arrow: arrow skins, arrow scale, and special travel button scale.",
-                    "- World Overlay: global overlay behavior and context display.",
-                    "- Waypoint: long-range marker, beacon, footer, distance, and text controls.",
-                    "- Pinpoint: close-range marker, plaque, title, subtext, arrows, and effects.",
-                    "- Navigator: off-screen arrow behavior.",
-                    "- Zygor: compact guide-frame controls, Tracker Viewer, native frame hiding, progress bar style, tracker text colors, and chat step display.",
-                }),
-            },
-            {
-                type = "note",
-                text =
-                "Check the General section when navigation ownership needs adjustment. Use the visual sections when you want to adjust the arrow, overlay, marker, plaque, or navigator needs adjustment.",
-            },
-            {
-                type = "heading",
-                text = "Colors and Auto Tint",
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "All overlay color dropdowns include Auto.",
-                    "",
-                    "Auto uses contextual hints such as quest state, destination type, route type, or source addon.",
-                    "",
-                    "Choosing a fixed color locks that element to the selected preset. Choosing Custom allows you to select your own custom color for that element.",
-                    "",
-                    "Waypoint Text defaults to Gray for readability. Choosing Auto makes it follow contextual icon/spec tint instead.",
-                    "",
-                    "Tracker Viewer Text and Chat Step Text can use contextual colors or forced to one selected color.",
-                    "",
-                    "Color presets include Auto, Blue, Custom, Cyan, Gold, Gray, Green, Pink, Purple, Red, Silver, and White.",
-                }),
-            },
-            {
-                type = "note",
-                text =
-                "Use Auto when you want quest state, source addon, or route type to drive color. Use a fixed color when you want a consistent UI theme no matter what kind of destination is active.",
-            },
-            {
-                type = "heading",
-                text = "Images, Search, and Filters",
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "The right-side preview pane changes as you hover or select settings.",
-                    "",
-                    "Use search and filters to find settings quickly. Filters can help narrow options by new, updated, visual, navigation, sizing, style, and integration behavior.",
-                }),
-            },
-            {
-                type = "heading",
-                text = "Minimap Button",
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "AWP includes a native minimap button and Blizzard addon-compartment entry for quick access.",
-                    "",
-                    "- Left-click: open AWP's quick menu.",
-                    "- Right-click: open AWP settings.",
-                    "- Drag: move it. Near the minimap it snaps to the edge; away from the minimap it can be placed freely.",
-                    "",
-                    "The quick menu can open AWP settings, Help, and Queue, reset or hide the button, and expose integration controls when supported addons are loaded.",
-                    "",
-                    "When Zygor is loaded, Zygor-specific controls appear in the menu. Those are covered on the Zygor Integration page.",
-                }),
-            },
+            Heading("Find the right setting"),
+            Text({
+                "Open /awp options (or use the minimap button). Search by a setting name or keyword. Use filters for new or updated settings, navigation, visuals, size and opacity, colors and styles, or integrations. The preview pane shows examples or descriptions for available controls.",
+                "",
+                "- General: routing, flight assist, waypoint queues, quests, guide order and UI Style.",
+                "- Profiles: create, share and switch setups.",
+                "- TomTom Arrow: skins, arrow size and travel button size.",
+                "- World Overlay: context and visibility: Waypoint, Pinpoint and Navigator have their own controls.",
+                "- Guide pages: native window options, Tracker Viewer, Guide Actions and Chat Output.",
+                "- Controller (Forever): native controller support and bindings.",
+                "- UI pages: customize matching for loaded supported UI addons.",
+                "- Integrations and Release Notes: see addon support and recent changes.",
+            }),
+            Heading("Reset a single setting"),
+            Text({
+                "A circular Reset icon appears beside changed values. Hover to see the default, click to restore that setting without resetting your profile. Dependent controls may refresh.",
+            }),
+            Heading("Colors and styles"),
+            Text({
+                "Auto follows quest, travel or destination context. Preset colors keep a consistent look, Custom lets you pick your own color. Waypoint Text defaults to Gray for readability. Guide text and chat can also use contextual colors or a fixed color. Tracker Viewer text additionally offers "
+                .. Link("UI colors", "tracker_viewer", "text_colors") .. " and "
+                .. Link("independent text sizes", "tracker_viewer", "text_sizes") .. ". See "
+                .. Link("Tracker Viewer", "tracker_viewer") .. " for details.",
+            }),
+            Heading("Minimap button"),
+            Text({
+                "Left-click opens the quick menu, right-click opens AWP settings. Drag to move the button around the minimap or place it freely. The menu includes Help, Queue, Search Nearby and controls for loaded guides (even if their Viewers are disabled). The active guide appears first, followed by the other loaded guides in Guide Viewer Order.",
+                "",
+                "Hide or reset the button in the quick menu or use /awp minimap show or /awp minimap reset. The Blizzard addon compartment remains another way to reach the menu.",
+            }),
         },
+    },
+    {
+        id = "appearance",
+        title = "UI Style",
+        intro = "Match AWP to your UI without changing how navigation works.",
+        blocks = {
+            Heading("Choose a UI Style"),
+            Text({
+                "General > UI Style defaults to Automatic. Automatic matches the only available UI style or offers a choice when several are available. Choose AWP to use its original look. Escape dismisses the chooser for this session and keeps your saved choice.",
+                "",
+                "- DaylightUI: UI style needs only its core addon.",
+                "- Ellesmere UI: Enable Blizzard Skins+ and its AzerothWaypoint skin.",
+                "- ElvUI: UI style needs only its core addon.",
+                "- GW2 UI: Appearance and custom tracker hosting are independent.",
+                "",
+                "If your selected UI addon is missing or disabled, AWP uses its own appearance and offers available alternatives. /awp status shows the selected and effective style.",
+            }),
+            Row({
+                Capture("AWPOptions", 320, 197, "AWP"),
+                Capture("OptionsDaylight", 320, 197, "DaylightUI (WoW Forever)"),
+            }),
+            Row({
+                Capture("OptionsEllesmere", 320, 197, "Ellesmere UI"),
+                Capture("OptionsElvUI", 320, 197, "ElvUI"),
+            }),
+            Heading("Customize individual areas"),
+            Text({
+                "Open the UI's AWP appearance page (in AWP or the UI's own settings). Both edit the same preferences. Choose each Guide Viewer, guide action panel, plaque, world marker/navigation labels, travel controls and AWP windows independently. Fonts, sizes, colors and panels can be adjusted where supported. For Tracker Viewer text, Auto keeps AWP's contextual colors even when UI text matching is enabled. Choose UI colors on the guide's Tracker Viewer page to use the UI's text colors. Custom Viewer text sizes override inherited sizes without changing the selected font, outline or shadow.",
+                "",
+                "Turn off a particular area to restore its original appearance. Choosing another provider keeps your saved preferences. Only one provider styles AWP at a time.",
+            }),
+            Heading("Tracker hosting"),
+            Text({
+                "UI Style controls how AWP looks. The installed tracker determines where Guide Viewers appear. DaylightUI's tracker requires DaylightUI_Quests, its appearance can work with other hosts. ElvUI uses Blizzard's tracker and retains its experimental docking limitation. Ellesmere UI's custom tracker is supported on Forever. GW2 UI's custom tracker is supported on both clients.",
+                "",
+                "With GW2 UI's map skin enabled, Waypoint Queues opens beside the map where possible and keeps the quest pane accessible on narrow maps.",
+            }),
+            Note(
+            "Ellesmere UI's AzerothWaypoint settings include a live Search settings filter. Clear Search restores the unfiltered page. Preset changes that require a UI reload follow the UI's normal behavior."),
+        },
+    },
+    {
+        id = "profiles",
+        title = "Settings Profiles",
+        intro = "Keep different setups, back up preferences and share settings between clients.",
+        blocks = {
+            Heading("Choose or create a profile"),
+            Text({
+                "Open /awp options > Profiles. Your existing preferences become the Default profile.",
+                "",
+                "- Account Default: the profile used by characters set to Follow Account Default.",
+                "- This Character: use the shared default or select a different named profile.",
+                "- Create: start from AWP's defaults for your client.",
+                "- Duplicate: copy the profile selected under Manage Profiles.",
+                "",
+                "Applying a different profile reloads the UI outside combat.",
+            }),
+            Capture("ProfilesOverview", 270, 234, "Account and character profile choices."),
+            Heading("Export settings"),
+            Text({
+                "Select a profile, click Export and copy the settings string with Ctrl+C. Save it for backup or share it with another player. Profile strings work across Retail and Forever.",
+            }),
+            Heading("Import only what you need"),
+            Text({
+                "1. Click Import, paste the string and choose Review Import.",
+                "2. Select the sections to import. Layout is unchecked by default to preserve saved frame positions.",
+                "3. Review changes and unavailable integration warnings.",
+                "4. Create Profile copies the active profile and applies selected sections. Replace Profile updates the selected profile after confirmation.",
+                "",
+                "Unchecked sections keep their existing settings. Missing values in selected sections use your client's defaults.",
+            }),
+            Capture("ProfilesImportReview", 470, 297, "An import review with Layout left unchecked."),
+            Note(
+            "Profiles include AWP preferences, per-guide text-size overrides and frame positions. Waypoint queues, active routes, guide progress, open guide tabs, flight favorites/history and other addons' settings are stored separately."),
+        },
+    },
+    {
+        id = "controller",
+        title = "Controller (Forever)",
+        intro = "Navigate AWP with WoW Forever's native controller UI.",
+        blocks = {
+            Heading("Get started"),
+            Text({
+                "Enable the game's controller UI, then open AWP Settings > Controller. AWP does not assign buttons or replace the game's tracker shortcut. In the game's key bindings, the AzerothWaypoint category offers three optional, unbound commands:",
+                "",
+                "- Navigate AWP Guides: focus the active visible guide or first visible guide in your order.",
+                "- Open AWP Menu: open the quick menu.",
+                "- Use Active Guide Action: use a prepared action from the active guide.",
+            }),
+            Heading("Move around the UI"),
+            Text({
+                "Use the D-pad to move between controls, Select to activate and Back to close menus or leave windows. Focused controls scroll into view. You can move across docked guide sections and navigate AWP settings, queues, Help, dialogs and action panels. Text entry and clipboard actions use the game or operating system's normal facilities.",
+            }),
+            Heading("Use guide actions"),
+            Text({
+                "Press the right stick on a focused guide task or objective to use its single action. If several are available, choose from a picker. More actions opens its context menu. Focusing a step does not make the guide active.",
+                "",
+                "A uniquely prepared standard action can remain usable during combat. If the guide changes, the indicator continues to identify the retained action until a replacement can be prepared after combat. Native helpers keep their normal restrictions. Temporary menu bindings are released in combat.",
+            }),
+            Heading("Adjust settings"),
+            Text({
+                "- Sliders: select, adjust Left/Right, then Select or Back to finish.",
+                "- Guide order: select a row, move Up/Down, then Select to save or Back to cancel.",
+                "- Color editor: adjust numeric channels or hex value, then Apply or Cancel.",
+                "- Dropdowns: move through enabled choices and pages of longer lists.",
+            }),
+            Note(
+            "Use /awp controllerdiag or the Controller settings page to check focus, bindings and the prepared action."),
+        },
+    },
+    {
+        id = "integrations",
+        title = "Integrations",
+        intro = "See what optional addons add to AzerothWaypoint.",
+        blocks = BuildIntegrationHelpBlocks(),
     },
     {
         id = "commands",
         title = "Commands",
-        intro = "Everyday commands worth remembering, plus diagnostics for bug reports and testing.",
+        intro = "Quick access, macros and diagnostic commands.",
         blocks = {
-            {
-                type = "heading",
-                text = "Help, Options, and Status",
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "/awp status",
-                    "- Show addon status, routing backend, key toggles, loaded integrations, and version.",
-                    "",
-                    "/awp options",
-                    "- Open the options panel.",
-                    "",
-                    "/awp help",
-                    "- Open this help guide.",
-                    "",
-                    "/awp changelog",
-                    "- Open What's New.",
-                    "",
-                    "/awp repair",
-                    "- Check and repair TomTom/Zygor settings that AWP depends on.",
-                }),
-            },
-            {
-                type = "heading",
-                text = "Routing and Queues",
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "/awp routing on|off|toggle",
-                    "- Enable or disable route ownership.",
-                    "",
-                    "/awp backend direct|zygor|mapzeroth|farstrider",
-                    "- Choose the routing backend. direct means TomTom Direct.",
-                    "",
-                    "/awp queue",
-                    "- Open the queue panel.",
-                    "",
-                    "/awp queue list",
-                    "- List known queues.",
-                    "",
-                    "/awp queue use <id|index>",
-                    "- Activate a queue.",
-                    "",
-                    "/awp queue clear [id|index]",
-                    "- Clear a queue.",
-                    "",
-                    "/awp queue remove <id|index> <item>",
-                    "- Remove one destination from a queue.",
-                    "",
-                    "/awp queue move <id|index> <from> <to>",
-                    "- Move a destination inside a queue.",
-                    "",
-                    "/awp queue import",
-                    "- Import supported queued waypoint data.",
-                }),
-            },
-            {
-                type = "heading",
-                text = "Manual and Quest Cleanup",
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "/awp manualclear on|off|toggle",
-                    "- Toggle auto-clear for manual waypoints on arrival.",
-                    "",
-                    "/awp cleardistance <5-100>",
-                    "- Set manual waypoint arrival clear distance.",
-                    "",
-                    "/awp trackroute on|off|toggle",
-                    "- Toggle auto-routing for newly tracked Blizzard quests.",
-                    "",
-                    "/awp untrackclear on|off|toggle",
-                    "- Toggle clearing matching AWP quest routes and queue items when a quest is untracked.",
-                    "",
-                    "/awp questclear on|off|toggle",
-                    "- Toggle arrival clear for supertracked quest routes.",
-                    "",
-                    "/awp addontakeover on|off|toggle|status",
-                    "- Control waypoint adoption from unknown addon callers.",
-                }),
-            },
-            {
-                type = "heading",
-                text = "Minimap Button",
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "/awp minimap show|hide|toggle|reset|status",
-                    "- Control the AWP minimap button. The button menu also opens Help and Queue.",
-                }),
-            },
-            {
-                type = "heading",
-                text = "Flight Map Assist",
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "/awp flightassist marker on|off|toggle|status",
-                    "- Control the retail flight-map destination marker for routed taxi / flight path legs.",
-                    "",
-                    "/awp flightassist auto disabled|exact|strong|status",
-                    "- Control opt-in Auto Take Flight Paths for matched flight paths. Disabled never auto-takes, exact only uses exact taxi-node matches, and strong also allows strict visible coordinate/name matches.",
-                    "",
-                    "/awp flightassist catalog on|off|toggle|reset|status",
-                    "- Control the AWP taxi list attached to the flight map. Reset restores the default side and open state without clearing favorites or recents.",
-                    "",
-                    "Holding Alt while opening the flight map suppresses auto-take for that interaction.",
-                }),
-            },
-            {
-                type = "heading",
-                text = "Zygor Display",
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "/awp compact on|off|toggle",
-                    "- Toggle Zygor's compact guide-frame mode (show only guide steps until you mouse over the frame).",
-                    "",
-                    "/awp trackerviewer on|off|toggle|status",
-                    "- Show the current Zygor guide docked inside the objective tracker (the AWP Tracker Viewer). status reports the tracker host and whether it is hidden or transparent.",
-                    "",
-                    "/awp zygorviewer show|hide|toggle|status",
-                    "- Show or visually hide Zygor's own full-size viewer. Hiding keeps Zygor's guide engine, active waypoints, guide picker, and settings fully working.",
-                }),
-            },
-            {
-                type = "heading",
-                text = "Zygor Guide Controls",
-            },
-            {
-                type = "text",
-                text =
-                "/awp zygor <subcommand> drives the active Zygor guide without opening Zygor's UI, so it works well in macros and key bindings.",
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "Step navigation:",
-                    "",
-                    "/awp zygor next",
-                    "- Advance to the next step.",
-                    "",
-                    "/awp zygor prev",
-                    "- Go back one step.",
-                    "",
-                    "/awp zygor skip",
-                    "- Skip / complete the current step (same as clicking the Tracker Viewer checkbox).",
-                }),
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "Loading and switching guides:",
-                    "",
-                    "/awp zygor picker",
-                    "- Open Zygor's guide picker.",
-                    "",
-                    "/awp zygor load <title> [step N]",
-                    "- Load a guide by partial title, optionally jumping straight to step N.",
-                    "",
-                    "/awp zygor list",
-                    "- List your open Zygor guides and which one is active.",
-                    "",
-                    "/awp zygor switch <index>",
-                    "- Switch to an open guide by its number from the list.",
-                    "",
-                    "/awp zygor close [current|index|all]",
-                    "- Close the current guide, a guide by number, or every open guide.",
-                }),
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "Zygor menus and chat step display:",
-                    "",
-                    "/awp zygor menu",
-                    "- Open Zygor's guide menu.",
-                    "",
-                    "/awp zygor settings",
-                    "- Open Zygor's settings.",
-                    "",
-                    "/awp zygor reset",
-                    "- Recover a lost or glitched native viewer: unhide it and reset Zygor's window back to its default position.",
-                    "",
-                    "/awp zygor output",
-                    "- Shows the current step in your own chat only. Sticky steps follow your Chat Sticky Summary option.",
-                    "",
-                    "/awp zygor output full",
-                    "- Shows the current step plus full details for each active sticky step.",
-                    "",
-                    "/awp zygor output sticky",
-                    "- Shows only the active sticky steps.",
-                }),
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "Examples:",
-                    "",
-                    "/awp zygor next",
-                    "/awp zygor load Emerald Dream",
-                    "/awp zygor load Khaz Algar step 14",
-                    "/awp zygor switch 2",
-                    "/awp zygor output full",
-                    "/awp zygor close all",
-                }),
-            },
-            {
-                type = "note",
-                text =
-                "Tip: put a single /awp zygor command on a macro or key binding (for example /awp zygor next) to step guides without touching Zygor's window.",
-            },
-            {
-                type = "heading",
-                text = "Arrow and Search",
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "/awp skin <skin>",
-                    "- Set the TomTom arrow skin.",
-                    "",
-                    "/awp scale <0.60-2.00>",
-                    "- Set custom arrow skin scale.",
-                    "",
-                    "/awp search <service>",
-                    "- Route to supported services or profession targets. Search requires Zygor search data.",
-                    "",
-                    "Examples:",
-                    "",
-                    "/awp search vendor",
-                    "/awp search repair",
-                    "/awp search auctioneer",
-                    "/awp search mailbox",
-                    "/awp search trainer alchemy",
-                    "/awp search workshop blacksmithing",
-                }),
-            },
-            {
-                type = "heading",
-                text = "Diagnostics",
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "/awp debug",
-                    "/awp diag",
-                    "/awp stepdebug",
-                    "/awp waytype",
-                    "/awp routedump",
-                    "/awp routeenv",
-                    "/awp traveldiag",
-                    "/awp churn",
-                    "/awp resolvercases",
-                    "/awp plaque",
-                    "",
-                    "These are mostly for testing and bug reports.",
-                    "",
-                    "For most reports, /awp status, /awp waytype, and /awp stepdebug are the most useful commands.",
-                }),
-            },
+            Heading("Everyday commands"),
+            Text({
+                "/awp options - open settings (also config or settings).",
+                "/awp help - open Help.",
+                "/awp queue - open Waypoint Queues.",
+                "/awp status - show routing, integrations and current settings.",
+                "/awp changelog - open What's New.",
+                "/awp repair - check and repair required TomTom/Zygor settings.",
+                "/awp routing on|off|toggle - enable or disable AWP routing.",
+                "/awp backend direct|zygor|mapzeroth|farstrider|dugi|polestar - choose a planner. QuestieRouter is also selectable in General on Forever.",
+            }),
+            Heading("Guide commands"),
+            Text({
+                "Use /awp <provider> help to see commands supported by that guide. Guide Provider names: zygor, dugi, rxp, apr, wowpro, polestar (Forever), questierouter (Forever). Commands work even with the AWP Viewer disabled.",
+                "",
+                "Examples:",
+                "/awp zygor next",
+                "/awp zygor compact toggle",
+                "/awp dugi list",
+                "/awp dugi switch 2",
+                "/awp rxp output full",
+                "/awp wowpro steps",
+                "/awp questierouter tasks",
+                "/awp questierouter automatic",
+                "",
+                "/awp <provider> viewer on|off|toggle|status controls the AWP Tracker Viewer.",
+                "/awp <provider> native show|hide|toggle|status controls the guide addon's own window.",
+                "Other actions vary by provider. Run list again before using an old index if guides change. Zygor load also accepts step N. Reset restores the native window and a safe position where supported, and preserves guide progress.",
+            }),
+            Heading("Queue commands"),
+            Text({
+                "/awp queue list - list queues.",
+                "/awp queue use <id|index> - activate a queue.",
+                "/awp queue clear [id|index] - clear a queue.",
+                "/awp queue remove <id|index> <item> - remove a destination.",
+                "/awp queue move <id|index> <from> <to> - reorder destinations.",
+                "/awp queue import - import waypoint data.",
+            }),
+            Heading("Navigation settings"),
+            Text({
+                "/awp manualclear on|off|toggle",
+                "/awp cleardistance <5-100>",
+                "/awp trackroute on|off|toggle",
+                "/awp untrackclear on|off|toggle",
+                "/awp questclear on|off|toggle",
+                "/awp addontakeover on|off|toggle|status",
+                "/awp minimap show|hide|toggle|reset|status",
+                "/awp skin <skin>",
+                "/awp scale <0.60-2.00>",
+            }),
+            Heading("Flight Map Assist"),
+            Text({
+                "/awp flightassist marker on|off|toggle|status",
+                "/awp flightassist auto disabled|exact|strong|status",
+                "/awp flightassist catalog on|off|toggle|reset|status",
+                "",
+                "Catalog reset restores the Taxi List side/open state without clearing favorites or recent flights. Hold Alt to skip automatic flight selection.",
+            }),
+            Heading("Search Nearby"),
+            Text({
+                "Open Search Nearby from the minimap menu or use /awp search help. Zygor, Dugi and Polestar (Forever) can provide results. See the Search Nearby Help page for "
+                .. Link("provider priority", "search_nearby", "providers") .. " and "
+                .. Link("setup", "search_nearby", "setup") .. ".",
+                "",
+                "Examples:",
+                "/awp search vendor",
+                "/awp search repair",
+                "/awp search auctioneer",
+                "/awp search mailbox",
+                "/awp search poison vendor",
+                "/awp search reagents",
+                "/awp search trainer alchemy",
+                "/awp search trainer mage",
+                "/awp search weapon master swords",
+                "/awp search workshop blacksmithing",
+            }),
+            Heading("Diagnostics"),
+            Text({
+                "/awp status, /awp waytype and /awp stepdebug are useful for most navigation reports. Other diagnostic commands: /awp debug, /awp diag, /awp routedump, /awp routeenv, /awp traveldiag, /awp mem, /awp churn, /awp resolvercases, /awp plaque and /awp controllerdiag (Forever).",
+                "",
+                "For slow login or reload reports, include the Startup and TOC groups lines from /awp mem and say whether you logged in or reloaded.",
+            }),
         },
     },
     {
         id = "troubleshooting",
         title = "Troubleshooting",
-        intro = "Common things to check when routing, arrows, queues, or quest text do not look right.",
+        intro = "Find common fixes without resetting your setup.",
         blocks = {
-            {
-                type = "heading",
-                text = "The Arrow Is Missing",
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "Try:",
-                    "",
-                    "/awp status",
-                    "/awp repair",
-                    "/reload",
-                    "",
-                    "Also check that TomTom is installed and enabled.",
-                }),
-            },
-            {
-                type = "heading",
-                text = "Tracker Viewer Is Missing",
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "Check:",
-                    "",
-                    "- Zygor Guides Viewer is installed, enabled, and loaded.",
-                    "- Zygor > Tracker Viewer > Enable Tracker Viewer is on.",
-                    "- A guide is loaded, or click the welcome row to open Zygor's guide picker.",
-                    "- The objective tracker the Tracker Viewer docks into is actually visible.",
-                    "",
-                    "The Tracker Viewer is not its own window. It docks into the objective tracker - Kaliel's Tracker if it is installed, otherwise Blizzard's. If that tracker is hidden, collapsed, or see-through, the Tracker Viewer goes with it.",
-                    "",
-                    "Kaliel's Tracker is recommended and selected automatically. Blizzard native docking is experimental: its known WoW 12.1 taint can produce protected-action or secret-value errors, may stop working after a future patch, and may eventually be removed in favor of Kaliel's Tracker-only docking.",
-                }),
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "If the tracker itself is hidden or hard to see:",
-                    "",
-                    "- Objective tracker opacity: Blizzard's Edit Mode and Kaliel's Tracker both have an opacity setting. If it is very low, the Tracker Viewer looks faint or invisible.",
-                    "- Mouseover-only addons: addons such as MouseoverObjectiveTracker hide the tracker until you hover it, so the Tracker Viewer only appears on mouseover.",
-                    "- UI suites that hide or disable the objective tracker entirely will also hide the Tracker Viewer. Re-enable the objective tracker in that addon.",
-                    "- The tracker may be collapsed or minimized. Expand it.",
-                }),
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "/awp status reports the detected objective tracker host, its support status, the native-warning preference, and whether it is hard-hidden or transparent. AWP also warns after login or /reload when the Tracker Viewer is on but the tracker is hidden or see-through. Native Blizzard attachment shows the experimental-support popup unless that reminder has been disabled.",
-                    "",
-                    "If you changed tracker addons or Zygor's load state, try /reload.",
-                }),
-            },
-            {
-                type = "note",
-                text =
-                "Hide Zygor's Native Frame only visually hides Zygor's full-size viewer. It does not turn off Zygor's guide logic or active waypoints.",
-            },
-            {
-                type = "heading",
-                text = "Hid Zygor's Viewer And Can't Reach Zygor",
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "Hide Zygor's Native Frame only cloaks Zygor's full-size window - the guide engine, waypoints, and menus stay active. To bring it back, or to reach Zygor without it:",
-                    "",
-                    "/awp zygorviewer show",
-                    "- Show Zygor's native viewer again.",
-                    "",
-                    "/awp zygor reset",
-                    "- If the viewer is stuck off-screen or the cloak glitches, this unhides it and resets Zygor's own window back to its default position.",
-                    "",
-                    "You can also:",
-                    "",
-                    "- Open /awp options and turn off Zygor > Hide Zygor's Native Frame.",
-                    "- Left-click the AWP minimap button and use its menu to toggle Zygor's native viewer.",
-                    "- Use the Tracker Viewer header buttons to open Zygor's guide menu and settings.",
-                    "- Use /awp zygor picker, /awp zygor menu, or /awp zygor settings to reach Zygor's guide picker, menu, and settings directly.",
-                }),
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "If it still will not show:",
-                    "",
-                    "- Make sure Zygor Guides Viewer itself is enabled and a guide is loaded - Zygor hides its own viewer when nothing is active.",
-                    "- Zygor has its own controls too: right-click Zygor's minimap button to show or hide its viewer, or use Zygor's own /zygor show and /zygor hide commands.",
-                }),
-            },
-            {
-                type = "heading",
-                text = "Minimap Button Is Gone",
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "If you hid the AWP minimap button:",
-                    "",
-                    "/awp minimap show",
-                    "- Show it again (use /awp minimap reset to move it back to a default spot).",
-                    "",
-                    "Even with the button hidden, you can open the addon compartment (the addon menu button on the minimap) and pick AzerothWaypoint - it has the same quick menu and still reaches Settings, Help, the Queue, and the Zygor controls.",
-                }),
-            },
-            {
-                type = "heading",
-                text = "Zygor's Arrow Is Still Showing",
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "Open Zygor options:",
-                    "",
-                    "/zygor options",
-                    "",
-                    "Then go to:",
-                    "",
-                    "Waypoint Arrow > Enable Waypoint Arrow",
-                    "",
-                    "Turn it off. AWP may also offer a one-click prompt when it detects this conflict.",
-                }),
-            },
-            {
-                type = "heading",
-                text = "A Guide Queue Is Visible But Not Active",
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "That can be normal.",
-                    "",
-                    "Guide queues can remain visible even when a manual queue, transient route, quest route, or another provider currently owns navigation.",
-                    "",
-                    "Activate the queue from the queue panel or use the guide addon normally to make it the active provider again.",
-                    "",
-                    "If none of that works try removing all TomTom waypoints `/tway reset all` or by going into the queue UI and clicking `Deactivate Queue` on the active queue.",
-                    "",
-                    "Sometimes a quick `/reload` will work too.",
-                }),
-            },
-            {
-                type = "heading",
-                text = "Unknown Addon Waypoints Are Ignored",
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "Check:",
-                    "",
-                    "- General > Adopt Waypoints from Unknown Addons.",
-                    "- Detected Addon Callers.",
-                    "- Addon Allowlist.",
-                    "- Addon Blocklist.",
-                    "",
-                    "Known source-aware integrations such as SilverDragon and RareScanner are handled separately from unknown addon callers.",
-                }),
-            },
-            {
-                type = "note",
-                text =
-                "Use the allowlist for addon callers you trust and want AWP to adopt. Use the blocklist when an addon creates TomTom waypoints that should remain outside AWP's route flow.",
-            },
-            {
-                type = "heading",
-                text = "Quest Text Or Objective Progress Looks Stale",
-            },
-            {
-                type = "text",
-                text = JoinLines({
-                    "Blizzard quest data can lag behind quest updates, especially after login, tracking changes, turn-ins, or rapid quest state changes.",
-                    "",
-                    "Try opening the quest log, changing tracking, or waiting for the next quest update event.",
-                }),
-            },
+            Heading("The arrow is missing"),
+            Text({
+                "Check that TomTom is installed and enabled, AWP routing is on, and you have a destination. Check Hide During Combat if you are fighting. Try /awp status, /awp repair and /reload.",
+            }),
+            Heading("Two arrows are showing"),
+            Text({
+                "AWP can offer a prompt to let TomTom show navigation instead of the guide's own arrow. Accept only if you want that change. For Zygor, open /zygor options > Waypoint Arrow and disable Enable Waypoint Arrow. For Polestar, use Let AWP Show Navigation. Turning off AWP routing restores normal Dugi planning and Polestar follower behavior.",
+            }),
+            Heading("A Viewer is missing"),
+            Text({
+                "Check the guide addon is enabled, its Tracker Viewer is enabled, a guide is loaded and the tracker is visible and expanded. If the tracker is faint or only appears on hover, check tracker opacity, Edit Mode and mouseover addons. On Forever with Questie, check Always Show Tracker.",
+                "",
+                "/awp status reports the detected tracker and visibility. After changing tracker addons, try /reload. See "
+                ..
+                Link("Tracker Viewer", "tracker_viewer", "supported_trackers") ..
+                " for supported trackers and the Blizzard docking warning.",
+            }),
+            Heading("I hid the original guide window"),
+            Text({
+                "Open the guide's settings in AWP and turn off its native-frame hiding option, or use the minimap menu. /awp <provider> native show restores it where supported. /awp <provider> reset can recover a lost window where the addon offers a safe position reset and preserves guide progress. Dugi's anchored small frame must be disabled before its floating frame can be hidden.",
+            }),
+            Heading("No guide action buttons are visible"),
+            Text({
+                "Check the guide's Guide Actions page. Make sure at least one of the AWP action displays is enabled or native action controls are visible, and that the matching category is enabled. Inline buttons and native helpers may be unavailable in combat.",
+            }),
+            Heading("A guide is visible but is not directing navigation"),
+            Text({
+                "Only one destination directs navigation at a time. A manual waypoint, temporary route or another guide may be active. Activate the desired guide or queue, or deactivate the current manual queue to return to guide navigation.",
+            }),
+            Heading("The route looks wrong"),
+            Text({
+                "Check your preferred and active backend with /awp status. AWP may be using a fallback or a walking-only route according to planner preferences. Some routes lack terrain or floor data. If an addon's waypoint is ignored, check General > Addon Waypoint Adoption and its allow/block lists. Quest data may be delayed after login or quest updates, open the quest log or wait for the next update.",
+            }),
+            Heading("Nearby search has no result"),
+            Text({
+                "Check that a supported search provider (Zygor, Dugi or Polestar on Forever) is loaded and ready. Use /awp search help to see available services. Guide Viewer Order determines which provider is tried first, enabling a Viewer is not required.",
+            }),
+            Heading("The minimap button is missing"),
+            Text({
+                "Use /awp minimap show or /awp minimap reset. The Blizzard addon compartment can still open the AWP quick menu.",
+            }),
+            Heading("Guide colors or text sizes are not what I expected"),
+            Text({
+                "Open the guide's Tracker Viewer settings. Auto keeps AWP's contextual colors, even with UI text-color matching on. Choose UI colors to use the selected style's text colors, or select a fixed color.",
+                "Enable Use custom Viewer text sizes to change this guide's heading, goal, notes and progress sizes. Disable it to return to the tracker or UI's sizing. Your selected font, outline and shadow remain in effect.",
+            }),
+            Heading("The appearance is not what I selected"),
+            Text({
+                "Check General > UI Style and /awp status for the effective style. Confirm the required UI addon and its skin module are enabled. Check the individual area's matching switch. If a standalone plaque does not appear, disable the UI's appearance setting for Pinpoint Plaque.",
+            }),
+            Heading("Report a problem"),
+            Text({
+                "Include your client (Retail or Forever), what you clicked, active guide, selected routing backend, /awp status, /awp waytype and /awp stepdebug for guide routing. Include any Lua error and whether the problem occurs with a particular tracker or UI Style.",
+            }),
         },
     },
     {
         id = "whats_new",
         title = "What's New",
-        intro = "Recent highlights from the recorded changelog data.",
+        intro = "Recent release notes and highlights.",
         blocks = {
-            {
-                type = "recent_changelog",
-                limit = 3,
-            },
+            { type = "recent_changelog", limit = 3 },
         },
     },
 }
+
+local _, private = ...
+if private and private.finishLoadGroup then private.finishLoadGroup("Takeovers, taxi and docs") end

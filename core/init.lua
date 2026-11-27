@@ -1,3 +1,13 @@
+-- ============================================================
+-- Addon lifecycle and events
+-- ============================================================
+--
+-- Connects the addon lifecycle to its event handlers and coordinates startup
+-- with TomTom and optional guides. File-load measurement stops before the
+-- startup events. The load and login handlers own the work timed by those
+-- events.
+
+local _, private = ...
 local NS = _G.AzerothWaypointNS
 local state = NS.State
 local GetZygorPointer = NS.GetZygorPointer
@@ -125,9 +135,10 @@ end
 -- Event handler
 -- ============================================================
 
-f:SetScript("OnEvent", function(_, ev, arg1)
+f:SetScript("OnEvent", function(_, ev, arg1, arg2)
     if ev == "ADDON_LOADED" then
         if arg1 == NS.ADDON_NAME then
+            local started = GetTimePreciseSec and GetTimePreciseSec()
             SafeCall(NS.ApplyDBDefaults)
             SafeCall(NS.InitializeRoutingCore)
             SafeCall(NS.InitializeWorldOverlay)
@@ -135,8 +146,10 @@ f:SetScript("OnEvent", function(_, ev, arg1)
             SafeCall(NS.RegisterCommands)
             SafeCall(NS.RefreshMinimapButton)
             NS.Msg("AzerothWaypoint loaded. Use /awp for commands.")
+            if started then state.init.addonLoadedMS = (GetTimePreciseSec() - started) * 1000 end
         end
     elseif ev == "PLAYER_LOGIN" then
+        local started = GetTimePreciseSec and GetTimePreciseSec()
         state.init.playerLoggedIn = true
         SafeCall(NS.InitializeFlightMapAssist)
         SafeCall(NS.InitializeFlightMapTimes)
@@ -145,7 +158,8 @@ f:SetScript("OnEvent", function(_, ev, arg1)
             or (type(C_AddOns) == "table" and type(C_AddOns.IsAddOnLoaded) == "function"
                 and C_AddOns.IsAddOnLoaded("ZygorWaypoint"))
         then
-            NS.Msg("|cffff4040WARNING:|r Old 'ZygorWaypoint' addon is still installed. Delete the ZygorWaypoint folder from Interface/AddOns to avoid conflicts.")
+            NS.Msg(
+                "|cffff4040WARNING:|r Old 'ZygorWaypoint' addon is still installed. Delete the ZygorWaypoint folder from Interface/AddOns to avoid conflicts.")
         end
         SafeCall(NS.RefreshSuperTrackedFrameSuppression)
         SafeCall(NS.InstallBlizzardTakeoverHooks)
@@ -165,11 +179,10 @@ f:SetScript("OnEvent", function(_, ev, arg1)
                 SafeCall(NS.MaybeShowZygorWaypointConflictPopup)
                 SafeCall(NS.StartZygorWaypointConflictReminders)
             end)
-            NS.After(1.0, function()
-                SafeCall(NS.MaybeWarnObjectiveTrackerVisibility)
-            end)
             NS.After(startupHelpPage and 6.0 or 1.25, function()
                 SafeCall(NS.MaybeShowZygorArrowRecommendationPopup, 1)
+                SafeCall(NS.MaybeShowDugiArrowRecommendationPopup, 1)
+                SafeCall(NS.MaybeShowRXPArrowRecommendationPopup)
             end)
         end)
 
@@ -219,6 +232,7 @@ f:SetScript("OnEvent", function(_, ev, arg1)
         end)
         NS.After(0.9, function() SafeCall(NS.SyncBlizzardTakeovers) end)
         NS.After(1.0, function() SafeCall(NS.TickUpdate) end)
+        if started then state.init.playerLoginMS = (GetTimePreciseSec() - started) * 1000 end
     elseif ev == "CINEMATIC_START" or ev == "PLAY_MOVIE" or ev == "LOADING_SCREEN_ENABLED" then
         SafeCall(NS.SetCinematicActive, true)
     elseif ev == "CINEMATIC_STOP" or ev == "STOP_MOVIE" or ev == "LOADING_SCREEN_DISABLED" then
@@ -229,7 +243,12 @@ f:SetScript("OnEvent", function(_, ev, arg1)
             end)
         end
     elseif ev == "PLAYER_DEAD" or ev == "PLAYER_ALIVE" or ev == "PLAYER_UNGHOST" then
-        NS.After(0, function() SafeCall(NS.TickUpdate) end)
+        NS.After(0, function()
+            if ev ~= "PLAYER_DEAD" and not UnitIsDeadOrGhost("player") then SafeCall(NS.EndCorpseRoute) end
+            SafeCall(NS.TickUpdate)
+            local mapzeroth = NS.RoutingBackend_Mapzeroth
+            if mapzeroth then SafeCall(mapzeroth.OnLifeStateChanged) end
+        end)
     elseif ev == "PLAYER_REGEN_DISABLED" then
         SafeCall(NS.SetCombatVisibilityEventActive, true)
         SafeCall(NS.ApplyCombatVisibilityGuard)
@@ -253,7 +272,8 @@ f:SetScript("OnEvent", function(_, ev, arg1)
             SafeCall(NS.NoteRouteEnvironmentChanged, ev)
         end)
     elseif ev == "SUPER_TRACKING_CHANGED" then
-        local superType = C_SuperTrack.GetHighestPrioritySuperTrackingType and C_SuperTrack.GetHighestPrioritySuperTrackingType()
+        local superType = C_SuperTrack.GetHighestPrioritySuperTrackingType and
+            C_SuperTrack.GetHighestPrioritySuperTrackingType()
         NS.LogSuperTrackTrace("SUPER_TRACKING_CHANGED", tostring(superType))
         SafeCall(NS.RefreshSuperTrackedFrameSuppression)
         if superType ~= Enum.SuperTrackingType.UserWaypoint then
@@ -291,6 +311,11 @@ f:SetScript("OnEvent", function(_, ev, arg1)
         or ev == "QUEST_TURNED_IN"
     then
         SafeCall(NS.InvalidateNativeOverlayQuestCaches, arg1)
+        local selection = NS.Internal.GuideQuestSelection
+        if selection then
+            local questID = ev == "QUEST_ACCEPTED" and type(arg2) == "number" and arg2 or arg1
+            selection.OnDialogEvent(ev, questID)
+        end
         if ev == "QUEST_TURNED_IN" then
             SafeCall(NS.ScheduleActiveQuestBackedManualRefresh, ev, arg1)
         end
@@ -304,3 +329,10 @@ f:SetScript("OnEvent", function(_, ev, arg1)
         NS.After(0, function() SafeCall(NS.OnDynamicGossipPoiUpdated) end)
     end
 end)
+
+-- This is the last TOC chunk. Saved-variable delivery and event dispatch follow.
+if private.finishLoadGroup then
+    state.init.fileLoadMS = private.finishLoadGroup("Settings and commands")
+    state.init.fileLoadGroups = private.fileLoadGroups
+    private.finishLoadGroup, private.fileLoadGroups = nil, nil
+end

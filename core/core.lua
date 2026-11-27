@@ -1,3 +1,10 @@
+-- ============================================================
+-- Shared constants and runtime state
+-- ============================================================
+--
+-- Initializes shared constants and runtime state. Also owns chat output, churn
+-- counters and debug hooks.
+
 local NS = _G.AzerothWaypointNS
 
 -- ============================================================
@@ -102,68 +109,98 @@ NS.State.churn = NS.State.churn or {
 
 local C = NS.Constants
 
+-- Shared guide identity, target registration order remains owned by the TOC.
+C.QUESTIEROUTER_VIEWER_MAX_TASKS = 14
+C.GUIDE_VIEWER_COLOR_THEME = "theme"
+C.GUIDE_VIEWER_TEXT_SIZES = {
+    { key = "headingSize",  suffix = "HeadingSize",  role = "heading",  label = "Heading Text Size",         default = 14, min = 10, max = 20 },
+    { key = "bodySize",     suffix = "BodySize",     role = "body",     label = "Goal Text Size",            default = 13, min = 9,  max = 24 },
+    { key = "tipSize",      suffix = "TipSize",      role = "tip",      label = "Notes / Context Text Size", default = 12, min = 8,  max = 22 },
+    { key = "progressSize", suffix = "ProgressSize", role = "progress", label = "Progress Text Size",        default = 11, min = 8,  max = 14 },
+}
+
+C.GUIDE_PROVIDERS = {
+    { key = "zygor",         label = "Zygor",         title = "Zygor Guides",           suffix = "Zygor",         module = "AwpZygorTrackerModule",         order = 2 },
+    { key = "dugi",          label = "Dugi",          title = "Dugi Guides",            suffix = "Dugi",          module = "AwpDugiTrackerModule",          order = 2.1 },
+    { key = "rxp",           label = "RestedXP",      title = "RestedXP Guides",        suffix = "RXP",           module = "AwpRXPTrackerModule",           order = 2.2, recentGuides = true },
+    { key = "polestar",      label = "Polestar",      title = "Polestar",               suffix = "Polestar",      module = "AwpPolestarTrackerModule",      order = 2.3, forever = true },
+    { key = "questierouter", label = "QuestieRouter", title = "QuestieRouter",          suffix = "QuestieRouter", module = "AwpQuestieRouterTrackerModule", order = 2.4, recentGuides = true, forever = true },
+    { key = "apr",           label = "APR",           title = "Azeroth Pilot Reloaded", suffix = "APR",           module = "AwpAPRTrackerModule",           order = 2.5 },
+    { key = "wowpro",        label = "WoWPro",        title = "WoWPro",                 suffix = "WoWPro",        module = "AwpWoWProTrackerModule",        order = 2.6, recentGuides = true },
+}
+C.GUIDE_PROVIDER_BY_KEY = {}
+for _, definition in ipairs(C.GUIDE_PROVIDERS) do C.GUIDE_PROVIDER_BY_KEY[definition.key] = definition end
+C.GUIDE_ACTION_TYPES                          = {
+    { key = "items",    label = "Items and Toys" }, { key = "spells", label = "Spells" },
+    { key = "friendly", label = "Friendly Targets" }, { key = "hostile", label = "Hostile Targets" },
+    { key = "extra", label = "Extra Actions" }, { key = "equipment", label = "Equipment" },
+    { key = "pets",  label = "Pet Actions" }, { key = "helpers", label = "Guide Helpers" },
+    { key = "cleanup", label = "Inventory Cleanup", default = false },
+}
+
 -- Skin / theme identifiers
-C.SKIN_DEFAULT = "default"
-C.SKIN_STARLIGHT = "starlight"
-C.SKIN_STEALTH = "stealth"
-C.THEME_STARLIGHT = "awp-zyg-starlight"
-C.THEME_STEALTH = "awp-zyg-stealth"
+C.SKIN_DEFAULT                                = "default"
+C.SKIN_AWP_MODERN                             = "awp_modern"
+C.SKIN_STARLIGHT                              = "starlight"
+C.SKIN_STEALTH                                = "stealth"
+C.THEME_STARLIGHT                             = "awp-zyg-starlight"
+C.THEME_STEALTH                               = "awp-zyg-stealth"
 
 -- Scale and distance settings
-C.SCALE_DEFAULT = 1.00
-C.SCALE_MIN = 0.60
-C.SCALE_MAX = 2.00
-C.SCALE_STEP = 0.05
-C.MANUAL_CLEAR_DISTANCE_DEFAULT = 10
-C.MANUAL_CLEAR_DISTANCE_MIN = 5
-C.MANUAL_CLEAR_DISTANCE_MAX = 100
-C.MANUAL_CLEAR_DISTANCE_STEP = 1
+C.SCALE_DEFAULT                               = 1.00
+C.SCALE_MIN                                   = 0.60
+C.SCALE_MAX                                   = 2.00
+C.SCALE_STEP                                  = 0.05
+C.MANUAL_CLEAR_DISTANCE_DEFAULT               = 10
+C.MANUAL_CLEAR_DISTANCE_MIN                   = 5
+C.MANUAL_CLEAR_DISTANCE_MAX                   = 100
+C.MANUAL_CLEAR_DISTANCE_STEP                  = 1
 
 -- Flight map assist auto-take modes
-C.FLIGHT_MAP_AUTO_TAKE_DISABLED = "disabled"
-C.FLIGHT_MAP_AUTO_TAKE_EXACT = "exact"
-C.FLIGHT_MAP_AUTO_TAKE_STRONG = "strong"
+C.FLIGHT_MAP_AUTO_TAKE_DISABLED               = "disabled"
+C.FLIGHT_MAP_AUTO_TAKE_EXACT                  = "exact"
+C.FLIGHT_MAP_AUTO_TAKE_STRONG                 = "strong"
 
-C.FLIGHT_MAP_AUTO_TAKE_MODES = {
+C.FLIGHT_MAP_AUTO_TAKE_MODES                  = {
     [C.FLIGHT_MAP_AUTO_TAKE_DISABLED] = true,
     [C.FLIGHT_MAP_AUTO_TAKE_EXACT] = true,
     [C.FLIGHT_MAP_AUTO_TAKE_STRONG] = true,
 }
 
-C.FLIGHT_MAP_CATALOG_FONT_SIZE_DEFAULT = 14
-C.FLIGHT_MAP_CATALOG_FONT_SIZE_MIN = 10
-C.FLIGHT_MAP_CATALOG_FONT_SIZE_MAX = 18
-C.FLIGHT_MAP_CATALOG_FONT_SIZE_STEP = 1
+C.FLIGHT_MAP_CATALOG_FONT_SIZE_DEFAULT        = 14
+C.FLIGHT_MAP_CATALOG_FONT_SIZE_MIN            = 10
+C.FLIGHT_MAP_CATALOG_FONT_SIZE_MAX            = 18
+C.FLIGHT_MAP_CATALOG_FONT_SIZE_STEP           = 1
 
 -- Guide compact chrome step background modes
-C.GUIDE_STEP_BACKGROUND_MODE_NONE = "none"
-C.GUIDE_STEP_BACKGROUND_MODE_BG = "bg"
-C.GUIDE_STEP_BACKGROUND_MODE_BG_GOAL = "bg_goal"
+C.GUIDE_STEP_BACKGROUND_MODE_NONE             = "none"
+C.GUIDE_STEP_BACKGROUND_MODE_BG               = "bg"
+C.GUIDE_STEP_BACKGROUND_MODE_BG_GOAL          = "bg_goal"
 
-C.GUIDE_STEP_BACKGROUND_MODES = {
+C.GUIDE_STEP_BACKGROUND_MODES                 = {
     [C.GUIDE_STEP_BACKGROUND_MODE_NONE] = true,
     [C.GUIDE_STEP_BACKGROUND_MODE_BG] = true,
     [C.GUIDE_STEP_BACKGROUND_MODE_BG_GOAL] = true,
 }
 
 -- Zygor step chat sticky summary modes
-C.ZYGOR_STEP_CHAT_STICKY_NONE = "none"
-C.ZYGOR_STEP_CHAT_STICKY_COUNT = "count"
-C.ZYGOR_STEP_CHAT_STICKY_TITLES = "titles"
+C.ZYGOR_STEP_CHAT_STICKY_NONE                 = "none"
+C.ZYGOR_STEP_CHAT_STICKY_COUNT                = "count"
+C.ZYGOR_STEP_CHAT_STICKY_TITLES               = "titles"
 
-C.ZYGOR_STEP_CHAT_STICKY_MODES = {
+C.ZYGOR_STEP_CHAT_STICKY_MODES                = {
     [C.ZYGOR_STEP_CHAT_STICKY_NONE] = true,
     [C.ZYGOR_STEP_CHAT_STICKY_COUNT] = true,
     [C.ZYGOR_STEP_CHAT_STICKY_TITLES] = true,
 }
 
 -- Combat visibility modes
-C.COMBAT_HIDE_MODE_DISABLED = "disabled"
-C.COMBAT_HIDE_MODE_TOMTOM = "tomtom"
-C.COMBAT_HIDE_MODE_OVERLAY = "overlay"
-C.COMBAT_HIDE_MODE_BOTH = "both"
+C.COMBAT_HIDE_MODE_DISABLED                   = "disabled"
+C.COMBAT_HIDE_MODE_TOMTOM                     = "tomtom"
+C.COMBAT_HIDE_MODE_OVERLAY                    = "overlay"
+C.COMBAT_HIDE_MODE_BOTH                       = "both"
 
-C.COMBAT_HIDE_MODES = {
+C.COMBAT_HIDE_MODES                           = {
     [C.COMBAT_HIDE_MODE_DISABLED] = true,
     [C.COMBAT_HIDE_MODE_TOMTOM] = true,
     [C.COMBAT_HIDE_MODE_OVERLAY] = true,
@@ -171,100 +208,131 @@ C.COMBAT_HIDE_MODES = {
 }
 
 -- Startup help / What's New notification modes
-C.STARTUP_HELP_MODE_ACCOUNT = "account"
-C.STARTUP_HELP_MODE_CHARACTER = "character"
-C.STARTUP_HELP_MODE_DISABLED = "disabled"
+C.STARTUP_HELP_MODE_ACCOUNT                   = "account"
+C.STARTUP_HELP_MODE_CHARACTER                 = "character"
+C.STARTUP_HELP_MODE_DISABLED                  = "disabled"
 
-C.STARTUP_HELP_MODES = {
+C.STARTUP_HELP_MODES                          = {
     [C.STARTUP_HELP_MODE_ACCOUNT] = true,
     [C.STARTUP_HELP_MODE_CHARACTER] = true,
     [C.STARTUP_HELP_MODE_DISABLED] = true,
 }
 
 -- Timing constants
-C.UPDATE_INTERVAL_SECONDS = 0.35
-C.FALLBACK_DEBOUNCE_SECONDS = 1.20
-C.FALLBACK_CONFIRM_COUNT = 2
+C.UPDATE_INTERVAL_SECONDS                     = 0.35
+C.FALLBACK_DEBOUNCE_SECONDS                   = 1.20
+C.FALLBACK_CONFIRM_COUNT                      = 2
 C.DEST_FALLBACK_SUPPRESS_RECENT_ARROW_SECONDS = 2.50
 C.DEST_FALLBACK_SUPPRESS_MAP_MISMATCH_SECONDS = 25.00
-C.ROUTE_RECALC_HOLD_SECONDS = 0.10
+C.ROUTE_RECALC_HOLD_SECONDS                   = 0.10
 
 -- User waypoint coordinate constants
-C.USER_WAYPOINT_COORD_BIAS = 1e-5
-C.MAX_PARENT_MAP_DEPTH = 12
-C.COORD_BOUNDS_EPSILON = 0.001
+C.USER_WAYPOINT_COORD_BIAS                    = 1e-5
+C.MAX_PARENT_MAP_DEPTH                        = 12
+C.COORD_BOUNDS_EPSILON                        = 0.001
 
 -- World overlay backend identifiers
-C.WORLD_OVERLAY_BACKEND_NONE = "none"
-C.WORLD_OVERLAY_BACKEND_NATIVE = "native"
+C.WORLD_OVERLAY_BACKEND_NONE                  = "none"
+C.WORLD_OVERLAY_BACKEND_NATIVE                = "native"
 
 -- World overlay info mode identifiers
-C.WORLD_OVERLAY_INFO_ALL = "all"
-C.WORLD_OVERLAY_INFO_DISTANCE = "distance"
-C.WORLD_OVERLAY_INFO_ARRIVAL = "arrival"
-C.WORLD_OVERLAY_INFO_DESTINATION = "destination"
-C.WORLD_OVERLAY_INFO_NONE = "none"
+C.WORLD_OVERLAY_INFO_ALL                      = "all"
+C.WORLD_OVERLAY_INFO_DISTANCE                 = "distance"
+C.WORLD_OVERLAY_INFO_ARRIVAL                  = "arrival"
+C.WORLD_OVERLAY_INFO_DESTINATION              = "destination"
+C.WORLD_OVERLAY_INFO_NONE                     = "none"
 
 -- World overlay context display identifiers
-C.WORLD_OVERLAY_CONTEXT_DISPLAY_DIAMOND_ICON = "diamond_icon"
-C.WORLD_OVERLAY_CONTEXT_DISPLAY_ICON_ONLY = "icon_only"
-C.WORLD_OVERLAY_CONTEXT_DISPLAY_HIDDEN = "hidden"
+C.WORLD_OVERLAY_CONTEXT_DISPLAY_DIAMOND_ICON  = "diamond_icon"
+C.WORLD_OVERLAY_CONTEXT_DISPLAY_ICON_ONLY     = "icon_only"
+C.WORLD_OVERLAY_CONTEXT_DISPLAY_HIDDEN        = "hidden"
 
-C.WORLD_OVERLAY_CONTEXT_DISPLAY_MODES = {
+C.WORLD_OVERLAY_CONTEXT_DISPLAY_MODES         = {
     [C.WORLD_OVERLAY_CONTEXT_DISPLAY_DIAMOND_ICON] = true,
     [C.WORLD_OVERLAY_CONTEXT_DISPLAY_ICON_ONLY] = true,
     [C.WORLD_OVERLAY_CONTEXT_DISPLAY_HIDDEN] = true,
 }
 
 -- World overlay waypoint display mode identifiers
-C.WORLD_OVERLAY_WAYPOINT_MODE_FULL     = "full"
-C.WORLD_OVERLAY_WAYPOINT_MODE_DISABLED = "disabled"
+C.WORLD_OVERLAY_WAYPOINT_MODE_FULL            = "full"
+C.WORLD_OVERLAY_WAYPOINT_MODE_DISABLED        = "disabled"
 
-C.WORLD_OVERLAY_WAYPOINT_MODES = {
+C.WORLD_OVERLAY_WAYPOINT_MODES                = {
     [C.WORLD_OVERLAY_WAYPOINT_MODE_FULL]     = true,
     [C.WORLD_OVERLAY_WAYPOINT_MODE_DISABLED] = true,
 }
 
 -- World overlay pinpoint display mode identifiers
-C.WORLD_OVERLAY_PINPOINT_MODE_FULL     = "full"
-C.WORLD_OVERLAY_PINPOINT_MODE_NO_PLAQUE = "no_plaque"
-C.WORLD_OVERLAY_PINPOINT_MODE_DISABLED  = "disabled"
+C.WORLD_OVERLAY_PINPOINT_MODE_FULL            = "full"
+C.WORLD_OVERLAY_PINPOINT_MODE_NO_PLAQUE       = "no_plaque"
+C.WORLD_OVERLAY_PINPOINT_MODE_DISABLED        = "disabled"
 
-C.WORLD_OVERLAY_PINPOINT_MODES = {
+C.WORLD_OVERLAY_PINPOINT_MODES                = {
     [C.WORLD_OVERLAY_PINPOINT_MODE_FULL]      = true,
     [C.WORLD_OVERLAY_PINPOINT_MODE_NO_PLAQUE] = true,
     [C.WORLD_OVERLAY_PINPOINT_MODE_DISABLED]  = true,
 }
 
 -- World overlay beacon style identifiers
-C.WORLD_OVERLAY_BEACON_STYLE_BEACON = "beacon"
-C.WORLD_OVERLAY_BEACON_STYLE_BASE = "base"
-C.WORLD_OVERLAY_BEACON_STYLE_DISTANCE = "distance"
-C.WORLD_OVERLAY_BEACON_STYLE_OFF  = "off"
+C.WORLD_OVERLAY_BEACON_STYLE_BEACON           = "beacon"
+C.WORLD_OVERLAY_BEACON_STYLE_BASE             = "base"
+C.WORLD_OVERLAY_BEACON_STYLE_DISTANCE         = "distance"
+C.WORLD_OVERLAY_BEACON_STYLE_OFF              = "off"
 
-C.WORLD_OVERLAY_BEACON_STYLES = {
-    [C.WORLD_OVERLAY_BEACON_STYLE_BEACON] = true,
-    [C.WORLD_OVERLAY_BEACON_STYLE_BASE] = true,
+C.WORLD_OVERLAY_BEACON_STYLES                 = {
+    [C.WORLD_OVERLAY_BEACON_STYLE_BEACON]   = true,
+    [C.WORLD_OVERLAY_BEACON_STYLE_BASE]     = true,
     [C.WORLD_OVERLAY_BEACON_STYLE_DISTANCE] = true,
-    [C.WORLD_OVERLAY_BEACON_STYLE_OFF]  = true,
+    [C.WORLD_OVERLAY_BEACON_STYLE_OFF]      = true,
 }
 
 -- World overlay plaque type identifiers
-C.WORLD_OVERLAY_PLAQUE_DEFAULT       = "Default"
-C.WORLD_OVERLAY_PLAQUE_GLOWING_GEMS  = "GlowingGems"
-C.WORLD_OVERLAY_PLAQUE_HORDE         = "HordePlaque"
-C.WORLD_OVERLAY_PLAQUE_ALLIANCE      = "AlliancePlaque"
-C.WORLD_OVERLAY_PLAQUE_MODERN        = "ModernPlaque"
-C.WORLD_OVERLAY_PLAQUE_STEAMPUNK     = "SteamPunkPlaque"
+C.WORLD_OVERLAY_PLAQUE_FANTASY                = "Fantasy"
+C.WORLD_OVERLAY_PLAQUE_GLOWING_GEMS           = "GlowingGems"
+C.WORLD_OVERLAY_PLAQUE_HORDE                  = "HordePlaque"
+C.WORLD_OVERLAY_PLAQUE_ALLIANCE               = "AlliancePlaque"
+C.WORLD_OVERLAY_PLAQUE_FUTURE                 = "ModernPlaque"
+C.WORLD_OVERLAY_PLAQUE_STEAMPUNK              = "SteamPunkPlaque"
+C.WORLD_OVERLAY_PLAQUE_MINIMAL                = "Minimal"
+C.WORLD_OVERLAY_PLAQUE_FOREVER                = "Forever"
+C.WORLD_OVERLAY_PLAQUE_BLIZZARD               = "Blizzard"
+C.WORLD_OVERLAY_PLAQUE_CLASSIC                = "Classic"
+C.WORLD_OVERLAY_PLAQUE_CLEAN                  = "Clean"
+C.WORLD_OVERLAY_PLAQUE_MODERN                 = "Modern"
 
-C.WORLD_OVERLAY_PLAQUE_TYPES = {
-    [C.WORLD_OVERLAY_PLAQUE_DEFAULT]       = true,
-    [C.WORLD_OVERLAY_PLAQUE_GLOWING_GEMS]  = true,
-    [C.WORLD_OVERLAY_PLAQUE_HORDE]         = true,
-    [C.WORLD_OVERLAY_PLAQUE_ALLIANCE]      = true,
-    [C.WORLD_OVERLAY_PLAQUE_MODERN]        = true,
-    [C.WORLD_OVERLAY_PLAQUE_STEAMPUNK]     = true,
+C.WORLD_OVERLAY_PLAQUE_TYPES                  = {
+    [C.WORLD_OVERLAY_PLAQUE_FANTASY]      = true,
+    [C.WORLD_OVERLAY_PLAQUE_GLOWING_GEMS] = true,
+    [C.WORLD_OVERLAY_PLAQUE_HORDE]        = true,
+    [C.WORLD_OVERLAY_PLAQUE_ALLIANCE]     = true,
+    [C.WORLD_OVERLAY_PLAQUE_FUTURE]       = true,
+    [C.WORLD_OVERLAY_PLAQUE_STEAMPUNK]    = true,
+    [C.WORLD_OVERLAY_PLAQUE_MINIMAL]      = true,
+    [C.WORLD_OVERLAY_PLAQUE_FOREVER]      = true,
+    [C.WORLD_OVERLAY_PLAQUE_BLIZZARD]     = true,
+    [C.WORLD_OVERLAY_PLAQUE_CLASSIC]      = true,
+    [C.WORLD_OVERLAY_PLAQUE_CLEAN]        = true,
+    [C.WORLD_OVERLAY_PLAQUE_MODERN]       = true,
 }
+
+-- One source for style defaults, only styles with separated artwork expose overrides.
+C.PLAQUE_APPEARANCE_DEFAULTS                  = {
+    Minimal = { backgroundOpacity = 85, borderOpacity = 100, borderThickness = 1 },
+    Forever = { backgroundOpacity = 85, borderOpacity = 100 },
+    Blizzard = { backgroundOpacity = 85, borderOpacity = 100 },
+    Classic = { backgroundOpacity = 85, borderOpacity = 100 },
+    Clean = { backgroundOpacity = 92, borderOpacity = 50, borderThickness = 1 },
+    Modern = { backgroundOpacity = 85, borderOpacity = 100, borderThickness = 4 },
+}
+C.PLAQUE_APPEARANCE_FIELDS                    = {
+    backgroundOpacity = { min = 0, max = 100, step = 1 },
+    borderOpacity = { min = 0, max = 100, step = 1 },
+    borderThickness = { min = 1, max = 8, step = 1 },
+}
+
+function NS.GetDefaultPlaqueType()
+    return NS.IsWoWForever() and C.WORLD_OVERLAY_PLAQUE_FOREVER or C.WORLD_OVERLAY_PLAQUE_BLIZZARD
+end
 
 -- World overlay color mode identifiers
 C.WORLD_OVERLAY_COLOR_AUTO = "auto"

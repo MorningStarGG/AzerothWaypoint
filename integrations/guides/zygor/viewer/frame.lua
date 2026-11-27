@@ -1,3 +1,10 @@
+-- ============================================================
+-- Standalone Zygor Viewer
+-- ============================================================
+--
+-- Builds the standalone Zygor viewer and coordinates visibility with its
+-- native guide window.
+
 local NS = _G.AzerothWaypointNS
 if not NS.IsZygorLoaded() then return end
 
@@ -43,9 +50,6 @@ state.zygorTrackerViewer = state.zygorTrackerViewer or {
     currentStepKey     = nil,
     dockMode           = "tracker",
     readerOpen         = false,
-    hideNativeHookInstalled = false,
-    hideNativeUpdateHookInstalled = false,
-    nativeFrameCloak   = nil,
     pendingDockApply   = nil,
 }
 
@@ -78,14 +82,16 @@ local function GetZ()
 end
 
 local function GetSettings()
-    return type(NS.GetZygorTrackerViewerSettings) == "function"
-        and NS.GetZygorTrackerViewerSettings()
+    return type(NS.GetGuideTrackerViewerSettings) == "function"
+        and NS.GetGuideTrackerViewerSettings("zygor")
         or { enabled = false, dockMode = "tracker", hideZygorFrame = false }
 end
 
 local function SetSetting(key, value)
-    if type(NS.SetZygorTrackerViewerSetting) == "function" then
-        NS.SetZygorTrackerViewerSetting(key, value)
+    if key == "dockMode" or key == "position" or key == "nativeDockWarningPopup" then
+        NS.SetGuideTrackerViewerSetting(key, value)
+    else
+        NS.SetGuideTrackerViewerProviderSetting("zygor", key, value)
     end
 end
 
@@ -380,24 +386,8 @@ local function ApplyDockMode(mode)
                 end
             end)
         end
-        local attachedNow, pendingAttach = nil, nil
-        if TM and type(TM.Attach) == "function" then
-            attachedNow, pendingAttach = TM.Attach()
-        end
-        if attachedNow then
-            viewer.frame:Hide()
-            return
-        end
-        if pendingAttach then
-            -- Keep the hidden frame available for rendering state while the
-            -- tracker module finishes delayed registration.
-            viewer.frame:Hide()
-            return
-        end
+        if TM and type(TM.Attach) == "function" then TM.Attach() end
         viewer.frame:Hide()
-        if type(NS.Msg) == "function" then
-            NS.Msg("Tracker dock unavailable.")
-        end
         return
     end
 
@@ -487,6 +477,7 @@ local function CreateFrameSafe()
     frame:Hide()
 
     local shell = FW.CreatePanelShell(frame, {
+        surface = "guide.zygor",
         title = "Zygor Tracker",
         titleHeight = TITLE_H,
         footerHeight = FOOTER_H,
@@ -549,175 +540,40 @@ end
 -- Native Zygor viewer cloaking
 -- ============================================================
 
-local ApplyHideNativeFrameState
-
-local function ShouldHideNativeFrame()
-    local settings = GetSettings()
-    if not settings.hideZygorFrame then return false end
-    return true
-end
-
+local function ShouldHideNativeFrame() return GetSettings().hideZygorFrame == true end
 local function GetNativeViewerFrame()
     local Z = GetZ()
-    local nativeFrame = Z and Z.Frame
-    if not nativeFrame then
-        nativeFrame = rawget(_G, "ZygorGuidesViewerFrame") or rawget(_G, "ZygorGuidesViewerFrameMaster")
-    end
-    return nativeFrame, Z
+    return Z and Z.Frame or rawget(_G, "ZygorGuidesViewerFrame") or rawget(_G, "ZygorGuidesViewerFrameMaster"), Z
 end
-
-local function CaptureFramePoints(frame)
-    local points = {}
-    if not frame or type(frame.GetNumPoints) ~= "function" or type(frame.GetPoint) ~= "function" then
-        return points
-    end
-
-    for i = 1, frame:GetNumPoints() do
-        local point, relativeTo, relativePoint, xOfs, yOfs = frame:GetPoint(i)
-        points[#points + 1] = {
-            point = point,
-            relativeTo = relativeTo,
-            relativePoint = relativePoint,
-            xOfs = xOfs,
-            yOfs = yOfs,
-        }
-    end
-
-    return points
-end
-
-local function RestoreFramePoints(frame, points)
-    if not frame or type(frame.ClearAllPoints) ~= "function" or type(frame.SetPoint) ~= "function" then return end
-
-    frame:ClearAllPoints()
-    if type(points) == "table" and #points > 0 then
-        for _, point in ipairs(points) do
-            if point.point then
-                frame:SetPoint(point.point, point.relativeTo, point.relativePoint, point.xOfs or 0, point.yOfs or 0)
-            end
-        end
-    else
-        frame:SetPoint("CENTER", UIParent, "CENTER", 0, -100)
-    end
-end
-
-local function CaptureNativeFrameCloakState(frame)
-    local cloak = {
-        frame = frame,
-        points = CaptureFramePoints(frame),
-    }
-
-    if type(frame.GetAlpha) == "function" then
-        cloak.alpha = frame:GetAlpha()
-    end
-    if type(frame.GetClampedToScreen) == "function" then
-        cloak.clampedToScreen = frame:GetClampedToScreen()
-    end
-    if type(frame.IsMouseEnabled) == "function" then
-        cloak.mouseEnabled = frame:IsMouseEnabled()
-    end
-
-    return cloak
-end
-
-local function RestoreNativeFrameCloak()
-    local cloak = viewer.nativeFrameCloak
-    if not cloak then return end
-
-    local frame = cloak.frame
-    viewer.nativeFrameCloak = nil
-
-    if not frame then return end
-
-    if type(frame.SetAlpha) == "function" then
-        frame:SetAlpha(cloak.alpha or 1)
-    end
-    if type(frame.SetClampedToScreen) == "function" and cloak.clampedToScreen ~= nil then
-        frame:SetClampedToScreen(cloak.clampedToScreen and true or false)
-    end
-    RestoreFramePoints(frame, cloak.points)
-    if type(frame.EnableMouse) == "function" and cloak.mouseEnabled ~= nil then
-        frame:EnableMouse(cloak.mouseEnabled and true or false)
-    end
-end
-
-local function ApplyNativeFrameCloak(nativeFrame, Z)
-    if not nativeFrame then return end
-
-    if type(nativeFrame.IsShown) == "function"
-        and not nativeFrame:IsShown()
-        and type(nativeFrame.Show) == "function"
-    then
-        nativeFrame:Show()
-    end
-
-    if Z and Z.db and Z.db.profile then
-        Z.db.profile.enable_viewer = true
-    end
-
-    if not viewer.nativeFrameCloak or viewer.nativeFrameCloak.frame ~= nativeFrame then
-        RestoreNativeFrameCloak()
-        viewer.nativeFrameCloak = CaptureNativeFrameCloakState(nativeFrame)
-    end
-
-    if type(nativeFrame.SetAlpha) == "function" then
-        nativeFrame:SetAlpha(0.1)
-    end
-    if type(nativeFrame.EnableMouse) == "function" then
-        nativeFrame:EnableMouse(false)
-    end
-    if type(nativeFrame.SetClampedToScreen) == "function" then
-        nativeFrame:SetClampedToScreen(false)
-    end
-    if type(nativeFrame.ClearAllPoints) == "function" and type(nativeFrame.SetPoint) == "function" then
-        nativeFrame:ClearAllPoints()
-        nativeFrame:SetPoint("TOPLEFT", UIParent, "BOTTOMRIGHT", 1000, -1000)
-    end
-end
-
+local nativeCloak = NS.Internal.GuideTrackerViewer.CreateNativeFrameCloak({
+    alpha = 0.1, anchor = { "TOPLEFT", UIParent, "BOTTOMRIGHT", 1000, -1000 },
+    fallbackAnchor = { "CENTER", UIParent, "CENTER", 0, -100 },
+    resolve = function()
+        local frame = GetNativeViewerFrame()
+        return frame and { frame } or {}, ShouldHideNativeFrame()
+    end,
+    prepare = function(frame)
+        -- Established Zygor policy: its shown/enabled viewer keeps the native
+        -- guide engine running while AWP cloaks only its appearance.
+        local shown = frame:IsShown()
+        if not shown then frame:Show() end
+        local Z = GetZ()
+        if Z and Z.db and Z.db.profile then Z.db.profile.enable_viewer = true end
+        return not shown
+    end,
+})
+local nativeUpdateHooks = setmetatable({}, { __mode = "kv" })
 local function ScheduleNativeFrameCloak()
-    if not ShouldHideNativeFrame() then return end
-    if C_Timer and type(C_Timer.After) == "function" then
-        C_Timer.After(0, function()
-            if type(ApplyHideNativeFrameState) == "function" then
-                ApplyHideNativeFrameState()
-            end
-        end)
-    elseif type(ApplyHideNativeFrameState) == "function" then
-        ApplyHideNativeFrameState()
-    end
+    if ShouldHideNativeFrame() then nativeCloak:Schedule() end
 end
-
-local function InstallNativeFrameHook(nativeFrame, Z)
-    if nativeFrame and not viewer.hideNativeHookInstalled and type(nativeFrame.Show) == "function" then
-        hooksecurefunc(nativeFrame, "Show", function()
-            ScheduleNativeFrameCloak()
-        end)
-
-        viewer.hideNativeHookInstalled = true
+local function ApplyHideNativeFrameState()
+    local _, Z = GetNativeViewerFrame()
+    if Z and type(Z.UpdateFrame) == "function" and nativeUpdateHooks[Z] ~= Z.UpdateFrame then
+        hooksecurefunc(Z, "UpdateFrame", ScheduleNativeFrameCloak)
+        nativeUpdateHooks[Z] = Z.UpdateFrame
     end
-
-    if Z and not viewer.hideNativeUpdateHookInstalled and type(Z.UpdateFrame) == "function" then
-        hooksecurefunc(Z, "UpdateFrame", function()
-            ScheduleNativeFrameCloak()
-        end)
-
-        viewer.hideNativeUpdateHookInstalled = true
-    end
+    return nativeCloak:Refresh()
 end
-
-ApplyHideNativeFrameState = function()
-    local nativeFrame, Z = GetNativeViewerFrame()
-    if not nativeFrame then return end
-
-    if ShouldHideNativeFrame() then
-        InstallNativeFrameHook(nativeFrame, Z)
-        ApplyNativeFrameCloak(nativeFrame, Z)
-    else
-        RestoreNativeFrameCloak()
-    end
-end
-
 M.ApplyHideNativeFrameState = ApplyHideNativeFrameState
 
 -- ============================================================

@@ -1,28 +1,55 @@
 ## Interface: 120105, 16001
 ## Title: AzerothWaypoint
-## Notes: A TomTom-powered navigation bridge, route planner selector, manual waypoint queue, and 3D world overlay for World of Warcraft
+## Notes: Unified navigation with smart travel routing, integrated guide viewers, waypoint queues, and customizable 3D world markers powered by TomTom.
 ## Author: MorningStarGG
-## Version: 4.2.0
+## Version: 5.0.0
 ## IconTexture: Interface\AddOns\AzerothWaypoint\media\icon.png
 ## SavedVariables: AzerothWaypointDB
 ## SavedVariablesPerCharacter: AzerothWaypointCharDB
 ## RequiredDeps: TomTom
-## OptionalDeps: ZygorGuidesViewer, ZygorGuidesViewerForever, APR, WoWPro, Mapzeroth, FarstriderLib, FarstriderLibData, !KalielsTracker, WorldQuestTab, HandyNotes, HandyNotes_MapNotes, SilverDragon, RareScanner, InFlight
+## OptionalDeps: ZygorGuidesViewer, ZygorGuidesViewerForever, DugisGuideViewerZ, RXPGuides, Polestar, APR, WoWPro, BtWQuests, QuestieDB, Questie, QuestieRouter, Mapzeroth, FarstriderLib, FarstriderLibData, !KalielsTracker, EllesmereUI, EllesmereUIBlizzardSkin, EllesmereUIQuestTracker, ElvUI, DaylightUI, DaylightUI_Quests, GW2_UI, WorldQuestTab, HandyNotes, HandyNotes_MapNotes, SilverDragon, RareScanner, InFlight
 ## AddonCompartmentFunc: AzerothWaypoint_OnAddonCompartmentClick
 ## AddonCompartmentFuncOnEnter: AzerothWaypoint_OnAddonCompartmentEnter
 ## AddonCompartmentFuncOnLeave: AzerothWaypoint_OnAddonCompartmentLeave
 
 core/addon.lua
 core/core.lua
+core/map_coordinates.lua
 core/util.lua
+core/instance_entrances.lua
+core/travel_types.lua
+core/scheduling.lua
+interface/menus.lua
+interface/startup_notices.lua
+core/routing_backends.lua
+core/quest_data.lua
 core/quest_text.lua
+core/db_defaults.lua
 core/db.lua
+core/guide_settings.lua
+core/service_search.lua
+core/profiles.lua
+interface/appearance/controller.lua
+interface/appearance/visuals.lua
+interface/appearance/provider.lua
+interface/appearance/providers/daylight.lua
+interface/appearance/providers/ellesmere.lua
+interface/appearance/providers/elvui.lua
+interface/appearance/providers/gw2ui.lua
 core/arrowskins.lua
 core/combat_visibility.lua
 integrations/external_waypoint_sources.lua
+integrations/btwquests.lua
+integrations/guides/native_map_waypoints.lua
+integrations/questie.lua
+integrations/service_zygor.lua
+integrations/guides/dugi/dugi_source.lua
 integrations/silverdragon.lua
 integrations/rarescanner.lua
 integrations/handynotes.lua
+integrations/guides/presentation.lua
+integrations/guides/quest_selection.lua
+integrations/guides/source_runtime.lua
 integrations/guides/zygor/canonical_target.lua
 integrations/guides/zygor/source.lua
 integrations/guides/zygor/guide_resolver/facts.lua
@@ -60,26 +87,47 @@ bridge/routing/queues/policy.lua
 bridge/routing/carrier_tomtom.lua
 bridge/routing/presentation.lua
 bridge/routing/guide.lua
+integrations/guides/dugi/dugi_presentation.lua
+integrations/guides/dugi/dugi_provider.lua
 integrations/guides/zygor/zygor_provider.lua
 integrations/guides/apr/apr_presentation.lua
 integrations/guides/apr/apr_provider.lua
 integrations/guides/wowpro/wowpro_presentation.lua
 integrations/guides/wowpro/wowpro_provider.lua
+integrations/guides/rxp/rxp_presentation.lua
+integrations/guides/rxp/rxp_provider.lua
+integrations/guides/polestar/polestar_presentation.lua
+integrations/guides/polestar/polestar_provider.lua
+integrations/guides/questierouter/runtime.lua
+integrations/guides/questierouter/questierouter_presentation.lua
+integrations/guides/questierouter/questierouter_provider.lua
 bridge/routing/shared.lua
+bridge/routing/walking.lua
+bridge/routing/walking_presentation.lua
 bridge/routing/backends/direct.lua
 bridge/routing/backends/zygor.lua
 bridge/routing/backends/mapzeroth.lua
 bridge/routing/backends/farstrider.lua
+bridge/routing/backends/polestar.lua
+bridge/routing/backends/dugi.lua
+bridge/routing/backends/questierouter.lua
 bridge/routing/core.lua
+bridge/routing/validation.lua
+bridge/routing/progress.lua
+bridge/routing/planning.lua
 bridge/takeovers/tomtom_bridge_blizzard_core.lua
 bridge/takeovers/tomtom_bridge_areapoi_takeover.lua
 bridge/takeovers/tomtom_bridge_vignette_takeover.lua
 bridge/takeovers/tomtom_bridge_taxi_takeover.lua
 bridge/takeovers/tomtom_bridge_userwaypoint_takeover.lua
 bridge/takeovers/tomtom_bridge_quest_takeover.lua
+integrations/daylight_quests.lua
+integrations/minimap_menu.lua
 bridge/takeovers/tomtom_bridge_digsite_takeover.lua
 bridge/takeovers/tomtom_bridge_housingplot_takeover.lua
 bridge/takeovers/tomtom_bridge_gossipoi_takeover.lua
+bridge/flightmap_window.lua
+bridge/flightmap_match.lua
 bridge/flightmap_assist.lua
 bridge/flightmap_times.lua
 bridge/flightmap_catalog.lua
@@ -89,20 +137,57 @@ docs/changelog_data.lua
 docs/changelog_format.lua
 docs/integrations_data.lua
 docs/help_pages.lua
-interface/panel_framework.lua
+interface/controller/core.lua
+interface/controller/widgets.lua
+interface/controller/modal.lua
+interface/framework/panels.lua
+integrations/guides/viewer_registry.lua
+integrations/guides/viewer_tabs.lua
+integrations/guides/viewer_styles.lua
+integrations/guides/viewer_chat.lua
+integrations/guides/viewer_actions.lua
+integrations/guides/viewer_controls.lua
 integrations/guides/zygor/viewer/shared.lua
 integrations/guides/zygor/viewer/tracker_util.lua
-integrations/guides/zygor/viewer/tracker_host.lua
-integrations/guides/zygor/viewer/tracker_combat_proxy.lua
+integrations/guides/viewer_custom_host.lua
+integrations/guides/viewer_ellesmere.lua
+integrations/guides/viewer_daylight.lua
+integrations/guides/viewer_questie.lua
+integrations/guides/viewer_gw2ui.lua
+integrations/guides/viewer_host.lua
+integrations/guides/viewer_quest_details.lua
+integrations/guides/viewer_module.lua
+integrations/guides/viewer_render.lua
+integrations/guides/viewer_combat_proxy.lua
+integrations/guides/viewer_controller.lua
+integrations/guides/viewer_native.lua
+integrations/guides/guide_actions.lua
+integrations/guides/controller.lua
+integrations/guides/viewer_source.lua
 integrations/guides/zygor/viewer/tracker_controls.lua
-integrations/guides/zygor/viewer/tracker_header_style.lua
+integrations/guides/viewer_header_style.lua
 integrations/guides/zygor/viewer/tracker_rows.lua
 integrations/guides/zygor/viewer/tracker_render.lua
 integrations/guides/zygor/viewer/tracker_module.lua
 integrations/guides/zygor/viewer/frame.lua
 integrations/guides/zygor/viewer/binding.lua
+integrations/guides/dugi/tabs.lua
+integrations/guides/dugi/viewer.lua
+integrations/guides/rxp/viewer.lua
+integrations/guides/polestar/viewer.lua
+integrations/guides/apr/viewer.lua
+integrations/guides/wowpro/viewer.lua
+integrations/guides/questierouter/viewer.lua
+integrations/guides/zygor/actions.lua
+integrations/guides/dugi/actions.lua
+integrations/guides/rxp/actions.lua
+integrations/guides/polestar/actions.lua
+integrations/guides/apr/actions.lua
+integrations/guides/wowpro/actions.lua
+integrations/guides/questierouter/actions.lua
 interface/help_frame.lua
-interface/ui_style.lua
+interface/help_notifications.lua
+interface/framework/primitives.lua
 interface/manual_queue_prompt.lua
 interface/queue/state.lua
 interface/queue/model.lua
@@ -110,6 +195,7 @@ interface/queue/widgets.lua
 interface/queue/actions.lua
 interface/queue/list_view.lua
 interface/queue/detail_view.lua
+interface/queue/map_host.lua
 interface/queue/panel.lua
 interface/options/shared.lua
 interface/options/canvas_data.lua
@@ -117,10 +203,12 @@ interface/options/canvas_dropdown.lua
 interface/options/canvas_widgets.lua
 interface/options/canvas.lua
 interface/options/canvas_sections.lua
+interface/options/profiles.lua
 interface/options/panel.lua
 interface/minimap_button.lua
 interface/commands_settings.lua
 interface/commands_search.lua
 interface/commands_diagnostics.lua
+interface/commands_memory.lua
 interface/commands_dispatch.lua
 core/init.lua

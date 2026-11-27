@@ -84,7 +84,7 @@ Notes:
 | `Emote` | Requires performing an emote on a target or at a step. | `Emote = "salute"` |
 | `ChromiePick` | Selects a specific Chromie Time timeline by option ID. | `ChromiePick = 8` |
 | `BuyMerchant` | Prompts the player to buy one or more items from a merchant. Can be used as a main or secondary action. | `BuyMerchant = { { itemID = 193890, quantity = 1, questID = 66680 } }` |
-| `Note` | Informational step. Accepts a single string or an array of strings. Intended as a standalone note-only step; seen notes are remembered and can auto-skip on later resets / revisits. | `Note = { "Open the map", "Follow the bridge north" }` |
+| `Note` | Informational step. Accepts a single string or an array of strings. Intended as a standalone note-only step, seen notes are remembered and can auto-skip on later resets / revisits. | `Note = { "Open the map", "Follow the bridge north" }` |
 | `RouteCompleted` | Marks the route as finished and triggers route completion flow. Must stay as the last step. | `RouteCompleted = true` |
 
 ---
@@ -94,7 +94,7 @@ Notes:
 | Option | Description | Expected Syntax |
 | --- | --- | --- |
 | `Coord` | World coordinates used by the arrow (`x`, `y` in WoW units). | `Coord = { x = 4298.4, y = -864.1 }` |
-| `Coords` | Multiple coordinate variants for the same step. Typically paired with `Zones`; each entry should include its own `Zone`. | `Coords = { { Zone = 84, x = 797.7, y = -8624.9 }, { Zone = 85, x = -4436, y = 1590.3 } }` |
+| `Coords` | Multiple coordinate variants for the same step. Typically paired with `Zones`, each entry should include its own `Zone`. | `Coords = { { Zone = 84, x = 797.7, y = -8624.9 }, { Zone = 85, x = -4436, y = 1590.3 } }` |
 | `Zone` | Expected map ID for the step. | `Zone = 627` |
 | `Zones` | Multiple valid map IDs for a single step. Also acts as a condition: the step is only considered valid when the player is in one of those maps. | `Zones = { 84, 85 }` |
 | `Range` | Distance in yards from `Coord` to consider the location reached. | `Range = 45` |
@@ -128,7 +128,7 @@ Notes:
 | `ExtraActionB` | Prompts use of the special extra action button. | `ExtraActionB = true` |
 | `TrigText*` | Text fragments used as completion triggers (`TrigText`, `TrigText2`, etc.). | `TrigText = "Restore the console"` |
 | `ExtraLineText*` | Additional helper lines displayed in the current step panel. Supports numbered variants such as `ExtraLineText2`, `ExtraLineText3`, etc. | `ExtraLineText = "Interact with the second console"` |
-| `PreviewImages` | Displays one or more clickable image previews in the current step panel. Relative paths are resolved from `APR-Core/assets/`; full `Interface\\...` paths are also accepted. | `PreviewImages = { "routeHelper\\86644.jpg" }` |
+| `PreviewImages` | Displays one or more clickable image previews in the current step panel. Relative paths are resolved from `APR-Core/assets/`, full `Interface\\...` paths are also accepted. | `PreviewImages = { "routeHelper\\86644.jpg" }` |
 | `Bloodlust` | Adds a reminder to use Heroism / Bloodlust. | `Bloodlust = true` |
 | `InVehicle` | Indicates vehicle status (`1` = enter, `2` = stay in vehicle). | `InVehicle = 1` |
 | `UseGlider` | Displays available gliders for controlled jumps. | `UseGlider = true` |

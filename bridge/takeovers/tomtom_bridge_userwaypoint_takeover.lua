@@ -1,3 +1,10 @@
+-- ============================================================
+-- Blizzard user waypoints
+-- ============================================================
+--
+-- Adopts explicit Blizzard user-waypoint clicks and distinguishes them from
+-- the navigation host's own writes.
+
 local NS = _G.AzerothWaypointNS
 local state = NS.State
 NS.Internal.BlizzardTakeovers = NS.Internal.BlizzardTakeovers or {}
@@ -5,8 +12,6 @@ local M = NS.Internal.BlizzardTakeovers
 
 local GetActiveManualDestination = NS.GetActiveManualDestination
 local ClearActiveManualDestination = NS.ClearActiveManualDestination
-local GetGuideVisibilityState = NS.GetGuideVisibilityState
-local ReadWaypointCoords = NS.ReadWaypointCoords
 local Signature = NS.Signature
 
 local USER_WAYPOINT_SUPERTRACK_CLEAR_SUPPRESSION_SECONDS = 0.15
@@ -14,7 +19,7 @@ local WAYPOINT_LOCATION_DATA_PROVIDER_STACK_MATCH = "blizzard_sharedmapdataprovi
 local WOWPRO_STACK_MATCH = "interface\\addons\\wowpro\\"
 
 -- ============================================================
--- Local helpers
+-- Waypoint ownership and click detection
 -- ============================================================
 
 local function GetTimeSafe()
@@ -105,44 +110,15 @@ local function ConsumeUserWaypointSupertrackClearSuppression()
     return true
 end
 
-local function GetWaypointSignature(mapID, x, y)
-    if type(Signature) ~= "function" then
-        return nil
-    end
-    if type(mapID) ~= "number" or type(x) ~= "number" or type(y) ~= "number" then
-        return nil
-    end
-    return Signature(mapID, x, y)
-end
-
-local function ResolveMapTitle(mapID, x, y)
-    local mapInfo = type(C_Map) == "table"
-        and type(C_Map.GetMapInfo) == "function"
-        and C_Map.GetMapInfo(mapID)
-        or nil
-    local mapName = mapInfo and mapInfo.name or nil
-    if type(mapName) == "string" and mapName ~= "" then
-        if type(x) == "number" and type(y) == "number" then
-            return string.format("%s %.0f, %.0f", mapName, x * 100, y * 100)
-        end
-        return mapName
-    end
-    if type(mapID) == "number" then
-        if type(x) == "number" and type(y) == "number" then
-            return string.format("Waypoint %d %.0f, %.0f", mapID, x * 100, y * 100)
-        end
-        return "Waypoint " .. tostring(mapID)
-    end
-    return "Waypoint"
-end
+local ResolveMapTitle = M.ResolveMapTitle
 
 -- ============================================================
 -- Destination metadata
 -- ============================================================
 
-local function BuildBlizzardUserWaypointMeta(mapID, x, y, context)
-    local sig = GetWaypointSignature(mapID, x, y)
-    return NS.BuildRouteMeta(NS.BuildUserWaypointIdentity(mapID, x, y, { sig = sig }), {
+local function BuildBlizzardUserWaypointMeta(mapID, x, y, context, worldMapClick)
+    local identity = NS.BuildUserWaypointIdentity(mapID, x, y, { worldMapClick = worldMapClick })
+    return NS.BuildRouteMeta(identity, {
         manualQuestID = type(context) == "table" and context.questID or nil,
         searchKind = type(context) == "table" and context.searchKind or nil,
         sourceAddon = type(context) == "table" and context.sourceAddon or nil,
@@ -150,47 +126,9 @@ local function BuildBlizzardUserWaypointMeta(mapID, x, y, context)
     })
 end
 
-local function GetBlizzardUserWaypointSignature(destination)
-    if type(destination) ~= "table" or destination.type ~= "manual" then
-        return nil
-    end
-    local identity = type(destination.identity) == "table" and destination.identity or nil
-    if not (type(identity) == "table" and identity.kind == "blizzard_user_waypoint") then
-        return nil
-    end
-    if type(identity) == "table" and type(identity.sig) == "string" then
-        return identity.sig
-    end
-    local mapID, x, y = ReadWaypointCoords(destination)
-    return GetWaypointSignature(mapID, x, y)
-end
-
-local function GetActiveBlizzardUserWaypointManual()
-    local destination = GetActiveManualDestination and GetActiveManualDestination() or nil
-    local sig = GetBlizzardUserWaypointSignature(destination)
-    if not sig then
-        return nil, nil
-    end
-    return destination, sig
-end
-
 -- ============================================================
 -- Adoption and clear
 -- ============================================================
-
-local function ClearBlizzardUserWaypointBackedManual(clearReason)
-    local destination, sig = GetActiveBlizzardUserWaypointManual()
-    if not destination then
-        return false
-    end
-    local visibilityState = GetGuideVisibilityState and GetGuideVisibilityState() or nil
-    if type(ClearActiveManualDestination) ~= "function" then
-        return false
-    end
-    NS.Log("Blizzard waypoint takeover clear",
-        tostring(sig), tostring(clearReason or "system"))
-    return ClearActiveManualDestination(visibilityState, clearReason or "system")
-end
 
 local function HandleExplicitBlizzardUserWaypointSet(mapID, x, y, sourceAddon)
     if IsWoWProUserWaypointStack() then
@@ -232,9 +170,13 @@ local function HandleExplicitBlizzardUserWaypointSet(mapID, x, y, sourceAddon)
             end
         end
     end
-    local title = type(context) == "table" and context.title or nil
-    title = title or ResolveMapTitle(mapID, x, y)
-    local meta = BuildBlizzardUserWaypointMeta(mapID, x, y, context)
+    -- Keep the clicked pin's identity for removal even when routing on another zone map.
+    local worldMapClick = not context and IsWaypointLocationDataProviderStack()
+    local meta = BuildBlizzardUserWaypointMeta(mapID, x, y, context, worldMapClick)
+    if worldMapClick then
+        mapID, x, y = NS.ResolveMapClickDestination(mapID, x, y)
+    end
+    local title = type(context) == "table" and context.title or ResolveMapTitle(mapID, x, y)
     local clickSource = "blizzard_user_waypoint"
     if type(context) == "table" and context.sourceAddon == "WorldQuestTab" then
         clickSource = "worldquesttab_user_waypoint"
@@ -250,27 +192,37 @@ local function HandleExplicitBlizzardUserWaypointSet(mapID, x, y, sourceAddon)
 end
 
 local function HandleExplicitBlizzardUserWaypointCleared()
-    if type(NS.ClearPendingGuideTakeoverForClear) == "function" then
-        NS.ClearPendingGuideTakeoverForClear()
-    else
-        NS.ClearPendingGuideTakeover()
+    if not NS.IsRoutingEnabled() then return false end
+    NS.ClearPendingGuideTakeoverForClear()
+    local mapID, x, y = NS.GetCurrentUserWaypoint()
+    local destination = GetActiveManualDestination()
+    local pending = state.routing.pendingManualAuthority
+    local carrier = state.routing.carrierState
+    local native = NS.Internal.WorldOverlay
+    if NS.GetWorldMapClickIdentity(pending) and NS.RouteIdentityMatchesHost(pending, mapID, x, y) then
+        NS.CancelPendingManualRoute("explicit_user_waypoint_clear")
+        NS.RecomputeCarrier()
+        return true
     end
-    local cancelledPending = type(NS.CancelPendingManualRoute) == "function"
-        and NS.CancelPendingManualRoute("explicit_user_waypoint_clear")
-        or false
-    local mapID, x, y = nil, nil, nil
-    if type(NS.GetCurrentUserWaypoint) == "function" then
-        mapID, x, y = NS.GetCurrentUserWaypoint()
-    end
-    local destination = GetActiveManualDestination and GetActiveManualDestination() or nil
-    if type(destination) == "table"
-        and type(NS.RouteIdentityMatchesHost) == "function"
-        and NS.RouteIdentityMatchesHost(destination, mapID, x, y)
-        and type(ClearActiveManualDestination) == "function"
+    if carrier and carrier.source == "manual" and carrier.authority
+        and (carrier.authority == destination or carrier.authority == pending)
+        and native and native.MatchesNavigationHost(carrier.sig, mapID, x, y)
     then
-        return ClearActiveManualDestination("explicit") or cancelledPending
+        if carrier.authority == pending then
+            NS.CancelPendingManualRoute("explicit_user_waypoint_clear")
+            NS.RecomputeCarrier()
+            return true
+        end
+        return ClearActiveManualDestination("explicit")
     end
-    return ClearBlizzardUserWaypointBackedManual("explicit") or cancelledPending
+
+    local identity = destination and destination.identity
+    if identity and identity.kind == "blizzard_user_waypoint"
+        and NS.RouteIdentityMatchesHost(destination, mapID, x, y)
+    then
+        return ClearActiveManualDestination("explicit")
+    end
+    return false
 end
 
 -- ============================================================
@@ -309,7 +261,8 @@ function NS.InstallUserWaypointHooks()
             end
 
             if IsRecentExternalTomTomDuplicate(sourceAddon, mapID, x, y) then
-                NS.Log("External Blizzard waypoint duplicate ignored", tostring(sourceAddon), tostring(Signature(mapID, x, y)))
+                NS.Log("External Blizzard waypoint duplicate ignored", tostring(sourceAddon),
+                tostring(Signature(mapID, x, y)))
                 return originalSetUserWaypoint(uiMapPoint, ...)
             end
 

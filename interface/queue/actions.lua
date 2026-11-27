@@ -1,3 +1,10 @@
+-- ============================================================
+-- Queue window commands
+-- ============================================================
+--
+-- Handles queue window commands, including activation, removal, import and
+-- export.
+
 local NS = _G.AzerothWaypointNS
 NS.Internal = NS.Internal or {}
 NS.Internal.QueueUI = NS.Internal.QueueUI or {}
@@ -111,6 +118,10 @@ function M.IsManualQueueActive(queueKey, snapshot)
     return type(snapshot) == "table" and snapshot.activeManualQueueID == queueKey
 end
 
+-- ============================================================
+-- Stopping and clearing queues
+-- ============================================================
+
 function M.StopUsingQueueByKey(queueKey)
     if type(queueKey) ~= "string" or M.IsGuideQueueKey(queueKey) or type(NS.StopUsingManualQueue) ~= "function" then
         return false
@@ -177,6 +188,10 @@ function M.DeleteSelectedQueues()
     return true
 end
 
+-- ============================================================
+-- Bulk item removal
+-- ============================================================
+
 function M.DeleteSelectedQueueItems(queueKey)
     local itemIndexes = M.GetSelectedQueueItemIndexes(queueKey)
     if type(queueKey) ~= "string" or #itemIndexes == 0 or type(NS.RemoveQueueItems) ~= "function" then
@@ -208,6 +223,88 @@ function M.OpenImportWindow()
     return false
 end
 
+function M.FormatWaypointExport(queues)
+    local lines = {}
+    for _, queue in ipairs(queues) do
+        for _, item in ipairs(queue.items or {}) do
+            local map, x, y = item.mapID, item.x, item.y
+            if type(map) == "number" and map > 0 and map < math.huge and map % 1 == 0
+                and type(x) == "number" and x >= 0 and x <= 1 and type(y) == "number" and y >= 0 and y <= 1 then
+                local coords = ("/way #%d %.6f %.6f"):format(map, x * 100, y * 100):gsub(",", ".")
+                local title = type(item.title) == "string" and item.title:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+                    :gsub("%c+", " "):gsub("^%s+", ""):gsub("%s+$", "") or ""
+                lines[#lines + 1] = title == "" and coords or (coords .. " " .. title)
+            end
+        end
+    end
+    return table.concat(lines, "\n")
+end
+
+local exportWindow
+
+-- ============================================================
+-- Export window and context menus
+-- ============================================================
+
+local function BuildExportWindow()
+    local frame = CreateFrame("Frame", "AWPWaypointExport", UIParent)
+    frame:SetSize(500, 320)
+    frame:SetPoint("CENTER")
+    frame:SetFrameStrata("FULLSCREEN_DIALOG")
+    frame:SetClampedToScreen(true)
+    frame:SetMovable(true)
+    frame:EnableMouse(true)
+    local shell = NS.Internal.Interface.Framework.CreatePanelShell(frame, {
+        title = "Export TomTom Waypoints", surface = "windows.queue", movable = true,
+    })
+    local message = shell.bodyFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    message:SetPoint("TOPLEFT", 14, -12)
+    message:SetText("Copy these lines and paste them into TomTom with /ttpaste.")
+    local scroll = CreateFrame("ScrollFrame", nil, shell.bodyFrame, "UIPanelScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", 14, -36)
+    scroll:SetPoint("BOTTOMRIGHT", -30, 14)
+    local edit = CreateFrame("EditBox", nil, scroll)
+    edit:SetMultiLine(true)
+    edit:SetAutoFocus(false)
+    edit:SetFontObject(ChatFontNormal)
+    edit:SetWidth(450)
+    edit:SetHeight(18)
+    scroll:SetScrollChild(edit)
+    scroll:EnableMouse(true)
+    scroll:SetScript("OnMouseDown", function() edit:SetFocus() end)
+    edit:SetScript("OnEscapePressed", function() frame:Hide() end)
+    edit:SetScript("OnTextChanged", function(self, fromUser)
+        if fromUser and self:GetText() ~= frame.exportText then self:SetText(frame.exportText) end
+    end)
+    frame:SetScript("OnHide", function()
+        edit:ClearFocus()
+        edit:SetText("")
+        frame.exportText = nil
+    end)
+    frame.edit = edit
+    if UISpecialFrames then UISpecialFrames[#UISpecialFrames + 1] = frame:GetName() end
+    return frame
+end
+
+function M.OpenExportWindow()
+    local snapshot = NS.GetQueuePanelSnapshot()
+    local queues = snapshot.manualQueues
+    if M.GetViewMode() == "detail" then
+        local queue, queueType = M.ResolveSelectedQueue(snapshot)
+        if queueType ~= "manual" then return false end
+        queues = { queue }
+    end
+    local text = M.FormatWaypointExport(queues)
+    if text == "" then return false end
+    exportWindow = exportWindow or BuildExportWindow()
+    exportWindow.exportText = text
+    exportWindow.edit:SetText(text)
+    exportWindow:Show()
+    exportWindow.edit:SetFocus()
+    exportWindow.edit:HighlightText()
+    return true
+end
+
 function M.ShowQueueDestinationContextMenu(owner, rowTitle, queueKey, itemIndex, removable)
     itemIndex = tonumber(itemIndex)
     if type(queueKey) ~= "string" or M.IsGuideQueueKey(queueKey) or not itemIndex then
@@ -215,7 +312,7 @@ function M.ShowQueueDestinationContextMenu(owner, rowTitle, queueKey, itemIndex,
     end
 
     if type(MenuUtil) == "table" and type(MenuUtil.CreateContextMenu) == "function" then
-        MenuUtil.CreateContextMenu(owner, function(_, rootDescription)
+        NS.Internal.Menus.CreateContextMenu(owner, function(_, rootDescription)
             if type(rootDescription.CreateTitle) == "function" then
                 rootDescription:CreateTitle(tostring(rowTitle or "Queued Destination"))
             end
@@ -248,7 +345,7 @@ function M.ShowQueueRowContextMenu(owner, queue, queueType, queueKey)
     M.Refresh()
 
     if type(MenuUtil) == "table" and type(MenuUtil.CreateContextMenu) == "function" then
-        MenuUtil.CreateContextMenu(owner, function(_, rootDescription)
+        NS.Internal.Menus.CreateContextMenu(owner, function(_, rootDescription)
             if type(rootDescription.CreateTitle) == "function" then
                 rootDescription:CreateTitle(tostring(queue.label or queueKey or "Queue"))
             end

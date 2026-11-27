@@ -1,3 +1,10 @@
+-- ============================================================
+-- Zygor tracker rows
+-- ============================================================
+--
+-- Builds the Zygor goal rows for each tracker block and chooses a title for
+-- sticky steps.
+
 local NS = _G.AzerothWaypointNS
 if not NS.IsZygorLoaded() then return end
 
@@ -11,7 +18,44 @@ local Util = Shared.TrackerUtil
 local Rows = {}
 Shared.TrackerRows = Rows
 
-local COLLAPSE_TIP_GROUP_THRESHOLD = 3
+local CommonPresentation = NS.Internal.GuidePresentation
+local details = NS.Internal.GuideTrackerViewer.QuestDetails
+if details then
+    details.RegisterSource("zygor", function()
+        local z = Shared.GetZygor and Shared.GetZygor()
+        return z and z.CurrentGuide, z and z.CurrentStepNum
+    end)
+end
+local guideRevisions = setmetatable({}, { __mode = "k" })
+local nextRevision = 0
+function Rows.GetGuideRevision(guide)
+    if not guide then return end
+    if not guideRevisions[guide] then
+        nextRevision = nextRevision + 1; guideRevisions[guide] = nextRevision
+    end
+    return guideRevisions[guide]
+end
+
+local function Interaction(step, goal)
+    if goal.action ~= "confirm" and goal.action ~= "loadguide" then return end
+    local z = Shared.GetZygor and Shared.GetZygor()
+    local guide = z and z.CurrentGuide
+    if not guide then return end
+    for i, candidate in ipairs(step.goals or {}) do
+        if candidate == goal then
+            return {
+                provider = "zygor",
+                action = goal.action,
+                guide = guide.title,
+                revision = Rows.GetGuideRevision(guide),
+                step = Util.GetStepNum(step),
+                goal = i,
+                target = goal.loadguide,
+                targetStep = goal.loadguidestep
+            }
+        end
+    end
+end
 
 -- ============================================================
 -- Renderable Zygor row model + sticky-step title handling
@@ -46,50 +90,23 @@ local function BuildDockedGoalRows(step)
             return
         end
 
+        local questID = goal.questid or (type(goal.quest) == "table" and (goal.quest.id or goal.quest.questid) or nil)
+        if issecretvalue and issecretvalue(questID) then questID = nil end
         currentRow = {
             text = text,
             status = status,
             kind = kind,
             goal = goal,
+            questID = tonumber(questID),
             confirmGoal = Util.IsConfirmGoal(goal) and goal or nil,
+            interaction = Interaction(step, goal),
             useFullHeight = true,
             tips = {},
         }
         groupedRows[#groupedRows + 1] = currentRow
     end, true)
 
-    local rows = {}
-    for _, row in ipairs(groupedRows) do
-        local tips = row.tips
-        local tipCount = type(tips) == "table" and #tips or 0
-
-        if tipCount >= COLLAPSE_TIP_GROUP_THRESHOLD then
-            rows[#rows + 1] = {
-                text = string.format("%s (%d tips)", row.text, tipCount),
-                status = row.status,
-                kind = row.kind,
-                tooltipTitle = row.text,
-                tips = tips,
-                goal = row.goal,
-                confirmGoal = row.confirmGoal,
-                useFullHeight = false,
-            }
-        else
-            rows[#rows + 1] = {
-                text = row.text,
-                status = row.status,
-                kind = row.kind,
-                goal = row.goal,
-                confirmGoal = row.confirmGoal,
-                useFullHeight = row.useFullHeight == true,
-            }
-            for _, tip in ipairs(tips or {}) do
-                rows[#rows + 1] = tip
-            end
-        end
-    end
-
-    return rows
+    return CommonPresentation.GroupTipRows(groupedRows)
 end
 
 local function BuildDockedGoalRowsWithStickyContext(Z, step, activeStickies)

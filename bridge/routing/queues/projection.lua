@@ -1,3 +1,10 @@
+-- ============================================================
+-- Queue destinations and leg projections
+-- ============================================================
+--
+-- Builds the queue window's destination and leg lists from the guide or manual
+-- record that owns the route.
+
 local NS = _G.AzerothWaypointNS
 local state = NS.State
 local Queue = NS.RouteQueueInternal
@@ -65,6 +72,8 @@ function Queue.ResolveGuideFinalProjectionSnapshot(record)
             or Queue.TrimString(target and target.rawTitle)
             or "Guide step"
         local subtext = Queue.TrimString(record.subtext) or Queue.TrimString(target and target.subtext)
+        local common = NS.Internal.GuidePresentation
+        if common then subtext = common.DestinationSubtext(subtext, x, y) end
         return {
             mirrorTitle = title,
             overlayTitle = title,
@@ -92,7 +101,8 @@ function Queue.ResolveGuideFinalProjectionSnapshot(record)
     end
 
     local snapshot = NS.ResolveGuideContentSnapshot({
-        rawArrowTitle = Queue.TrimString(record.rawTitle) or Queue.TrimString(target and target.rawTitle) or Queue.TrimString(record.title),
+        rawArrowTitle = Queue.TrimString(record.rawTitle) or Queue.TrimString(target and target.rawTitle) or
+            Queue.TrimString(record.title),
         mapID = mapID,
         x = x,
         y = y,
@@ -107,18 +117,29 @@ function Queue.ResolveGuideFinalProjectionSnapshot(record)
     return snapshot
 end
 
+-- ============================================================
+-- Projection entries and route legs
+-- ============================================================
+
 function Queue.BuildProjectionEntry(queue, leg, index, record, entryType, projectionContext)
     local sourceMeta = type(record) == "table" and record.meta or nil
     local title = type(leg) == "table" and leg.title or nil
     if not title then
         title = type(record) == "table" and record.title or nil
     end
+    local quest = entryType ~= "travel" and sourceMeta and sourceMeta.manualQuestID and NS.ResolveQuestPresentation
+        and NS.ResolveQuestPresentation(sourceMeta.manualQuestID, record.title, record)
+    if quest then title = quest.title or title end
+    local walking = leg and leg.walkingDescription and NS.Internal.RouteWalkingPresentation.Resolve(record, leg,
+        projectionContext and projectionContext.finalSnapshot)
+    if walking then title = walking.title end
     local entry = {
         key = Queue.BuildProjectionEntryKey(queue, index, leg and leg.mapID, leg and leg.x, leg and leg.y, entryType),
         mapID = leg and leg.mapID,
         x = leg and leg.x,
         y = leg and leg.y,
         title = title,
+        subtext = walking and walking.subtext or quest and quest.subtext,
         entryType = entryType,
         routeLegKind = type(leg) == "table" and leg.routeLegKind or nil,
         routeTravelType = type(leg) == "table" and leg.routeTravelType or nil,
@@ -126,10 +147,18 @@ function Queue.BuildProjectionEntry(queue, leg, index, record, entryType, projec
         sourceAddon = type(sourceMeta) == "table" and sourceMeta.sourceAddon or nil,
         searchKind = type(sourceMeta) == "table" and sourceMeta.searchKind or nil,
         manualQuestID = type(sourceMeta) == "table" and sourceMeta.manualQuestID or nil,
+        questContext = type(sourceMeta) == "table" and sourceMeta.questContext or nil,
         mapPinInfo = type(sourceMeta) == "table" and Queue.DeepCopy(sourceMeta.mapPinInfo) or nil,
         isHead = type(record) == "table" and tonumber(record.currentLegIndex) == index or false,
+        isPassed = type(record) == "table" and tonumber(record.currentLegIndex) ~= nil
+            and index < tonumber(record.currentLegIndex) or false,
         readOnly = true,
     }
+
+    local identity = sourceMeta and sourceMeta.identity
+    if entryType == "final_destination" and type(identity) == "table" and identity.destinationKind == "corpse" then
+        entry.iconHintKind, entry.semanticKind = "corpse", "corpse"
+    end
 
     if type(projectionContext) == "table" and projectionContext.source == "guide" then
         if entry.entryType == "final_destination" then
@@ -143,7 +172,6 @@ function Queue.BuildProjectionEntry(queue, leg, index, record, entryType, projec
 
     return entry
 end
-
 
 function Queue.BuildRouteProjection(queue, record, projectionContext)
     projectionContext = type(projectionContext) == "table" and projectionContext or nil
@@ -182,7 +210,8 @@ function Queue.BuildRouteProjection(queue, record, projectionContext)
                 then
                     entryType = "destination"
                 end
-                projection.entries[#projection.entries + 1] = Queue.BuildProjectionEntry(queue, leg, index, record, entryType, projectionContext)
+                projection.entries[#projection.entries + 1] = Queue.BuildProjectionEntry(queue, leg, index, record,
+                    entryType, projectionContext)
             end
         end
     end
@@ -210,13 +239,13 @@ function Queue.BuildRouteProjection(queue, record, projectionContext)
     return projection
 end
 
-function Queue.BuildDestinationQueueProjection(queue, record)
+function Queue.BuildDestinationQueueProjection(queue, record, activeItemIndex, reachedItem)
     local projection = {
         kind = "destination_queue",
         items = {},
         derivedEntries = {},
         publishedEntries = {},
-        activeItemIndex = tonumber(queue and queue.activeItemIndex) or 1,
+        activeItemIndex = activeItemIndex or tonumber(queue and queue.activeItemIndex) or 1,
         updatedAt = Queue.GetTimeSafe(),
     }
 
@@ -245,14 +274,14 @@ function Queue.BuildDestinationQueueProjection(queue, record)
     projection.derivedEntries = routeProjection.entries
     for index = 1, #routeProjection.entries do
         local entry = routeProjection.entries[index]
-        if type(entry) == "table" and entry.isHead ~= true then
+        if type(entry) == "table" and entry.isHead ~= true and entry.isPassed ~= true then
             projection.publishedEntries[#projection.publishedEntries + 1] = entry
         end
     end
     if queue and type(queue.items) == "table" then
         for index = 1, #queue.items do
             local item = queue.items[index]
-            if type(item) == "table" and index ~= projection.activeItemIndex then
+            if type(item) == "table" and item ~= reachedItem and index ~= projection.activeItemIndex then
                 projection.publishedEntries[#projection.publishedEntries + 1] = {
                     key = Queue.BuildProjectionEntryKey(queue, index, item.mapID, item.x, item.y, "destination"),
                     queueID = queue.id,
@@ -271,6 +300,10 @@ function Queue.BuildDestinationQueueProjection(queue, record)
     return projection
 end
 
+-- ============================================================
+-- Active queue selection
+-- ============================================================
+
 function Queue.ResolveActiveQueueReference()
     local stack = Queue.GetTransientQueueStack()
     if #stack > 0 then
@@ -282,8 +315,8 @@ function Queue.ResolveActiveQueueReference()
         return manualQueue, "manual"
     end
 
-    local guideQueue = Queue.GetActiveGuideQueue() or Queue.GetGuideQueueState()
-    local guideProj = guideQueue.projection
+    local guideQueue = Queue.GetActiveGuideQueue()
+    local guideProj = guideQueue and guideQueue.projection
     local guideEntries = type(guideProj) == "table" and guideProj.entries or nil
     if type(guideEntries) == "table" and #guideEntries > 0 then
         return guideQueue, "guide"
@@ -294,7 +327,7 @@ end
 
 function Queue.ClearGuideQueueProjection(provider)
     if provider then
-        local guideQueue = Queue.GetGuideQueueState(provider)
+        local guideQueue = Queue.GetGuideQueueByProvider(provider)
         if type(guideQueue) == "table" then
             guideQueue.projection = nil
         end
@@ -312,6 +345,10 @@ end
 function NS.ClearGuideQueueProjection(provider)
     Queue.ClearGuideQueueProjection(provider)
 end
+
+-- ============================================================
+-- Publishing guide and manual projections
+-- ============================================================
 
 function NS.SyncGuideQueueProjection(authority, opts)
     if type(authority) ~= "table" then
@@ -373,22 +410,33 @@ function NS.SyncAuthorityQueueProjection(authority, source)
         or tonumber(authority.queueItemIndex)
         or queue.activeItemIndex
         or 1
+    local indexChanged = authority.queueItemIndex ~= authorityItemIndex
     authority.queueItemIndex = authorityItemIndex
-
-    if queue.kind == "destination_queue" then
+    local pending = authority._corePendingManualRoute
+    local transaction = authority._corePendingQueueTransaction
+    local reachedItem = pending and transaction and transaction.reachedItem
+    if not pending and queue.activeItemIndex ~= authorityItemIndex then
         queue.activeItemIndex = authorityItemIndex
-        queue.projection = Queue.BuildDestinationQueueProjection(queue, authority)
-        state.routing.activeQueueProjection = queue.projection
-    else
-        queue.activeItemIndex = authorityItemIndex
-        queue.projection = Queue.BuildRouteProjection(queue, authority)
-        state.routing.activeQueueProjection = queue.projection
+        if not authority.queueIsTransient then Queue.PersistManualQueues() end
     end
+    local projection
+    if queue.kind == "destination_queue" then
+        projection = Queue.BuildDestinationQueueProjection(queue, authority, authorityItemIndex, reachedItem)
+    else
+        projection = Queue.BuildRouteProjection(queue, authority)
+    end
+    state.routing.activeQueueProjection = projection
     state.routing.activeQueueKey = queue.id
-    Queue.PersistManualAuthorityIfAvailable()
-    Queue.PersistManualQueues()
-    Queue.RefreshQueueUI()
-    return queue.projection
+    if not reachedItem then
+        queue.projection = projection
+        Queue.RefreshQueueUI()
+    end
+    if not pending then
+        local db = NS.GetDB and NS.GetDB()
+        local saved = db and db.manualAuthority
+        if indexChanged or saved and saved.backend ~= authority.backend then Queue.PersistManualAuthorityIfAvailable() end
+    end
+    return projection
 end
 
 function NS.GetActiveQueueProjection()
@@ -409,10 +457,9 @@ function NS.GetActiveQueuePublishedEntries()
     local entries = {}
     for index = 1, #(projection.entries or {}) do
         local entry = projection.entries[index]
-        if type(entry) == "table" and entry.isHead ~= true then
+        if type(entry) == "table" and entry.isHead ~= true and entry.isPassed ~= true then
             entries[#entries + 1] = entry
         end
     end
     return entries, routing.activeQueueKey
 end
-

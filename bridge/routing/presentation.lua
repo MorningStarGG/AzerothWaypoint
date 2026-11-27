@@ -9,48 +9,8 @@ local state = NS.State
 -- diagnostics consumers. This keeps the push-driven model and
 -- uses richer content snapshot fields they already understand.
 
-local Signature = NS.Signature
-
-local presentationScratch = {
-    carrierTitle = nil,
-    carrierStatus = nil,
-    overlayTitle = nil,
-    overlaySubtext = nil,
-    pinpointSubtext = nil,
-    iconHint = nil,
-    specialAction = nil,
-    carrierSig = nil,
-    overlaySig = nil,
-    sourceAddon = nil,
-    sourceAddonIconKey = nil,
-    guideProvider = nil,
-    searchKind = nil,
-    manualQuestID = nil,
-    guideRoutePresentation = false,
-    liveTravelType = nil,
-    routeGoalMapID = nil,
-    routeLegKind = nil,
-    routeTravelType = nil,
-    mapPinKind = nil,
-    mapPinType = nil,
-    mapPinID = nil,
-    iconHintAtlas = nil,
-    iconHintRawAtlas = nil,
-    iconHintTextureIndex = nil,
-    mapPinDescription = nil,
-    mapPinIsCurrentEvent = nil,
-    mapPinTooltipWidgetSet = nil,
-    semanticKind = nil,
-    semanticQuestID = nil,
-    semanticTravelType = nil,
-    iconHintKind = nil,
-    iconHintQuestID = nil,
-    mirrorTitle = nil,
-    contentSig = nil,
-}
 
 local _contentSigParts = {}
-local _finalContentSigParts = {}
 
 local function TrimString(value)
     if type(value) ~= "string" then return nil end
@@ -95,13 +55,18 @@ local function ResolveGuideProvider(authority)
     end
 
     local routing = state.routing or {}
-    local activeProvider = type(NS.GetActiveGuideProvider) == "function" and TrimString(NS.GetActiveGuideProvider()) or nil
+    local activeProvider = type(NS.GetActiveGuideProvider) == "function" and TrimString(NS.GetActiveGuideProvider()) or
+        nil
     if activeProvider then
         return activeProvider
     end
-    local guideQueue = type(routing.guideQueue) == "table" and routing.guideQueue or nil
+    local guideQueue = NS.RouteQueueInternal.GetActiveGuideQueue()
     return guideQueue and TrimString(guideQueue.provider) or nil
 end
+
+-- ============================================================
+-- Carrier titles and semantic icons
+-- ============================================================
 
 local function ResolveSemanticTravelType(action)
     if type(action) ~= "table" then
@@ -195,36 +160,11 @@ local function ResolveInstanceTravelIconOverride(liveTravelType, routeTravelType
 end
 
 local function NormalizeRouteTravelType(routeTravelType, routeLegKind, plannerLegKind)
-    local value = TrimString(routeTravelType)
-    if value == "hearthstone" then
-        return "hearth"
-    end
-    if value == "carrier"
-        or value == "walk"
-        or value == "fly"
-        or value == "ship"
-        or value == "zeppelin"
-    then
-        return "travel"
-    end
-    if value then
-        return value
-    end
-
-    local plannerKind = TrimString(plannerLegKind)
-    if routeLegKind == "carrier" then
-        if plannerKind == "portal" or plannerKind == "taxi" then
-            return plannerKind
-        end
-        if plannerKind == "hearthstone" then
-            return "hearth"
-        end
-        return "travel"
-    end
-    return nil
+    return NS.ResolveCarrierTravelType(TrimString(routeTravelType), routeLegKind, TrimString(plannerLegKind))
 end
 
-local function ResolvePresentationIconHint(targetKind, snapshot, liveTravelType, liveTravelConfidence, searchKind, manualQuestID, mapPinInfo)
+local function ResolvePresentationIconHint(targetKind, snapshot, liveTravelType, liveTravelConfidence, searchKind,
+                                           manualQuestID, mapPinInfo)
     if targetKind == "manual" then
         if type(manualQuestID) == "number" and manualQuestID > 0 then
             return "quest", manualQuestID
@@ -285,7 +225,7 @@ local function ResolvePresentationIconHint(targetKind, snapshot, liveTravelType,
         and snapshot.semanticQuestID > 0
         and snapshot.semanticQuestID
         or nil
-    if snapshot.semanticKind == "quest" and semanticQuestID then
+    if snapshot.semanticKind == "quest" and (semanticQuestID or snapshot.iconHintKind == "quest") then
         return "quest", semanticQuestID
     end
 
@@ -301,20 +241,9 @@ local function ResolvePresentationIconHint(targetKind, snapshot, liveTravelType,
     return nil, nil
 end
 
-local function BuildFinalContentSig(snapshot)
-    _finalContentSigParts[1] = tostring(snapshot.contentSig or "")
-    _finalContentSigParts[2] = tostring(snapshot.guideRoutePresentation == true)
-    _finalContentSigParts[3] = tostring(snapshot.iconHintKind or "")
-    _finalContentSigParts[4] = tostring(snapshot.iconHintQuestID or "")
-    _finalContentSigParts[5] = tostring(snapshot.iconHintAtlas or "")
-    _finalContentSigParts[6] = tostring(snapshot.mapPinKind or "")
-    _finalContentSigParts[7] = tostring(snapshot.mapPinID or "")
-    _finalContentSigParts[8] = tostring(snapshot.sourceAddon or "")
-    _finalContentSigParts[9] = tostring(snapshot.iconHintTextureIndex or "")
-    _finalContentSigParts[10] = tostring(snapshot.guideProvider or "")
-    _finalContentSigParts[11] = tostring(snapshot.sourceAddonIconKey or "")
-    return table.concat(_finalContentSigParts, "\031", 1, 11)
-end
+-- ============================================================
+-- Snapshot fields and signatures
+-- ============================================================
 
 local function ResolveSnapshotContentSig(snapshot)
     _contentSigParts[1] = tostring(snapshot.guideRoutePresentation == true)
@@ -333,20 +262,14 @@ local function ResolveSnapshotContentSig(snapshot)
     _contentSigParts[14] = tostring(snapshot.pinpointSubtext or snapshot.overlaySubtext or "")
     _contentSigParts[15] = tostring(snapshot.guideProvider or "")
     _contentSigParts[16] = tostring(snapshot.sourceAddonIconKey or "")
-    return table.concat(_contentSigParts, "\031", 1, 16)
+    _contentSigParts[17] = tostring(snapshot.iconHintKind or "")
+    _contentSigParts[18] = tostring(snapshot.iconHintQuestID or "")
+    _contentSigParts[19] = tostring(snapshot.iconHintAtlas or "")
+    _contentSigParts[20] = tostring(snapshot.iconHintTextureIndex or "")
+    return table.concat(_contentSigParts, "\031", 1, 20)
 end
 
 local function FillMapPinFields(snapshot, mapPinInfo)
-    snapshot.mapPinKind = nil
-    snapshot.mapPinType = nil
-    snapshot.mapPinID = nil
-    snapshot.iconHintAtlas = nil
-    snapshot.iconHintRawAtlas = nil
-    snapshot.iconHintTextureIndex = nil
-    snapshot.mapPinDescription = nil
-    snapshot.mapPinIsCurrentEvent = nil
-    snapshot.mapPinTooltipWidgetSet = nil
-
     if type(mapPinInfo) ~= "table" then
         return
     end
@@ -374,7 +297,7 @@ local function ComputeOverlaySig(carrierSig, snapshot)
     end
     return table.concat({
         baseSig,
-        BuildFinalContentSig(snapshot),
+        snapshot.contentSig,
         tostring(snapshot.mirrorTitle or snapshot.overlayTitle or ""),
         tostring(snapshot.overlaySubtext or ""),
     }, "\031", 1, 4)
@@ -404,6 +327,30 @@ local function ResolveGuideRouteSnapshot(authority, carrier, targetKind, routeLe
             or TrimString(target and target.rawTitle)
             or "Guide step"
         local subtext = TrimString(authority and authority.subtext) or TrimString(target and target.subtext)
+        local subtextReason = subtext and "instruction" or nil
+        local common = NS.Internal.GuidePresentation
+        if common and (routeLegKind == "destination" or routeLegKind == nil and targetKind ~= "route") then
+            subtext, subtextReason = common.DestinationSubtext(subtext, x, y)
+        end
+        local adapter = type(NS.GetGuideTargetProvider) == "function" and NS.GetGuideTargetProvider(provider)
+        if adapter and adapter.structuredPresentation then
+            local semantics = common.BuildSemanticInfo(
+                TrimString(authority and authority.semanticKind) or TrimString(target and target.semanticKind),
+                TrimString(authority and authority.semanticTravelType) or
+                TrimString(target and target.semanticTravelType),
+                authoritySemanticQuestID or targetSemanticQuestID)
+            local snapshot = common.BuildSnapshot(carrier.title or rawArrowTitle, title, subtext,
+                provider, subtextReason, nil, nil, semantics)
+            snapshot.guideProvider = provider
+            snapshot.iconHintKind = TrimString(authority and authority.iconHintKind) or
+                TrimString(target and target.iconHintKind)
+            snapshot.iconHintQuestID = authorityIconHintQuestID or targetIconHintQuestID
+            common.ApplyRoutePolicy(snapshot, {
+                kind = targetKind, legKind = routeLegKind, routeTravelType = routeTravelType,
+            })
+            if snapshot.routePresentationAllowed == false then return nil end
+            return snapshot
+        end
         return {
             mirrorTitle = title,
             overlayTitle = title,
@@ -414,7 +361,8 @@ local function ResolveGuideRouteSnapshot(authority, carrier, targetKind, routeLe
             semanticQuestID = type(authoritySemanticQuestID) == "number" and authoritySemanticQuestID
                 or type(targetSemanticQuestID) == "number" and targetSemanticQuestID
                 or nil,
-            semanticTravelType = TrimString(authority and authority.semanticTravelType) or TrimString(target and target.semanticTravelType),
+            semanticTravelType = TrimString(authority and authority.semanticTravelType) or
+                TrimString(target and target.semanticTravelType),
             iconHintKind = TrimString(authority and authority.iconHintKind) or TrimString(target and target.iconHintKind),
             iconHintQuestID = type(authorityIconHintQuestID) == "number" and authorityIconHintQuestID
                 or type(targetIconHintQuestID) == "number" and targetIconHintQuestID
@@ -444,28 +392,32 @@ local function ResolveGuideRouteSnapshot(authority, carrier, targetKind, routeLe
             or target and target.source
             or carrier.source,
     })
-    if type(snapshot) ~= "table" or snapshot.routePresentationAllowed == false then
-        return nil
-    end
-    return snapshot
+    if type(snapshot) ~= "table" then return nil end
+    if snapshot.routePresentationAllowed == false then return nil, snapshot end
+    return snapshot, snapshot
 end
 
-function NS.ResolvePresentation()
+-- ============================================================
+-- Active route presentation
+-- ============================================================
+
+function NS.ResolvePresentation(carrier)
     local routing = state.routing or {}
-    local carrier = routing.carrierState
+    carrier = carrier or routing.carrierState
     local action = routing.specialActionState
-    local authority = carrier and carrier.source == "manual" and routing.manualAuthority
-        or carrier and carrier.source == "guide" and (type(NS.GetActiveGuideRouteState) == "function" and NS.GetActiveGuideRouteState() or routing.guideRouteState)
+    local authority = carrier and carrier.authority
+        or carrier and carrier.source == "manual" and routing.manualAuthority
+        or
+        carrier and carrier.source == "guide" and
+        (type(NS.GetActiveGuideRouteState) == "function" and NS.GetActiveGuideRouteState() or routing.guideRouteState)
         or nil
 
     if not carrier or not authority then
-        for key in pairs(presentationScratch) do
-            presentationScratch[key] = nil
-        end
-        presentationScratch.guideRoutePresentation = false
-        return presentationScratch
+        return { guideRoutePresentation = false }
     end
 
+    -- The overlay may retain this snapshot after another route is resolved.
+    local snapshot = {}
     local targetKind = carrier.kind or (carrier.source == "guide" and "guide" or "manual")
     local routeLegKind = carrier.routeLegKind
     local routeTravelType = NormalizeRouteTravelType(carrier.routeTravelType, routeLegKind, carrier.plannerLegKind)
@@ -477,7 +429,7 @@ function NS.ResolvePresentation()
     local isCarrierTravelPresentation = targetKind == "route" or routeLegKind == "carrier"
     local liveTravelType = semanticTravelType or (isCarrierTravelPresentation and routeTravelType or nil)
     local liveTravelConfidence = liveTravelType and "high" or nil
-    local guideSnapshot = ResolveGuideRouteSnapshot(
+    local guideSnapshot, walkingContext = ResolveGuideRouteSnapshot(
         authority,
         carrier,
         targetKind,
@@ -486,66 +438,85 @@ function NS.ResolvePresentation()
         TrimString(authority.rawTitle) or TrimString(carrier.title) or TrimString(authorityTitle)
     )
 
-    presentationScratch.carrierTitle = ResolveCarrierTitle(action, carrier, authorityTitle)
-    presentationScratch.carrierStatus = nil
-    presentationScratch.overlayTitle = ResolveOverlayTitle(action, carrier, authorityTitle, routeLegKind)
-    presentationScratch.overlaySubtext = ResolveOverlaySubtext(action, presentationScratch.overlayTitle, routeLegKind)
+    snapshot.carrierTitle = ResolveCarrierTitle(action, carrier, authorityTitle)
+    snapshot.overlayTitle = ResolveOverlayTitle(action, carrier, authorityTitle, routeLegKind)
+    snapshot.overlaySubtext = ResolveOverlaySubtext(action, snapshot.overlayTitle, routeLegKind)
     if guideSnapshot then
         local guideSubtext = TrimString(guideSnapshot.pinpointSubtext)
         if routeLegKind == "carrier" then
             if NS.IsInstanceRouteTravelType(routeTravelType) and guideSubtext then
-                presentationScratch.overlaySubtext = guideSubtext
+                snapshot.overlaySubtext = guideSubtext
             end
         else
-            presentationScratch.overlayTitle = TrimString(guideSnapshot.mirrorTitle) or presentationScratch.overlayTitle
-            presentationScratch.overlaySubtext = guideSubtext or presentationScratch.overlaySubtext
+            snapshot.overlayTitle = TrimString(guideSnapshot.mirrorTitle) or snapshot.overlayTitle
+            snapshot.overlaySubtext = guideSubtext or snapshot.overlaySubtext
         end
     end
-    presentationScratch.pinpointSubtext = presentationScratch.overlaySubtext
-    presentationScratch.iconHint = nil
-    presentationScratch.specialAction = action
-    presentationScratch.carrierSig = carrier.sig
-    presentationScratch.overlaySig = nil
-    presentationScratch.sourceAddon = NormalizeSourceAddon(authority.sourceAddon)
-    presentationScratch.sourceAddonIconKey = TrimString(authority.sourceAddonIconKey)
-    presentationScratch.guideProvider = carrier.source == "guide" and ResolveGuideProvider(authority) or nil
-    presentationScratch.searchKind = type(searchKind) == "string" and searchKind or nil
-    presentationScratch.manualQuestID = type(manualQuestID) == "number" and manualQuestID > 0 and manualQuestID or nil
-    presentationScratch.guideRoutePresentation = carrier.source == "guide"
-    presentationScratch.liveTravelType = liveTravelConfidence == "high" and liveTravelType or nil
-    presentationScratch.routeGoalMapID = carrier.finalMapID
-    presentationScratch.routeLegKind = routeLegKind
-    presentationScratch.routeTravelType = routeTravelType
-    presentationScratch.semanticKind = type(action) == "table" and action.semanticKind
-        or presentationScratch.manualQuestID and "quest"
+    snapshot.pinpointSubtext = snapshot.overlaySubtext
+    local walking = authority.currentLeg and authority.currentLeg.walkingDescription
+        and NS.Internal.RouteWalkingPresentation.Resolve(authority, authority.currentLeg, walkingContext or guideSnapshot)
+    if walking then
+        snapshot.carrierTitle, snapshot.overlayTitle = walking.title, walking.title
+        snapshot.overlaySubtext, snapshot.pinpointSubtext = walking.subtext, walking.subtext
+    end
+    if manualQuestID and not isCarrierTravelPresentation and NS.ResolveQuestPresentation then
+        local quest = NS.ResolveQuestPresentation(manualQuestID, authorityTitle, authority)
+        if quest then
+            snapshot.overlayTitle = quest.title or snapshot.overlayTitle
+            snapshot.overlaySubtext, snapshot.pinpointSubtext = quest.subtext, quest.subtext
+        end
+    end
+    snapshot.specialAction = action
+    snapshot.carrierSig = carrier.sig
+    snapshot.sourceAddon = NormalizeSourceAddon(authority.sourceAddon)
+    snapshot.sourceAddonIconKey = TrimString(authority.sourceAddonIconKey)
+    snapshot.guideProvider = carrier.source == "guide" and ResolveGuideProvider(authority) or nil
+    snapshot.searchKind = type(searchKind) == "string" and searchKind or nil
+    snapshot.manualQuestID = type(manualQuestID) == "number" and manualQuestID > 0 and manualQuestID or nil
+    snapshot.guideRoutePresentation = carrier.source == "guide"
+    snapshot.liveTravelType = liveTravelConfidence == "high" and liveTravelType or nil
+    snapshot.routeGoalMapID = carrier.finalMapID
+    snapshot.routeLegKind = routeLegKind
+    snapshot.routeTravelType = routeTravelType
+    snapshot.semanticKind = type(action) == "table" and action.semanticKind
+        or targetKind == "corpse" and "corpse"
+        or snapshot.manualQuestID and "quest"
         or nil
-    presentationScratch.semanticQuestID = presentationScratch.manualQuestID
-    presentationScratch.semanticTravelType = semanticTravelType
+    snapshot.semanticQuestID = snapshot.manualQuestID
+    snapshot.semanticTravelType = semanticTravelType
     if guideSnapshot then
-        presentationScratch.semanticKind = TrimString(guideSnapshot.semanticKind) or presentationScratch.semanticKind
-        presentationScratch.semanticQuestID = type(guideSnapshot.semanticQuestID) == "number"
+        snapshot.semanticKind = TrimString(guideSnapshot.semanticKind) or snapshot.semanticKind
+        snapshot.iconHintKind = guideSnapshot.iconHintKind
+        snapshot.semanticQuestID = type(guideSnapshot.semanticQuestID) == "number"
             and guideSnapshot.semanticQuestID > 0
             and guideSnapshot.semanticQuestID
-            or presentationScratch.semanticQuestID
-        presentationScratch.semanticTravelType = TrimString(guideSnapshot.semanticTravelType)
-            or presentationScratch.semanticTravelType
+            or snapshot.semanticQuestID
+        snapshot.semanticTravelType = TrimString(guideSnapshot.semanticTravelType)
+            or snapshot.semanticTravelType
     end
-    presentationScratch.mirrorTitle = presentationScratch.overlayTitle
-    presentationScratch.carrierTitle = presentationScratch.overlayTitle or presentationScratch.carrierTitle
+    if carrier.source == "guide" and routeLegKind == "carrier" and liveTravelType
+        and not NS.IsInstanceRouteTravelType(liveTravelType)
+    then
+        snapshot.semanticKind = "travel"
+        snapshot.semanticQuestID = nil
+        snapshot.semanticTravelType = liveTravelType
+    end
+    snapshot.mirrorTitle = snapshot.overlayTitle
+    snapshot.carrierTitle = snapshot.overlayTitle or snapshot.carrierTitle
 
-    FillMapPinFields(presentationScratch, mapPinInfo)
+    FillMapPinFields(snapshot, mapPinInfo)
 
-    presentationScratch.contentSig = ResolveSnapshotContentSig(presentationScratch)
-    presentationScratch.iconHintKind, presentationScratch.iconHintQuestID = ResolvePresentationIconHint(
+    snapshot.iconHintKind, snapshot.iconHintQuestID = ResolvePresentationIconHint(
         targetKind,
-        presentationScratch,
-        presentationScratch.liveTravelType,
+        snapshot,
+        snapshot.liveTravelType,
         liveTravelConfidence,
-        presentationScratch.searchKind,
-        presentationScratch.manualQuestID,
+        snapshot.searchKind,
+        snapshot.manualQuestID,
         mapPinInfo
     )
-    presentationScratch.iconHint = presentationScratch.iconHintKind
-    presentationScratch.overlaySig = ComputeOverlaySig(carrier.sig, presentationScratch)
-    return presentationScratch
+    snapshot.iconHint = snapshot.iconHintKind
+    snapshot.contentSig = ResolveSnapshotContentSig(snapshot)
+    snapshot.overlaySig = ComputeOverlaySig(carrier.sig, snapshot)
+    return snapshot
 end

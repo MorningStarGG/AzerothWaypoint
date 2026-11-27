@@ -1,3 +1,10 @@
+-- ============================================================
+-- Queue window state
+-- ============================================================
+--
+-- Tracks queue-window selection, collapsed sections and list or detail view
+-- mode.
+
 local NS = _G.AzerothWaypointNS
 NS.Internal = NS.Internal or {}
 NS.Internal.QueueUI = NS.Internal.QueueUI or {}

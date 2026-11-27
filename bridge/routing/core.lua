@@ -1,25 +1,29 @@
+-- ============================================================
+-- Routing core
+-- ============================================================
+--
+-- Owns the accepted route, its current leg, and the target published to
+-- TomTom and the world overlay. The planning coordinator runs backend
+-- attempts. This module validates their results and commits the route.
+
 local NS = _G.AzerothWaypointNS
 local state = NS.State
 
 local SafeCall = NS.SafeCall
 local Signature = NS.Signature
+local Sanctum = NS.RouteSpecials and NS.RouteSpecials.Sanctum
 local ROUTE_COORD_TOLERANCE = 0.00005
 local ROUTE_REPLAN_DEBOUNCE_SECONDS = 0.35
-local ROUTE_VALIDATION_COOLDOWN_WINDOW_SECONDS = 0.5
 local DEFAULT_ACTION_RADIUS_YARDS = 15
 local DEFAULT_MOVEMENT_RADIUS_YARDS = 55
-
-local ROUTE_VALIDATION_PRIORITY = {
-    cooldown = 1,
-    structural = 2,
-    selected_action = 3,
-}
 
 local NOISY_ACTION_INVALIDATION_REASON = {
     SPELL_UPDATE_COOLDOWN = true,
 }
 
 local NOISY_ACTION_INVALIDATION_BACKEND = {
+    dugi = true,
+    polestar = true,
     mapzeroth = true,
     farstrider = true,
 }
@@ -72,6 +76,7 @@ local ENVIRONMENT_REFRESH_REASON = {
 }
 
 local ROUTE_SUCCESS_REASON = {
+    polestar_plan = true,
     direct_plan = true,
     mapzeroth_plan = true,
     mapzeroth_instance_entrance_plan = true,
@@ -82,10 +87,14 @@ local ROUTE_SUCCESS_REASON = {
 }
 
 local ROUTE_PLANNING_REASON = {
+    dugi_planning_fallback = true,
+    dugi_combat_continuity = true,
+    polestar_combat_continuity = true,
     zygor_planning_fallback = true,
 }
 
 local ROUTE_FAILURE_REASON = {
+    polestar_nopath_fallback = true,
     mapzeroth_missing = true,
     mapzeroth_nopath_fallback = true,
     mapzeroth_emptysteps_fallback = true,
@@ -133,35 +142,28 @@ local function BuildPlanMeta(record, reason)
     return planMeta
 end
 
--- ------------------------------------------------------------
+-- ============================================================
 -- Backend selection
--- ------------------------------------------------------------
+-- ============================================================
 
-local BACKEND_PRIORITY = { "zygor", "farstrider", "mapzeroth", "direct" }
-
-local function GetBackendObject(id)
-    if id == "zygor"       then return NS.RoutingBackend_Zygor end
-    if id == "mapzeroth"   then return NS.RoutingBackend_Mapzeroth end
-    if id == "farstrider"  then return NS.RoutingBackend_Farstrider end
-    if id == "direct"      then return NS.RoutingBackend_Direct end
-    return nil
-end
+local BackendCatalog = NS.Internal.RoutingBackends
+local GetBackendObject = NS.GetRoutingBackend
 
 local function ResolveEffectiveBackend(opts)
     local override = opts and opts.backendOverride
     if override then
         local b = GetBackendObject(override)
-        if b and b.IsAvailable() then return b end
+        if b and BackendCatalog.IsAvailable(override) then return b end
     end
 
     local db = NS.GetDB()
     local selected = db and db.routingBackend
     local b = GetBackendObject(selected)
-    if b and b.IsAvailable() then return b end
+    if b and BackendCatalog.IsAvailable(selected) then return b end
 
-    for _, id in ipairs(BACKEND_PRIORITY) do
-        local fallback = GetBackendObject(id)
-        if fallback and fallback.IsAvailable() then return fallback end
+    for _, entry in ipairs(BackendCatalog.entries) do
+        local fallback = GetBackendObject(entry.id)
+        if fallback and BackendCatalog.IsAvailable(entry.id) then return fallback end
     end
 
     -- direct is the floor, should never miss, but defensive return.
@@ -176,9 +178,15 @@ function NS.GetSelectedBackendID()
 end
 
 function NS.GetEffectiveBackendID()
+    local record = type(NS.GetActiveAuthorityRecord) == "function" and NS.GetActiveAuthorityRecord()
+    if record and record.backend then return record.backend end
     local b = ResolveEffectiveBackend()
     return b and b.id or "direct"
 end
+
+-- ============================================================
+-- Route authority and destination lookup
+-- ============================================================
 
 local function ResolveAuthorityDestination(record)
     if type(record) ~= "table" then
@@ -193,19 +201,26 @@ local function ResolveAuthorityDestination(record)
     return record.mapID, record.x, record.y, record.title
 end
 
+local function GetRoutableGuide()
+    if UnitIsDeadOrGhost and UnitIsDeadOrGhost("player") then return end
+    local guide = NS.GetActiveGuideRouteState and NS.GetActiveGuideRouteState() or state.routing.guideRouteState
+    if guide and guide.target and not guide.suppressed then return guide end
+end
+
 local function GetActiveRouteRecord()
     local routing = state.routing
-    local record = routing and routing.manualAuthority or nil
-    if not record then
-        local guideState = type(NS.GetActiveGuideRouteState) == "function"
-            and NS.GetActiveGuideRouteState()
-            or routing and routing.guideRouteState
-        if guideState and guideState.target and not guideState.suppressed then
-            record = guideState
-        end
+    -- A pending replacement owns guidance. Its session handles changes until
+    -- acceptance, the previous committed route must not progress or replan.
+    if not routing or routing.pendingManualAuthority then return nil end
+    if routing.manualAuthority then
+        return type(routing.manualAuthority) == "table" and routing.manualAuthority or nil
     end
-    return type(record) == "table" and record or nil
+    return GetRoutableGuide()
 end
+
+-- ============================================================
+-- Leg coordinates and travel action identity
+-- ============================================================
 
 local function IsValidLeg(leg)
     return type(leg) == "table"
@@ -265,6 +280,10 @@ end
 
 
 NS.GetRouteSpecialActionIdentity = GetSpecialActionIdentity
+
+-- ============================================================
+-- Travel dependencies and cooldown changes
+-- ============================================================
 
 local ROUTE_DEPENDENCY_KIND = {
     spell = true,
@@ -401,6 +420,10 @@ local function IsNoisyActionInvalidation(reason)
     return type(reason) == "string" and NOISY_ACTION_INVALIDATION_REASON[reason] == true
 end
 
+-- ============================================================
+-- Route environment and zone changes
+-- ============================================================
+
 local function TrimRouteText(value)
     if type(value) ~= "string" then return nil end
     value = value:gsub("^%s+", ""):gsub("%s+$", "")
@@ -441,10 +464,8 @@ function NS.GetRouteEnvironmentSnapshot()
 end
 
 local function RouteEnvironmentFingerprint(env)
-    env = type(env) == "table" and env or NS.GetRouteEnvironmentSnapshot()
-    local mapID = type(NS.GetPlayerMapID) == "function" and NS.GetPlayerMapID() or nil
     return table.concat({
-        tostring(mapID or "-"),
+        tostring(env.mapID or "-"),
         tostring(env.indoors),
         tostring(env.zone or "-"),
         tostring(env.realzone or "-"),
@@ -455,6 +476,7 @@ end
 
 local function RememberRouteEnvironment()
     local current = NS.GetRouteEnvironmentSnapshot()
+    current.mapID = NS.GetPlayerMapID and NS.GetPlayerMapID()
     local fingerprint = RouteEnvironmentFingerprint(current)
     state.routing._routeEnvironmentSnapshot = current
     state.routing._routeEnvironmentFingerprint = fingerprint
@@ -463,7 +485,8 @@ end
 
 local function ShouldRefreshForEnvironment(reason)
     local previous = state.routing._routeEnvironmentFingerprint
-    local _, fingerprint = RememberRouteEnvironment()
+    local last = state.routing._routeEnvironmentSnapshot
+    local current, fingerprint = RememberRouteEnvironment()
 
     if type(reason) == "string" and FORCE_ENVIRONMENT_REFRESH_REASON[reason] then
         return true
@@ -472,8 +495,20 @@ local function ShouldRefreshForEnvironment(reason)
         return true
     end
 
-    return previous ~= fingerprint
+    if previous == fingerprint then return false end
+    if reason == "ZONE_CHANGED" and last and last.indoors == false and current.indoors == false
+        and current.mapID and current.mapID == last.mapID and current.zone == last.zone
+        and current.realzone == last.realzone then
+        local record = GetActiveRouteRecord()
+        local backend = record and GetBackendObject(record.backend)
+        if backend and backend.CanRetainOutdoorWalk and backend.CanRetainOutdoorWalk(record) then return false end
+    end
+    return true
 end
+
+-- ============================================================
+-- Route outcomes and failure reporting
+-- ============================================================
 
 local function IsStrictRouteRecord(record)
     if type(record) ~= "table" then
@@ -572,26 +607,36 @@ local function ReportStrictRouteFailure(record, reason)
     end
     record._coreLastStrictFailureMessageKey = key
     if type(NS.Msg) == "function" then
-        NS.Msg(string.format("Routing failed: no route found to %s.", title))
+        local routing = record.backendOverride and BackendCatalog.Label(record.backendOverride) .. " routing" or
+            "Routing"
+        NS.Msg(string.format("%s failed: no route found to %s.", routing, title))
     end
 end
+
+-- ============================================================
+-- Pending manual route handoff
+-- ============================================================
+
+-- A ready pending route can supply guidance while the previous queue is
+-- still saved. Only an accepted result commits the queue transaction.
+-- Cancellation or a failed result releases the pending route.
 
 local function IsPendingManualRouteRecord(record)
     return type(record) == "table" and record._corePendingManualRoute == true
 end
 
-local function ClearPendingManualRoute(record)
+local function ClearPendingManualRoute(record, replacement)
     if type(record) ~= "table" then
         return
     end
     if state.routing.pendingManualAuthority == record then
-        state.routing.pendingManualAuthority = nil
+        NS.SetPendingManualAuthority(replacement)
     end
     record._corePendingManualRoute = nil
     record._corePendingRouteSerial = nil
 end
 
-local function CancelPendingManualRoute(reason)
+local function CancelPendingManualRoute(reason, replacement)
     local pending = state.routing.pendingManualAuthority
     if type(pending) ~= "table" then
         return false
@@ -599,7 +644,10 @@ local function CancelPendingManualRoute(reason)
     if type(NS.RollbackPendingManualQueueTransaction) == "function" then
         NS.RollbackPendingManualQueueTransaction(pending, "cancelled", reason or "superseded")
     end
-    ClearPendingManualRoute(pending)
+    if pending._routePlanning then NS.CancelRoutePlanning(pending) end
+    ClearPendingManualRoute(pending, replacement)
+    local native = NS.Internal and NS.Internal.NativeMapWaypoints
+    if native then native.Retire(pending) end
     pending._coreStrictRouteCompleted = true
     pending._coreStrictRouteSucceeded = false
     pending._coreRoutePending = nil
@@ -633,6 +681,8 @@ local function CompletePendingManualRoute(record, outcome, reason)
         end
         ReportStrictRouteFailure(record, reason)
         ClearPendingManualRoute(record)
+        local native = NS.Internal and NS.Internal.NativeMapWaypoints
+        if native then native.Retire(record) end
         record._coreRoutePending = nil
         record._corePlanning = nil
         record._coreStrictRouteCompleted = true
@@ -640,17 +690,22 @@ local function CompletePendingManualRoute(record, outcome, reason)
         return false
     end
 
-    if type(NS.CommitPendingManualQueueTransaction) == "function" then
-        NS.CommitPendingManualQueueTransaction(record)
+    if type(NS.CommitPendingManualQueueTransaction) == "function"
+        and NS.CommitPendingManualQueueTransaction(record) == false
+    then
+        CancelPendingManualRoute("queue_changed")
+        return false
     end
-    ClearPendingManualRoute(record)
     record._coreStrictRouteCompleted = true
     record._coreStrictRouteSucceeded = true
-    if type(NS.CommitManualAuthority) == "function" then
-        return NS.CommitManualAuthority(record)
-    end
-    return false
+    local committed = NS.CommitManualAuthority(record)
+    ClearPendingManualRoute(record)
+    return committed
 end
+
+-- ============================================================
+-- Arrival gates and matching legs
+-- ============================================================
 
 local function GateTextMatches(expected, actual)
     expected = NormalizeZoneText(expected)
@@ -661,6 +716,10 @@ local function GateTextMatches(expected, actual)
 end
 
 local function ArrivalGateMatches(leg)
+    if leg and (leg.sanctumContinuation
+            or leg.sanctumDestination and not Sanctum.AtDestination(leg.sanctumDestination)) then
+        return false
+    end
     local gate = type(leg) == "table" and leg.arrivalGate or nil
     if type(gate) ~= "table" then
         return true
@@ -698,6 +757,13 @@ local function FindMatchingLegIndex(legs, previousLeg)
     end
     for index = 1, #legs do
         if GetLegSignature(legs[index]) == previousSig then
+            -- A matching endpoint does not establish that the incoming
+            -- walking section is unchanged. Preserving it can jump over
+            -- freshly inserted road/terrain legs after a preference change.
+            if previousLeg.routeGeometryKey ~= legs[index].routeGeometryKey
+                and (previousLeg.routeGeometryKey or legs[index].routeGeometryKey) then
+                return nil
+            end
             -- Do not let a temporary direct/fallback destination leg skip a
             -- newly available route plan. This was the failure mode where a
             -- guide target first planned as one final destination, then a
@@ -774,20 +840,16 @@ local function PreservePreviousSpecialActionLeg(legs, previousLeg)
     return nil
 end
 
+-- ============================================================
+-- Fallback legs and plan normalization
+-- ============================================================
+
 local function MakeFallbackLeg(record)
     local mapID, x, y, title = ResolveAuthorityDestination(record)
     if type(mapID) ~= "number" or type(x) ~= "number" or type(y) ~= "number" then
         return nil
     end
-    return {
-        mapID = mapID,
-        x = x,
-        y = y,
-        title = title,
-        kind = "destination",
-        routeLegKind = "destination",
-        source = record and record.backend or "direct",
-    }
+    return NS.RouteSpecials.MakeDestinationLeg(record and record.backend or "direct", mapID, x, y, title)
 end
 
 local function MakeDirectDestinationLeg(record, backendID)
@@ -818,7 +880,7 @@ local function LegRequiresHardTransition(leg)
     if IsEquipmentSpecialAction(leg.specialAction) then
         return true
     end
-    if type(leg.arrivalGate) == "table" then
+    if leg.sanctumCrossing or type(leg.arrivalGate) == "table" or leg.leaveInstanceMapID or leg.transportDestination then
         return true
     end
     if leg.kind == "entrance" then
@@ -899,7 +961,7 @@ local function ShouldCollapseCurrentMapSetupRoute(record, legs, reason)
     end
 
     -- Current-map plans that leave the target map are backend detours. Only
-    -- the first presented local leg can block collapse; later off-map gates
+    -- the first presented local leg can block collapse, later off-map gates
     -- belong to the detour we are intentionally discarding.
     if FindFirstOffTargetMapLegIndex(legs, targetMapID) then
         return not LegRequiresHardTransition(firstLeg)
@@ -916,6 +978,11 @@ local function ShouldCollapseCurrentMapSetupRoute(record, legs, reason)
 end
 
 local function NormalizeAcceptedLegs(record, backendID, legs, reason)
+    local backend = GetBackendObject(backendID)
+    if backend and backend.preserveItinerary then return legs end
+    for _, leg in ipairs(legs) do
+        if leg.fixedWalkingGeometry or leg.sanctumCrossing then return legs end
+    end
     if ShouldCollapseCurrentMapSetupRoute(record, legs, reason) then
         local directLeg = MakeDirectDestinationLeg(record, backendID)
         if directLeg then
@@ -925,14 +992,19 @@ local function NormalizeAcceptedLegs(record, backendID, legs, reason)
     return legs
 end
 
-local function ClearRecordPlan(record)
+local function ClearRecordPlan(record, reason)
     if type(record) ~= "table" then
         return
     end
+    NS.Internal.RouteWalking.Forget(record)
+    if record._routePlanning then NS.CancelRoutePlanning(record) end
+    record._routePlanningResume = nil
     if type(NS.CancelRouteEquipmentTransaction) == "function" then
-        NS.CancelRouteEquipmentTransaction(record, "clear_record_plan")
+        NS.CancelRouteEquipmentTransaction(record, reason or "clear_record_plan")
     end
     ClearRouteTravelDependencies(record)
+    NS.CancelRouteBackendStateValidations(record.backend, record)
+    record.replanReason = nil
     record.legs = nil
     record.currentLegIndex = nil
     record.currentLeg = nil
@@ -940,6 +1012,7 @@ local function ClearRecordPlan(record)
     record._corePlanning = nil
     record._coreRoutePending = nil
     record.planFingerprint = nil
+    record.hasSanctumCrossing = nil
     record._routeBackendStateFingerprint = nil
     record.lastPlanSkippedAt = nil
     record.lastPlanSkipReason = nil
@@ -950,11 +1023,28 @@ local function ClearRecordPlan(record)
     record.routeOutcomeAt = nil
 end
 
+NS.ClearAcceptedRoutePlan = ClearRecordPlan
+
+-- ============================================================
+-- Destination signatures and plan fingerprints
+-- ============================================================
+
 local function FormatPlanCoord(value)
     if type(value) == "number" then
         return string.format("%.5f", value)
     end
     return "-"
+end
+
+local function BuildValidationDestinationSignature(record)
+    local mapID, x, y, title = ResolveAuthorityDestination(record)
+    return table.concat({
+        tostring(mapID or "-"),
+        FormatPlanCoord(x),
+        FormatPlanCoord(y),
+        tostring(title or "-"),
+        tostring(record and record.sig or "-"),
+    }, "/")
 end
 
 local function BuildAuthorityTargetSignature(mapID, x, y, title, guideTarget)
@@ -965,6 +1055,7 @@ local function BuildAuthorityTargetSignature(mapID, x, y, title, guideTarget)
         tostring(title or "-"),
         tostring(type(guideTarget) == "table" and guideTarget.guideProvider or "-"),
         tostring(type(guideTarget) == "table" and guideTarget.rawTitle or "-"),
+        tostring(type(guideTarget) == "table" and guideTarget.guideStepIdentity or "-"),
         tostring(type(guideTarget) == "table" and guideTarget.source or "-"),
     }, "|")
 end
@@ -1017,9 +1108,16 @@ local function FingerprintTaxi(taxi)
         return "-"
     end
     return table.concat({
+        tostring(taxi.sourceNodeID or "-"),
         tostring(taxi.nodeID or "-"),
         tostring(taxi.operator or "-"),
         tostring(taxi.final == true),
+        FingerprintCoords(taxi.destination),
+        FingerprintCoords(taxi.departure),
+        tostring(taxi.name or "-"),
+        tostring(taxi.offerSerial or "-"),
+        tostring(taxi.offerMap or "-"),
+        tostring(taxi.offerSource or "-"),
     }, "/")
 end
 
@@ -1027,7 +1125,7 @@ local function FingerprintLeg(leg)
     if type(leg) ~= "table" then
         return "-"
     end
-    return table.concat({
+    local parts = {
         tostring(leg.mapID or "-"),
         FormatPlanCoord(leg.x),
         FormatPlanCoord(leg.y),
@@ -1037,11 +1135,23 @@ local function FingerprintLeg(leg)
         tostring(leg.routeLegKind or "-"),
         tostring(leg.routeTravelType or "-"),
         tostring(leg.arrivalRadius or "-"),
+        tostring(leg.navigationHeight), tostring(leg.navigationContinent),
         FingerprintCoords(leg.activationCoords),
         FingerprintGate(leg.arrivalGate),
+        tostring(leg.leaveInstanceMapID or "-"),
+        FingerprintCoords(leg.transportDestination),
         FingerprintSpecialAction(leg.specialAction),
         FingerprintTaxi(leg.taxi),
-    }, ":")
+        tostring(leg.routeGeometryKey or "-"),
+        tostring(leg.preservePlanOnArrival == true),
+    }
+    if leg.sanctumCrossing then
+        parts[#parts + 1] = leg.sanctumCrossing.id
+        parts[#parts + 1] = leg.sanctumResume and "resume" or "continue"
+    end
+    if leg.sanctumDestination then parts[#parts + 1] = leg.sanctumDestination end
+    if leg.sanctumContinuation then parts[#parts + 1] = "sanctum_pending" end
+    return table.concat(parts, ":")
 end
 
 local function BuildPlanFingerprint(record, backendID, legs)
@@ -1062,7 +1172,11 @@ local function BuildPlanFingerprint(record, backendID, legs)
     return table.concat(parts, "|")
 end
 
-function NS.AcceptBackendPlan(record, backendID, legs, reason, serial)
+-- ============================================================
+-- Accepting backend plans
+-- ============================================================
+
+function NS.AcceptBackendPlan(record, backendID, legs, reason, serial, install)
     if type(record) ~= "table" then
         return false
     end
@@ -1075,6 +1189,12 @@ function NS.AcceptBackendPlan(record, backendID, legs, reason, serial)
     acceptedLegs = NormalizeAcceptedLegs(record, backendID, acceptedLegs, reason)
     if type(acceptedLegs) ~= "table" or #acceptedLegs == 0 then
         return false
+    end
+
+    if record.authority == "guide" and record.target then
+        for _, leg in ipairs(acceptedLegs) do
+            NS.ApplyGuideDestinationPresentation(leg, record.target)
+        end
     end
 
     local outcome = ClassifyRouteOutcome(record, backendID, acceptedLegs, reason)
@@ -1092,6 +1212,15 @@ function NS.AcceptBackendPlan(record, backendID, legs, reason, serial)
         return false
     end
 
+    local firstCrossing
+    if Sanctum then
+        for index, leg in ipairs(acceptedLegs) do
+            if leg.sanctumCrossing then
+                firstCrossing = index; break
+            end
+        end
+    end
+    local final = acceptedLegs[#acceptedLegs]
     local previousLeg = record.currentLeg
     local resetLeg = record._coreResetLegOnNextPlan == true
     local preservedActionLegIndex = nil
@@ -1126,6 +1255,7 @@ function NS.AcceptBackendPlan(record, backendID, legs, reason, serial)
         record.lastPlanSkippedFingerprint = planFingerprint
         record._coreResetLegOnNextPlan = nil
         MarkRouteOutcome(record, outcome, reason)
+        if install then install(record) end
         CompletePendingManualRoute(record, outcome, reason)
         if record.authority == "guide" and type(NS.SyncGuideQueueProjection) == "function" then
             SafeCall(NS.SyncGuideQueueProjection, record)
@@ -1135,7 +1265,9 @@ function NS.AcceptBackendPlan(record, backendID, legs, reason, serial)
     end
 
     record.backend = backendID or record.backend
+    NS.Internal.RouteWalking.Forget(record)
     record.legs = acceptedLegs
+    record.hasSanctumCrossing = firstCrossing ~= nil or final.sanctumDestination ~= nil or nil
     record.planSerial = serial or record.planSerial
     record.planFingerprint = planFingerprint
     record._routeAcceptedPlanGeneration = (tonumber(record._routeAcceptedPlanGeneration) or 0) + 1
@@ -1155,6 +1287,10 @@ function NS.AcceptBackendPlan(record, backendID, legs, reason, serial)
             or FindMatchingSpecialActionLegIndex(acceptedLegs, previousLeg)
             or FindMatchingLegIndex(acceptedLegs, previousLeg)
     end
+    if firstCrossing and record.currentLegIndex and record.currentLegIndex > firstCrossing
+        and not Sanctum.HasArrived(acceptedLegs[firstCrossing].sanctumCrossing) then
+        record.currentLegIndex = nil
+    end
     -- Gate regression safety: FindMatchingLegIndex may preserve a leg whose
     -- arrival gate the player no longer satisfies (e.g. matched a portal leg
     -- that requires being indoors, but player is now outside). Reset to leg 1
@@ -1164,6 +1300,7 @@ function NS.AcceptBackendPlan(record, backendID, legs, reason, serial)
             record.currentLegIndex = nil
         end
     end
+    if install then install(record) end
     if type(NS.SyncRouteEquipmentTransaction) == "function" then
         local retainedLeg = record.currentLegIndex and acceptedLegs[record.currentLegIndex] or nil
         NS.SyncRouteEquipmentTransaction(record, retainedLeg and retainedLeg.specialAction or nil)
@@ -1183,54 +1320,58 @@ function NS.AcceptBackendPlan(record, backendID, legs, reason, serial)
     return true
 end
 
+local function IsRouteActionTransactionLocked()
+    return state.routing.specialActionCasting == true
+        or (type(NS.IsRouteEquipmentTransactionActive) == "function" and NS.IsRouteEquipmentTransactionActive())
+end
+
+NS.RoutePlanningCore = {
+    GetActiveRecord = GetActiveRouteRecord,
+    GetTime = GetTimeSafe,
+    GetValidationDestinationSignature = BuildValidationDestinationSignature,
+    IsActionTransactionLocked = IsRouteActionTransactionLocked,
+    DependencyKey = RouteDependencyKey,
+    GetDestination = ResolveAuthorityDestination,
+    IsValidLeg = IsValidLeg,
+    CompletePendingManualRoute = CompletePendingManualRoute,
+}
+
+-- ============================================================
+-- Switching the routing backend
+-- ============================================================
+
 -- Switch backend live. Tears down old backend's state, switches the DB
 -- key, re-plans whichever authority is active, and recomputes.
 function NS.SetBackend(newID)
     local db = NS.GetDB()
     if not db then return false end
-    if newID ~= "zygor" and newID ~= "mapzeroth" and newID ~= "farstrider" and newID ~= "direct" then
+    if not GetBackendObject(newID) then
         return false
     end
 
-    local oldEffective = ResolveEffectiveBackend()
-    db.routingBackend = newID
-    state.routing.selectedBackend = newID
-
-    -- Tear down old backend's per-record scratch.
-    if oldEffective and type(oldEffective.Clear) == "function" then
-        SafeCall(oldEffective.Clear, state.routing.manualAuthority, "backend_change")
-        SafeCall(oldEffective.Clear, state.routing.guideRouteState, "backend_change")
-        if type(state.routing.guideRouteStates) == "table" then
-            for _, guideState in pairs(state.routing.guideRouteStates) do
-                if guideState ~= state.routing.guideRouteState then
-                    SafeCall(oldEffective.Clear, guideState, "backend_change")
-                end
-            end
-        end
+    CancelPendingManualRoute("backend_change")
+    local function clear(record)
+        if not record then return end
+        local old = GetBackendObject(record.backend)
+        if old and old.Clear then old.Clear(record, "backend_change") else ClearRecordPlan(record, "backend_change") end
     end
-
-    -- Re-plan whichever authority is currently active under the new backend.
-    local newEffective = ResolveEffectiveBackend()
-    if state.routing.manualAuthority and newEffective and type(newEffective.PlanRoute) == "function" then
-        local ma = state.routing.manualAuthority
-        ma.backend = newEffective.id
-        SafeCall(newEffective.PlanRoute, ma, ma.mapID, ma.x, ma.y, ma.title, ma.meta)
+    clear(state.routing.manualAuthority)
+    if state.routing.guideRouteStates then
+        for _, record in pairs(state.routing.guideRouteStates) do clear(record) end
+    else
+        clear(state.routing.guideRouteState)
     end
-    if state.routing.guideRouteState and state.routing.guideRouteState.target
-        and newEffective and type(newEffective.PlanRoute) == "function"
-    then
-        local gt = state.routing.guideRouteState.target
-        state.routing.guideRouteState.backend = newEffective.id
-        SafeCall(newEffective.PlanRoute, state.routing.guideRouteState, gt.mapID, gt.x, gt.y, gt.title, nil)
-    end
+    db.routingBackend, state.routing.selectedBackend = newID, newID
+    local active = NS.GetActiveAuthorityRecord()
+    if active then NS.RequestRoutePlan(active, newID, active.meta, "initial") end
 
     NS.RecomputeCarrier()
     return true
 end
 
--- ------------------------------------------------------------
--- Routing entrypoint
--- ------------------------------------------------------------
+-- ============================================================
+-- Routing requests
+-- ============================================================
 
 function NS.RouteViaBackend(mapID, x, y, title, meta, opts)
     if type(mapID) ~= "number" or type(x) ~= "number" or type(y) ~= "number" then
@@ -1238,10 +1379,14 @@ function NS.RouteViaBackend(mapID, x, y, title, meta, opts)
     end
     if NS.IsRoutingEnabled and NS.IsRoutingEnabled() == false then return false end
 
-    local backend = ResolveEffectiveBackend(opts)
+    local authority = opts and opts.authority or "manual"
+    local explicitBackend = authority == "manual" and NS.GetRouteBackendOverride(meta)
+    local preferred = explicitBackend or opts and opts.backendOverride or NS.GetSelectedBackendID()
+    local backend = GetBackendObject(preferred)
     if not backend then return false end
 
-    local authority = opts and opts.authority or "manual"
+    if authority == "manual" and NS.Internal.ServiceSearch then NS.Internal.ServiceSearch.Cancel() end
+
     if authority == "manual"
         and not (type(opts) == "table" and type(opts.queueContext) == "table")
         and type(NS.HandleManualQueueRoutingPolicy) == "function"
@@ -1264,37 +1409,16 @@ function NS.RouteViaBackend(mapID, x, y, title, meta, opts)
             ClearRecordPlan(gs)
             gs._coreTargetSignature = targetSig
         end
-        gs.target = gs.target or {}
-        gs.target.mapID = mapID
-        gs.target.x     = x
-        gs.target.y     = y
-        gs.target.title = title
-        gs.target.kind  = type(guideTarget) == "table" and (guideTarget.kind or "guide_goal") or "guide_goal"
-        gs.target.source = type(guideTarget) == "table" and guideTarget.source or nil
-        gs.target.rawTitle = type(guideTarget) == "table" and guideTarget.rawTitle or nil
-        gs.target.subtext = type(guideTarget) == "table" and guideTarget.subtext or nil
-        gs.target.guideProvider = providerKey
-        gs.target.liveRouteLegKind = type(guideTarget) == "table" and guideTarget.liveRouteLegKind or nil
-        gs.suppressed   = false
-        gs.backend = backend.id
-        gs.authority = "guide"
-        gs.guideProvider = providerKey
-        gs.guideSource = gs.target.source
-        gs.rawTitle = gs.target.rawTitle
-        gs.subtext = gs.target.subtext
-        gs.liveRouteLegKind = gs.target.liveRouteLegKind
-        gs.semanticKind = type(guideTarget) == "table" and guideTarget.semanticKind or nil
-        gs.semanticQuestID = type(guideTarget) == "table" and guideTarget.semanticQuestID or nil
-        gs.semanticTravelType = type(guideTarget) == "table" and guideTarget.semanticTravelType or nil
-        gs.iconHintKind = type(guideTarget) == "table" and guideTarget.iconHintKind or nil
-        gs.iconHintQuestID = type(guideTarget) == "table" and guideTarget.iconHintQuestID or nil
+        NS.SetGuideRouteTarget(gs, type(guideTarget) == "table" and guideTarget or {}, providerKey, mapID, x, y, title)
+        gs.suppressed                               = false
+        gs.authority                                = "guide"
         state.routing.guideRouteStates[providerKey] = gs
-        state.routing.activeGuideProvider = providerKey
+        state.routing.activeGuideProvider           = providerKey
         if type(NS.SetActiveRouteSource) == "function" then
             NS.SetActiveRouteSource("guide")
         end
         state.routing.guideRouteState = gs
-        SafeCall(backend.PlanRoute, gs, mapID, x, y, title, meta)
+        NS.RequestRoutePlan(gs, preferred, meta, "initial")
     else
         local queueContext = nil
         local queueTransaction = nil
@@ -1303,6 +1427,8 @@ function NS.RouteViaBackend(mapID, x, y, title, meta, opts)
         end
         local record = NS.BuildManualAuthorityRecord(mapID, x, y, title, meta, backend.id)
         if not record then return false end
+        if NS.ClearPendingGuideSelection then NS.ClearPendingGuideSelection() end
+        record._nativeMapWaypoint = opts and opts.nativeMapWaypoint
         if type(queueContext) == "table" then
             record.queueID = queueContext.queueID
             record.queueKind = queueContext.queueKind
@@ -1310,20 +1436,20 @@ function NS.RouteViaBackend(mapID, x, y, title, meta, opts)
             record.queueItemIndex = queueContext.queueItemIndex
             record.queueIsTransient = queueContext.queueIsTransient == true or nil
         end
-        local strictRouteSuccess = type(opts) == "table" and opts.strictRouteSuccess == true
+        local strictRouteSuccess = record.backendOverride ~= nil
+            or type(opts) == "table" and opts.strictRouteSuccess == true
             or type(queueContext) == "table" and queueContext.strictRouteSuccess == true
             or type(queueTransaction) == "table" and queueTransaction.strictRouteSuccess == true
         if strictRouteSuccess then
             local routing = state.routing
-            CancelPendingManualRoute("superseded")
             routing._pendingManualRouteSerial = (tonumber(routing._pendingManualRouteSerial) or 0) + 1
             record.strictRouteSuccess = true
             record._coreStrictRouteSuccess = true
             record._corePendingManualRoute = true
             record._corePendingRouteSerial = routing._pendingManualRouteSerial
             record._corePendingQueueTransaction = queueTransaction
-            routing.pendingManualAuthority = record
-            SafeCall(backend.PlanRoute, record, mapID, x, y, title, meta)
+            if not CancelPendingManualRoute("superseded", record) then NS.SetPendingManualAuthority(record) end
+            NS.RequestRoutePlan(record, preferred, meta, "initial")
             if record._corePendingManualRoute == true
                 and record._coreRoutePending ~= true
                 and record.routeOutcome == nil
@@ -1336,7 +1462,7 @@ function NS.RouteViaBackend(mapID, x, y, title, meta, opts)
         end
 
         CancelPendingManualRoute("manual_route")
-        SafeCall(backend.PlanRoute, record, mapID, x, y, title, meta)
+        NS.RequestRoutePlan(record, preferred, meta, "initial")
         if type(NS.CommitManualAuthority) == "function" then
             NS.CommitManualAuthority(record)
         end
@@ -1346,13 +1472,13 @@ function NS.RouteViaBackend(mapID, x, y, title, meta, opts)
     return true
 end
 
--- ------------------------------------------------------------
--- Carrier recompute single arbitration entrypoint
--- ------------------------------------------------------------
---
--- Push-driven on state change. Authority order is manual > guide > idle.
--- Dedupes against state.routing.lastPushedCarrierUID/Sig and
--- lastPushedOverlaySig so identical re-pushes are no-ops.
+-- ============================================================
+-- Choosing which route to display
+-- ============================================================
+
+-- A pending manual route can take over once it has legs to show. While it
+-- is still planning, a committed manual route can remain visible, but a
+-- guide cannot take over. Without manual input, show the visible guide.
 
 local function IsPresentablePendingManualAuthority(record)
     return type(record) == "table"
@@ -1373,9 +1499,8 @@ local function ArbitrateAuthority()
     if pending then
         return nil, nil
     end
-    local gs = type(NS.GetActiveGuideRouteState) == "function" and NS.GetActiveGuideRouteState() or routing.guideRouteState
-    if gs and gs.target and not gs.suppressed
-        and type(NS.GetGuideVisibilityState) == "function"
+    local gs = GetRoutableGuide()
+    if gs and type(NS.GetGuideVisibilityState) == "function"
         and NS.GetGuideVisibilityState(gs.guideProvider) == "visible"
     then
         return gs, "guide"
@@ -1399,12 +1524,23 @@ local function IsSameRouteCoord(aMapID, aX, aY, bMapID, bX, bY)
         and math.abs(aY - bY) <= ROUTE_COORD_TOLERANCE
 end
 
+-- ============================================================
+-- Active leg transitions and arrival
+-- ============================================================
+
 local function SetCoreLegIndex(record, index, reason)
     if type(record) ~= "table" or type(record.legs) ~= "table" or not IsValidLeg(record.legs[index]) then
         return false
     end
 
     local previousIndex = tonumber(record.currentLegIndex)
+    if record.hasSanctumCrossing and previousIndex and index > previousIndex then
+        for i = previousIndex, index - 1 do
+            if record.legs[i].sanctumCrossing and (reason ~= "sanctum_crossed" or i ~= previousIndex) then
+                return false
+            end
+        end
+    end
     local previousLeg = record.currentLeg
     local leg = record.legs[index]
     record.currentLegIndex = index
@@ -1419,8 +1555,93 @@ local function SetCoreLegIndex(record, index, reason)
         record._coreLastAdvancedLegSig = GetLegSignature(previousLeg)
         record._coreLastAdvanceReason = reason
         record._coreLastAdvanceAt = GetTimeSafe()
+        record._coreLastAdvancePreservesPlan = previousLeg and previousLeg.preservePlanOnArrival == true
+        if previousLeg and (previousLeg.kind == "portal" or previousLeg.kind == "taxi" or previousLeg.kind == "boat"
+                or previousLeg.kind == "ship" or previousLeg.kind == "tram" or previousLeg.kind == "zeppelin") then
+            NS.SignalPreferredRouteRecovery(nil, "travel_transition")
+        end
     end
     return previousIndex ~= index
+end
+
+local function RouteAreaNumber(value)
+    return CanAccessRouteValue(value) and type(value) == "number" and value == value and math.abs(value) < math.huge
+end
+
+-- Area arrival retires travel, never the guide objective. The guide owns the
+-- selected camp, walking away or selecting another camp restores travel.
+function NS.UpdateRouteDestinationArea(record, suppressRefresh)
+    if type(record) ~= "table" then return false, false end
+    if state.routing.specialActionCasting == true
+        or type(NS.IsRouteEquipmentTransactionActive) == "function" and NS.IsRouteEquipmentTransactionActive() then
+        return false, false
+    end
+    if record.hasSanctumCrossing then
+        for index = record.currentLegIndex or 1, #record.legs do
+            local leg = record.legs[index]
+            if leg.sanctumCrossing or leg.sanctumContinuation
+                or leg.sanctumDestination and not Sanctum.AtDestination(leg.sanctumDestination) then
+                return false, false
+            end
+        end
+    end
+    local target = type(record.target) == "table" and record.target or record
+    local area = target.navigationArea
+    local previous = record._routeDestinationAreaState
+    local backend = GetBackendObject(record.backend)
+    if type(area) ~= "table" or not RouteAreaNumber(area.radius) or area.radius <= 0
+        or not RouteAreaNumber(area.arrivalRadius) or area.arrivalRadius < 0 then
+        record._routeDestinationAreaState = nil
+        if previous and previous.arrived then
+            if backend and backend.OnDestinationAreaChanged then backend.OnDestinationAreaChanged(record, false) end
+            if not suppressRefresh then NS.ScheduleActiveRouteRefresh("destination_area_removed") end
+        end
+        return false, false
+    end
+    local map, x, y = ResolveAuthorityDestination(record)
+    if type(NS.GetPlayerWaypointDistance) ~= "function" then return false, false end
+    local same = previous and previous.id == area.id and previous.map == map and previous.x == x and previous.y == y
+    local height, continent
+    if backend and type(backend.GetDestinationAreaFloor) == "function" then
+        height, continent = backend.GetDestinationAreaFloor(record, area)
+    elseif type(UnitPosition) == "function" then
+        local ok, _, _, z, c = pcall(UnitPosition, "player")
+        if ok then
+            continent = RouteAreaNumber(c) and c or nil
+            if RouteAreaNumber(z) and z ~= 0 and continent == area.continent then height = z end
+        end
+    end
+    local far = RouteAreaNumber(continent) and RouteAreaNumber(area.continent) and continent ~= area.continent
+    local distance = NS.GetPlayerWaypointDistance(map, x, y)
+    if not far and (not RouteAreaNumber(distance) or distance < 0) then
+        return same and previous.arrived == true or false,
+            false
+    end
+    local observed = same and previous or { id = area.id, map = map, x = x, y = y, arrived = false }
+    record._routeDestinationAreaState = observed
+    local wasArrived = observed.arrived
+    local wrongFloor = RouteAreaNumber(height) and RouteAreaNumber(area.height) and math.abs(height - area.height) > 8
+    local limit = area.radius + area.arrivalRadius
+    if wasArrived then limit = limit + math.max(5, area.arrivalRadius * 0.5) end
+    observed.arrived, observed.distance = not far and not wrongFloor and distance <= limit, distance
+    local changed = false
+    if observed.arrived and type(record.legs) == "table" then
+        local last = #record.legs
+        local final = record.legs[last]
+        if final and final.routeLegKind == "destination" and IsSameRouteCoord(map, x, y, final.mapID, final.x, final.y)
+            and record.currentLeg ~= final then
+            changed = SetCoreLegIndex(record, last, "destination_area_arrival")
+            record._coreLastAdvancePreservesPlan = true
+        end
+    end
+    if backend and type(backend.OnDestinationAreaChanged) == "function"
+        and (changed or wasArrived ~= observed.arrived or not same and (observed.arrived or previous and previous.arrived)) then
+        backend.OnDestinationAreaChanged(record, observed.arrived)
+    end
+    if previous and (wasArrived or not same and previous.arrived) and not observed.arrived and not suppressRefresh then
+        NS.ScheduleActiveRouteRefresh("destination_area_left")
+    end
+    return observed.arrived, changed, wasArrived ~= observed.arrived
 end
 
 function NS.AdvanceActiveRouteAction(expectedIdentity, expectedGeneration, reason)
@@ -1434,6 +1655,89 @@ function NS.AdvanceActiveRouteAction(expectedIdentity, expectedGeneration, reaso
     local advanced = SetCoreLegIndex(record, index + 1, reason or "action_complete")
     if advanced and type(NS.RecomputeCarrier) == "function" then NS.RecomputeCarrier() end
     return advanced
+end
+
+function NS.RetainBackendPlan(record, backendID, reason)
+    if record and record._routePlanAttempt then
+        return NS.RouteSpecials.CompletePlan(record, backendID, "success", record.legs, reason, nil, "retained")
+    end
+    if type(record) ~= "table" or record.backend ~= backendID or type(record.legs) ~= "table" or #record.legs == 0 then return false end
+    record.lastPlanSkipStatus, record.lastPlanSkipReason = reason or "equivalent", reason
+    record.lastPlanSkippedAt = GetTimeSafe()
+    record._corePlanning, record._coreResetLegOnNextPlan = nil, nil
+    local churn = state.churn
+    if churn and churn.active then churn.routePlanSkip = (churn.routePlanSkip or 0) + 1 end
+    if record.routeOutcome ~= "planning" then
+        record._coreRoutePending = nil
+        record.planAcceptStatus = "equivalent"
+        CompletePendingManualRoute(record, record.routeOutcome or "success", reason)
+    end
+    return true
+end
+
+function NS.AdvanceActiveRouteLeg(record, expectedLeg, generation, reason)
+    if GetActiveRouteRecord() ~= record or record.currentLeg ~= expectedLeg
+        or record._routeAcceptedPlanGeneration ~= generation then
+        return false
+    end
+    local index = tonumber(record.currentLegIndex) or 1
+    if not record.legs or index >= #record.legs then return false end
+    return SetCoreLegIndex(record, index + 1, reason or "backend_arrival")
+end
+
+-- Commit one proven prefix, so pins and presentation see only its final index.
+function NS.AdvanceActiveWalkingLegs(record, expectedLeg, generation, nextIndex, reason)
+    if GetActiveRouteRecord() ~= record or record.currentLeg ~= expectedLeg
+        or record._routeAcceptedPlanGeneration ~= generation
+        or NS.Internal.RouteProgress.IsBlocked(record) then
+        return false
+    end
+    local index, walking = record.currentLegIndex or 1, expectedLeg.walking
+    if not walking or nextIndex <= index or nextIndex > math.min(#record.legs, index + 128) then return false end
+    for i = index, nextIndex - 1 do
+        local leg = record.legs[i]
+        local point = leg.walking
+        if not point or point.group ~= walking.group or point.required or leg.specialAction
+            or leg.arrivalGate or leg.sanctumCrossing or leg.routeLegKind == "destination" then
+            return false
+        end
+    end
+    return SetCoreLegIndex(record, nextIndex, reason)
+end
+
+-- Refine an accepted walking section without replaying completed travel legs
+-- or allowing a late asynchronous search to replace a different route.
+function NS.ReplaceActiveRouteLegs(record, expectedLeg, generation, replacements, lastLeg)
+    if GetActiveRouteRecord() ~= record or record.currentLeg ~= expectedLeg
+        or record._routeAcceptedPlanGeneration ~= generation or _G.InCombatLockdown()
+        or NS.Internal.RouteProgress and NS.Internal.RouteProgress.IsBlocked() then
+        return false
+    end
+    local index = tonumber(record.currentLegIndex) or 1
+    if type(record.legs) ~= "table" or record.legs[index] ~= expectedLeg
+        or type(replacements) ~= "table" or #replacements == 0 then
+        return false
+    end
+    local lastIndex = index
+    if lastLeg then
+        while record.legs[lastIndex] and record.legs[lastIndex] ~= lastLeg do lastIndex = lastIndex + 1 end
+        if not record.legs[lastIndex] then return false end
+    end
+    if record.hasSanctumCrossing then
+        for i = index, lastIndex do
+            if record.legs[i].sanctumCrossing or record.legs[i].sanctumContinuation then return false end
+        end
+    end
+    local legs = {}
+    for i = 1, index - 1 do legs[#legs + 1] = record.legs[i] end
+    for _, leg in ipairs(replacements) do
+        if not IsValidLeg(leg) then return false end
+        legs[#legs + 1] = leg
+    end
+    for i = lastIndex + 1, #record.legs do legs[#legs + 1] = record.legs[i] end
+    if not NS.AcceptBackendPlan(record, record.backend, legs, record.backend .. "_plan") then return false end
+    SetCoreLegIndex(record, index, "walking_path")
+    return true
 end
 
 local function EnsureCoreLeg(record)
@@ -1467,7 +1771,12 @@ local function EnsureCoreLeg(record)
 end
 
 local function ResolveLegToCarry(record)
-    return EnsureCoreLeg(record)
+    local leg = EnsureCoreLeg(record)
+    -- The final point remains available to the queue. Until the same planner
+    -- provides the onward route, the continuation isn't a navigation leg.
+    if leg and leg.sanctumContinuation then return end
+    local backend = leg and GetBackendObject(record.backend)
+    return backend and backend.GetCarrierLeg and backend.GetCarrierLeg(record, leg) or leg
 end
 
 local function GetPlayerMapIDSafe()
@@ -1493,7 +1802,7 @@ local function ShouldAdvanceByDistance(leg)
     end
 
     local distance = NS.GetPlayerWaypointDistance(leg.mapID, leg.x, leg.y)
-    if type(distance) ~= "number" then
+    if not RouteAreaNumber(distance) then
         return false
     end
 
@@ -1518,6 +1827,11 @@ local function AdvanceToPlayerMapLeg(record, currentIndex, playerMapID)
 end
 
 local function AdvanceAuthorityLeg(record, reason)
+    local backend = record and GetBackendObject(record.backend)
+    if backend and backend.CanAdvanceLeg and record.currentLeg
+        and backend.CanAdvanceLeg(record, record.currentLeg) == false then
+        return false
+    end
     local leg = EnsureCoreLeg(record)
     if type(leg) ~= "table" or not IsValidLeg(leg) or type(record.legs) ~= "table" then
         return false
@@ -1533,9 +1847,31 @@ local function AdvanceAuthorityLeg(record, reason)
     local previousMapID = record._coreLastPlayerMapID
     record._coreLastPlayerMapID = playerMapID
 
+    if leg.leaveInstanceMapID then
+        if type(GetInstanceInfo) ~= "function" then return false end
+        local _, _, _, _, _, _, _, instanceMapID = GetInstanceInfo()
+        if not CanAccessRouteValue(instanceMapID) or type(instanceMapID) ~= "number"
+            or instanceMapID == leg.leaveInstanceMapID then
+            return false
+        end
+        return SetCoreLegIndex(record, currentIndex + 1, "left_instance")
+    end
+
+    local transportDestination = leg.transportDestination
+    if transportDestination then
+        if type(NS.GetPlayerWaypointDistance) ~= "function" then return false end
+        local distance = NS.GetPlayerWaypointDistance(transportDestination.mapID, transportDestination.x,
+            transportDestination.y)
+        if not RouteAreaNumber(distance) or distance > (leg.arrivalRadius or DEFAULT_MOVEMENT_RADIUS_YARDS) then return false end
+        local boardingDistance = NS.GetPlayerWaypointDistance(leg.mapID, leg.x, leg.y)
+        if RouteAreaNumber(boardingDistance) and boardingDistance <= distance then return false end
+        return SetCoreLegIndex(record, currentIndex + 1, "transport_arrival")
+    end
+
     if type(playerMapID) == "number"
         and type(previousMapID) == "number"
         and playerMapID ~= previousMapID
+        and (not leg.preservePlanOnArrival or leg.kind == "entrance")
         and AdvanceToPlayerMapLeg(record, currentIndex, playerMapID)
     then
         return true
@@ -1557,147 +1893,9 @@ local function AdvanceAuthorityLeg(record, reason)
     return false
 end
 
-function NS.PollNeutralRouteLeg(record, reason)
-    return AdvanceAuthorityLeg(record, reason or "backend_poll")
-end
-
-local function ResolveCarrierSemanticKind(authority, source, leg)
-    if type(leg) ~= "table" then
-        return source == "guide" and "guide" or "manual", "destination"
-    end
-
-    if leg.kind == "corpse" then
-        return "corpse", "destination"
-    end
-
-    if leg.routeLegKind == "destination" then
-        return source == "guide" and "guide" or "manual", "destination"
-    end
-
-    if leg.routeLegKind == "carrier" then
-        return "route", "carrier"
-    end
-
-    local destMapID, destX, destY = ResolveAuthorityDestination(authority)
-    if IsSameRouteCoord(leg.mapID, leg.x, leg.y, destMapID, destX, destY) then
-        return source == "guide" and "guide" or "manual", "destination"
-    end
-
-    if type(leg.kind) == "string"
-        and leg.kind ~= ""
-        and leg.kind ~= "destination"
-        and leg.kind ~= "guide_goal"
-    then
-        return "route", "carrier"
-    end
-
-    return "route", "carrier"
-end
-
-local function NormalizeCarrierRouteTravelType(leg)
-    if type(leg) ~= "table" then
-        return nil
-    end
-
-    local travelType = type(leg.routeTravelType) == "string" and leg.routeTravelType or nil
-    if travelType == "hearthstone" then
-        return "hearth"
-    end
-    if travelType == "carrier"
-        or travelType == "walk"
-        or travelType == "fly"
-        or travelType == "ship"
-        or travelType == "zeppelin"
-    then
-        return "travel"
-    end
-    if travelType then
-        return travelType
-    end
-
-    if leg.routeLegKind ~= "carrier" then
-        return nil
-    end
-    if leg.kind == "portal" or leg.kind == "taxi" then
-        return leg.kind
-    end
-    if leg.kind == "hearthstone" then
-        return "hearth"
-    end
-    return "travel"
-end
-
-local function BuildCarrierSignature(mapID, x, y)
-    if type(Signature) == "function" then
-        return Signature(mapID, x, y)
-    end
-    return string.format("%s:%s:%s", tostring(mapID), tostring(x), tostring(y))
-end
-
-local function EnsureCarrierStateWithoutTomTom(mapID, x, y, title)
-    local routing = state.routing
-    local sig = BuildCarrierSignature(mapID, x, y)
-    local carrier = type(routing.carrierState) == "table" and routing.carrierState or {}
-    if carrier.sig ~= sig then
-        carrier.uid = nil
-        carrier.overlayUID = nil
-    end
-    carrier.mapID = mapID
-    carrier.x = x
-    carrier.y = y
-    carrier.title = title
-    carrier.sig = sig
-    carrier.uid = nil
-    carrier.overlayUID = carrier.overlayUID or { fromAWPOverlayCarrier = true }
-    routing.carrierState = carrier
-    routing.lastPushedCarrierUID = nil
-    return carrier
-end
-
-local function ResolveCarrierPresentationTitle(
-    routing,
-    authority,
-    source,
-    leg,
-    fallbackTitle,
-    semanticKind,
-    routeLegKind,
-    destinationMapID,
-    destinationX,
-    destinationY,
-    destinationTitle
-)
-    if type(NS.ResolvePresentation) ~= "function" then
-        return fallbackTitle
-    end
-
-    local previousCarrier = routing.carrierState
-    local previewCarrier = {
-        mapID = leg.mapID,
-        x = leg.x,
-        y = leg.y,
-        title = fallbackTitle,
-        sig = BuildCarrierSignature(leg.mapID, leg.x, leg.y),
-        source = source,
-        kind = semanticKind,
-        routeLegKind = routeLegKind,
-        routeTravelType = NormalizeCarrierRouteTravelType(leg),
-        plannerLegKind = leg.kind or nil,
-        finalMapID = destinationMapID,
-        finalX = destinationX,
-        finalY = destinationY,
-        finalTitle = destinationTitle,
-    }
-
-    routing.carrierState = previewCarrier
-    local ok, presentation = pcall(NS.ResolvePresentation)
-    routing.carrierState = previousCarrier
-
-    if ok and type(presentation) == "table" and type(presentation.carrierTitle) == "string" and presentation.carrierTitle ~= "" then
-        return presentation.carrierTitle
-    end
-    return fallbackTitle
-end
+-- ============================================================
+-- Route refresh and backend invalidation
+-- ============================================================
 
 local function ReplanAuthority(record, reason)
     if type(record) ~= "table" then
@@ -1709,24 +1907,21 @@ local function ReplanAuthority(record, reason)
         return false
     end
 
-    local backend = GetBackendObject(record.backend) or ResolveEffectiveBackend()
-    if not backend or type(backend.PlanRoute) ~= "function" then
-        return false
+    local backend = GetBackendObject(record.backend)
+    if not backend then return false end
+    local crossing = record.currentLeg and record.currentLeg.sanctumCrossing
+    if crossing and NS.GetPlayerMapID() == crossing.mapID and not Sanctum.HasArrived(crossing) then return false end
+    if NS.UpdateRouteDestinationArea(record, true) and record.legs then
+        return NS.RetainBackendPlan(record, backend.id, "destination_area_arrived")
     end
-
-    record.backend = backend.id
     record._coreLastRefreshReason = reason
     record._coreLastRefreshAt = GetTimeSafe()
     if ShouldResetLegOnReplan(reason) then
         record._coreResetLegOnNextPlan = true
     end
-    SafeCall(backend.PlanRoute, record, mapID, x, y, title, BuildPlanMeta(record, reason))
-    return true
-end
-
-local function IsRouteActionTransactionLocked()
-    return state.routing.specialActionCasting == true
-        or (type(NS.IsRouteEquipmentTransactionActive) == "function" and NS.IsRouteEquipmentTransactionActive())
+    local session = record._routePlanning
+    return NS.RequestRoutePlan(record, session and session.preferred or NS.GetSelectedBackendID(),
+        BuildPlanMeta(record, reason), "refresh")
 end
 
 function NS.RefreshActiveRoutePlans(reason)
@@ -1740,14 +1935,7 @@ function NS.RefreshActiveRoutePlans(reason)
         end
         return false
     end
-    local record = routing.manualAuthority
-    if not record then
-        local gs = type(NS.GetActiveGuideRouteState) == "function" and NS.GetActiveGuideRouteState() or routing.guideRouteState
-        if gs and gs.target and not gs.suppressed then
-            record = gs
-        end
-    end
-    local replanned = ReplanAuthority(record, reason or "refresh")
+    local replanned = ReplanAuthority(GetActiveRouteRecord(), reason or "refresh")
     if replanned and type(NS.RecomputeCarrier) == "function" then
         NS.RecomputeCarrier()
     end
@@ -1810,6 +1998,7 @@ function NS.FlushDeferredRouteActionRefresh()
 end
 
 function NS.NoteRouteEnvironmentChanged(reason)
+    NS.NoteRoutePlanningEnvironment(reason)
     local routing = state.routing
     routing._lastRouteEnvironmentChange = reason
     local shouldRefresh = ShouldRefreshForEnvironment(reason or "environment")
@@ -1840,14 +2029,7 @@ local function ShouldSuppressNoisyActionInvalidation(record, backendID, reason)
 end
 
 function NS.NoteRouteBackendInvalidated(backendID, reason)
-    local routing = state.routing
-    local record = routing.manualAuthority
-    if not record then
-        local gs = type(NS.GetActiveGuideRouteState) == "function" and NS.GetActiveGuideRouteState() or routing.guideRouteState
-        if gs and gs.target and not gs.suppressed then
-            record = gs
-        end
-    end
+    local record = GetActiveRouteRecord()
     if type(record) ~= "table" or record.backend ~= backendID then
         return false
     end
@@ -1883,311 +2065,9 @@ function NS.NoteRouteBackendInvalidated(backendID, reason)
     return true
 end
 
--- ------------------------------------------------------------
--- Backend-state validation coordinator
--- ------------------------------------------------------------
-
-local routeBackendValidators = {}
-state.routing.routeBackendValidation = state.routing.routeBackendValidation or {
-    pending = {},
-    dirty = {},
-    castDeferred = {},
-    serial = 0,
-}
-local routeValidation = state.routing.routeBackendValidation
-routeValidation.pending = routeValidation.pending or {}
-routeValidation.dirty = routeValidation.dirty or {}
-routeValidation.castDeferred = routeValidation.castDeferred or {}
-routeValidation.serial = tonumber(routeValidation.serial) or 0
-
-local function IsCombatLocked()
-    return type(InCombatLockdown) == "function" and InCombatLockdown() == true
-end
-
-local function NoteRouteValidationChurn(backendID, key)
-    local churn = state.churn
-    if not churn or not churn.active then return end
-    churn.routeValidation = churn.routeValidation or {}
-    local counters = churn.routeValidation[backendID]
-    if type(counters) ~= "table" then
-        counters = {}
-        churn.routeValidation[backendID] = counters
-    end
-    counters[key] = (tonumber(counters[key]) or 0) + 1
-end
-
-local function BuildValidationDestinationSignature(record)
-    local mapID, x, y, title = ResolveAuthorityDestination(record)
-    return table.concat({
-        tostring(mapID or "-"),
-        FormatPlanCoord(x),
-        FormatPlanCoord(y),
-        tostring(title or "-"),
-        tostring(record and record.sig or "-"),
-    }, "/")
-end
-
-local function CaptureValidationRequest(record, backendID, reason, requestClass)
-    routeValidation.serial = (tonumber(routeValidation.serial) or 0) + 1
-    return {
-        serial = routeValidation.serial,
-        record = record,
-        backendID = backendID,
-        reason = reason,
-        requestClass = requestClass,
-        priority = ROUTE_VALIDATION_PRIORITY[requestClass] or ROUTE_VALIDATION_PRIORITY.structural,
-        destinationSignature = BuildValidationDestinationSignature(record),
-        planFingerprint = record.planFingerprint,
-        planGeneration = record._routeAcceptedPlanGeneration,
-    }
-end
-
-local function IsValidationRequestCurrent(request)
-    if type(request) ~= "table" then return false end
-    local record = GetActiveRouteRecord()
-    if not record or record ~= request.record then return false end
-    return record.backend == request.backendID
-        and record.planFingerprint == request.planFingerprint
-        and record._routeAcceptedPlanGeneration == request.planGeneration
-        and BuildValidationDestinationSignature(record) == request.destinationSignature
-end
-
-local function MergeValidationRequest(existing, incoming)
-    if incoming.priority > existing.priority then
-        existing.priority = incoming.priority
-        existing.requestClass = incoming.requestClass
-        existing.reason = incoming.reason
-    end
-    return existing
-end
-
-local function DeferValidationForCombat(request)
-    local backendID = request.backendID
-    local dirty = routeValidation.dirty[backendID]
-    if dirty then
-        MergeValidationRequest(dirty, request)
-        NoteRouteValidationChurn(backendID, "coalesced")
-    else
-        routeValidation.dirty[backendID] = request
-    end
-    NoteRouteValidationChurn(backendID, "combatDeferred")
-end
-
-local function DeferValidationForCast(request)
-    local backendID = request.backendID
-    local deferred = routeValidation.castDeferred[backendID]
-    if deferred then
-        MergeValidationRequest(deferred, request)
-        NoteRouteValidationChurn(backendID, "coalesced")
-    else
-        routeValidation.castDeferred[backendID] = request
-    end
-end
-
-local function ExecuteRouteBackendStateValidation(request)
-    local backendID = request.backendID
-    if IsCombatLocked() then
-        DeferValidationForCombat(request)
-        return
-    end
-    if IsRouteActionTransactionLocked() then
-        DeferValidationForCast(request)
-        return
-    end
-    if not IsValidationRequestCurrent(request) then
-        NoteRouteValidationChurn(backendID, "stale")
-        return
-    end
-
-    local registration = routeBackendValidators[backendID]
-    if type(registration) ~= "table" or type(registration.validator) ~= "function" then
-        NoteRouteValidationChurn(backendID, "failed")
-        return
-    end
-
-    NoteRouteValidationChurn(backendID, "executed")
-    local callOK, scanOK, fingerprint = pcall(
-        registration.validator,
-        request.record,
-        request.reason,
-        request.requestClass)
-    if not callOK or scanOK ~= true or type(fingerprint) ~= "string" then
-        NoteRouteValidationChurn(backendID, "failed")
-        request.record._coreLastBackendValidationError = callOK and tostring(fingerprint or "no_fingerprint") or tostring(scanOK)
-        request.record._coreLastBackendValidationErrorAt = GetTimeSafe()
-        return
-    end
-
-    local previous = request.record._routeBackendStateFingerprint
-    request.record._routeBackendStateFingerprint = fingerprint
-    request.record._coreLastBackendValidationError = nil
-    request.record._coreLastBackendValidationAt = GetTimeSafe()
-    request.record._coreLastBackendValidationReason = request.reason
-    if type(previous) ~= "string" or previous == fingerprint then
-        return
-    end
-
-    NoteRouteValidationChurn(backendID, "stateChanged")
-    NS.NoteRouteBackendInvalidated(backendID, backendID .. "_state_changed")
-end
-
-local function ScheduleValidationRequest(request, delay)
-    local backendID = request.backendID
-    routeValidation.pending[backendID] = request
-    NS.After(delay or 0, function()
-        if request.cancelled or routeValidation.pending[backendID] ~= request then
-            return
-        end
-        routeValidation.pending[backendID] = nil
-        ExecuteRouteBackendStateValidation(request)
-    end)
-end
-
-local function ProbeRouteDependencies(record, backendID)
-    local registration = routeBackendValidators[backendID]
-    local probe = type(registration) == "table" and registration.dependencyProbe or nil
-    local dependencies = type(record._routeTravelDependencies) == "table"
-        and record._routeTravelDependencies
-        or nil
-    if type(probe) ~= "function" or type(dependencies) ~= "table" or #dependencies == 0 then
-        return false
-    end
-
-    local states = type(record._routeTravelDependencyStates) == "table"
-        and record._routeTravelDependencyStates
-        or {}
-    record._routeTravelDependencyStates = states
-    local changed = false
-    for index = 1, #dependencies do
-        local dependency = dependencies[index]
-        NoteRouteValidationChurn(backendID, "dependencyChecked")
-        local ok, result = pcall(probe, record, dependency)
-        if not ok or (result ~= "ready" and result ~= "unavailable") then
-            NoteRouteValidationChurn(backendID, "dependencyUnknown")
-        else
-            local key = dependency.key or RouteDependencyKey(dependency.kind, dependency.id)
-            local previous = states[key]
-            states[key] = result
-            if previous and previous ~= result then
-                changed = true
-                NoteRouteValidationChurn(backendID, "dependencyChanged")
-            end
-        end
-    end
-    return changed
-end
-
-function NS.RegisterRouteBackendStateValidator(backendID, validator, dependencyProbe)
-    if type(backendID) ~= "string" or backendID == "" or type(validator) ~= "function" then
-        return false
-    end
-    routeBackendValidators[backendID] = {
-        validator = validator,
-        dependencyProbe = type(dependencyProbe) == "function" and dependencyProbe or nil,
-    }
-    return true
-end
-
-function NS.RequestRouteBackendStateValidation(backendID, reason, requestClass)
-    local record = GetActiveRouteRecord()
-    if type(record) ~= "table" or record.backend ~= backendID or not routeBackendValidators[backendID] then
-        return false
-    end
-
-    requestClass = ROUTE_VALIDATION_PRIORITY[requestClass] and requestClass or "structural"
-    NoteRouteValidationChurn(backendID, "requested")
-
-    local combatLocked = IsCombatLocked()
-    if requestClass == "cooldown" and not combatLocked and not IsRouteActionTransactionLocked() then
-        if ProbeRouteDependencies(record, backendID) then
-            requestClass = "selected_action"
-        end
-    end
-
-    local incoming = CaptureValidationRequest(record, backendID, reason or "backend_state", requestClass)
-    local castDeferred = routeValidation.castDeferred[backendID]
-    if castDeferred then
-        routeValidation.castDeferred[backendID] = nil
-        MergeValidationRequest(incoming, castDeferred)
-        NoteRouteValidationChurn(backendID, "coalesced")
-    end
-
-    if combatLocked then
-        local pending = routeValidation.pending[backendID]
-        if pending then
-            pending.cancelled = true
-            routeValidation.pending[backendID] = nil
-            MergeValidationRequest(incoming, pending)
-            NoteRouteValidationChurn(backendID, "coalesced")
-        end
-        DeferValidationForCombat(incoming)
-        return true
-    end
-
-    if IsRouteActionTransactionLocked() then
-        local pending = routeValidation.pending[backendID]
-        if pending then
-            pending.cancelled = true
-            routeValidation.pending[backendID] = nil
-            MergeValidationRequest(incoming, pending)
-            NoteRouteValidationChurn(backendID, "coalesced")
-        end
-        DeferValidationForCast(incoming)
-        return true
-    end
-
-    local dirty = routeValidation.dirty[backendID]
-    if dirty then
-        routeValidation.dirty[backendID] = nil
-        MergeValidationRequest(incoming, dirty)
-        NoteRouteValidationChurn(backendID, "coalesced")
-    end
-
-    local pending = routeValidation.pending[backendID]
-    if pending then
-        NoteRouteValidationChurn(backendID, "coalesced")
-        if incoming.priority <= pending.priority then
-            return true
-        end
-        pending.cancelled = true
-        routeValidation.pending[backendID] = nil
-    end
-
-    local delay = incoming.requestClass == "cooldown" and ROUTE_VALIDATION_COOLDOWN_WINDOW_SECONDS or 0
-    ScheduleValidationRequest(incoming, delay)
-    return true
-end
-
-function NS.FlushDeferredRouteBackendStateValidations()
-    if IsCombatLocked() or IsRouteActionTransactionLocked() then return false end
-    local flushed = false
-    local function flushRequests(requests)
-        local companion = requests == routeValidation.dirty
-            and routeValidation.castDeferred
-            or routeValidation.dirty
-        for backendID, request in pairs(requests) do
-            requests[backendID] = nil
-            local other = companion[backendID]
-            if other then
-                companion[backendID] = nil
-                MergeValidationRequest(request, other)
-                NoteRouteValidationChurn(backendID, "coalesced")
-            end
-            local pending = routeValidation.pending[backendID]
-            if pending then
-                pending.cancelled = true
-                routeValidation.pending[backendID] = nil
-                MergeValidationRequest(request, pending)
-                NoteRouteValidationChurn(backendID, "coalesced")
-            end
-            ScheduleValidationRequest(request, 0)
-            flushed = true
-        end
-    end
-    flushRequests(routeValidation.dirty)
-    flushRequests(routeValidation.castDeferred)
-    return flushed
-end
+-- ============================================================
+-- Notify validators when a selected travel action is used
+-- ============================================================
 
 function NS.NotifyRouteTravelActionUsed(dependency, reason)
     local record = GetActiveRouteRecord()
@@ -2215,12 +2095,175 @@ local function ScheduleRefreshAfterAdvance(record)
     if type(record) ~= "table" or record.backend == "direct" then
         return
     end
+    if record._coreLastAdvancePreservesPlan then return end
     local advancedSig = record._coreLastAdvancedLegSig
     if type(advancedSig) ~= "string" or record._coreLastRefreshAdvanceSig == advancedSig then
         return
     end
     record._coreLastRefreshAdvanceSig = advancedSig
     NS.ScheduleActiveRouteRefresh(record._coreLastAdvanceReason or "leg_advance")
+end
+
+-- ============================================================
+-- Movement sampling and arrival monitoring
+-- ============================================================
+
+-- One scheduler owns movement observations. Backends retain coordinate,
+-- geometry, floor and asynchronous-search policy.
+local Progress = {
+    GetActiveRecord = GetActiveRouteRecord,
+    IsValidCoordinate = RouteAreaNumber,
+    GetTime = GetTimeSafe,
+    requests = setmetatable({}, { __mode = "k" }),
+}
+NS.Internal.RouteProgress = Progress
+
+function Progress.IsBlocked(record)
+    if Progress.frame and Progress.frame.loading or state.routing.specialActionCasting
+        or NS.IsRouteEquipmentTransactionActive and NS.IsRouteEquipmentTransactionActive() then
+        return true
+    end
+    -- Each terrain adapter opts in once it can follow accepted legs in combat.
+    if _G.InCombatLockdown() then
+        record = record or GetActiveRouteRecord()
+        local backend = record and GetBackendObject(record.backend)
+        return backend and not backend.canFollowRouteInCombat and backend.WantsNavigationProgress
+            and backend.WantsNavigationProgress(record) or false
+    end
+    return false
+end
+
+function Progress.EnsureLeg(record)
+    if record and (not record.currentLeg or not record.legs
+            or record.legs[record.currentLegIndex or 1] ~= record.currentLeg) then
+        EnsureCoreLeg(record)
+    end
+end
+
+function Progress.PollLeg(record, source, sampledMode, key, x, y, z, observedAt)
+    if not record or GetActiveRouteRecord() ~= record then return false end
+    if Progress.IsBlocked(record) then return false end
+    Progress.EnsureLeg(record)
+    local leg = record.currentLeg
+    if leg and (leg.sanctumContinuation
+            or leg.sanctumDestination and not ArrivalGateMatches(leg)) then
+        return false
+    end
+    if leg and leg.sanctumCrossing then
+        local generation = record._routeAcceptedPlanGeneration
+        if not Sanctum.HasArrived(leg.sanctumCrossing)
+            or not NS.AdvanceActiveRouteLeg(record, leg, generation, "sanctum_crossed") then
+            return false
+        end
+        if leg.sanctumResume then NS.ScheduleActiveRouteRefresh("sanctum_crossed") end
+        return true
+    end
+    if source == "guide" and NS.CheckGuideRouteDestinationReached then
+        NS.CheckGuideRouteDestinationReached(record, DEFAULT_MOVEMENT_RADIUS_YARDS)
+    end
+    if GetActiveRouteRecord() ~= record then return false end
+    local backend = GetBackendObject(record.backend)
+    local walking = NS.Internal.RouteWalking
+    local mode = sampledMode or walking.ReadMode()
+    if mode == "taxi" then
+        if backend and backend.StopNavigationProgress then
+            backend.StopNavigationProgress(record,
+                record._routeAcceptedPlanGeneration, "taxi")
+        end
+        return false
+    end
+    local db = NS.GetDB()
+    if walking.UpdateFlight(record, backend, mode, db and db.followGroundPathsWhileFlying == true) then return true end
+    local arrived, changed = NS.UpdateRouteDestinationArea(record)
+    if arrived then return changed end
+    if backend and backend.PollNavigationLeg then
+        local advanced, carrierChanged = backend.PollNavigationLeg(record, sampledMode ~= nil, key, x, y, z, observedAt)
+        if advanced or carrierChanged then return advanced, carrierChanged end
+    end
+    if GetActiveRouteRecord() ~= record then return false end
+    return AdvanceAuthorityLeg(record, source == "manual" and "manual_progress" or "guide_progress")
+end
+
+function Progress.CanFinishManualArrival(record)
+    local leg, backend = record.currentLeg, GetBackendObject(record.backend)
+    return not leg.sanctumCrossing and not IsExecutableSpecialAction(leg.specialAction) and ArrivalGateMatches(leg)
+        and not (backend and backend.CanAdvanceLeg and backend.CanAdvanceLeg(record, leg) == false)
+end
+
+function Progress.CheckManualArrival(arrival, mode)
+    if not arrival or Progress.IsBlocked() or (mode or NS.Internal.RouteWalking.ReadMode()) == "taxi" then return false end
+    return NS.CheckManualAuthorityArrival(arrival, Progress.CanFinishManualArrival)
+end
+
+function NS.RefreshManualArrivalMonitoring()
+    local record = ArbitrateAuthority()
+    local frame = Progress.frame
+    if record and frame and frame.record == record then
+        Progress.requests[record] = (Progress.requests[record] or 0) + 1
+    end
+    Progress.Refresh(record)
+end
+
+function NS.RequestRouteNavigationProgress(record, reason)
+    if not record or GetActiveRouteRecord() ~= record then return false end
+    Progress.requests[record] = (Progress.requests[record] or 0) + 1
+    Progress.lastWakeReason = reason
+    Progress.Refresh(record)
+    return true
+end
+
+-- ============================================================
+-- TomTom and overlay publication
+-- ============================================================
+
+-- Reuse the indexed TomTom waypoint and publish overlay changes by
+-- signature. Clear both when routing has no visible authority.
+
+local function ResolveCarrierSemanticKind(authority, source, leg)
+    if type(leg) ~= "table" then
+        return source == "guide" and "guide" or "manual", "destination"
+    end
+
+    local identity = type(authority) == "table" and authority.identity
+    if leg.kind == "corpse" or leg.routeLegKind == "destination"
+        and type(identity) == "table" and identity.destinationKind == "corpse" then
+        return "corpse", "destination"
+    end
+
+    if leg.routeLegKind == "destination" then
+        return source == "guide" and "guide" or "manual", "destination"
+    end
+
+    if leg.routeLegKind == "carrier" then
+        return "route", "carrier"
+    end
+
+    local destMapID, destX, destY = ResolveAuthorityDestination(authority)
+    if IsSameRouteCoord(leg.mapID, leg.x, leg.y, destMapID, destX, destY) then
+        return source == "guide" and "guide" or "manual", "destination"
+    end
+
+    if type(leg.kind) == "string"
+        and leg.kind ~= ""
+        and leg.kind ~= "destination"
+        and leg.kind ~= "guide_goal"
+    then
+        return "route", "carrier"
+    end
+
+    return "route", "carrier"
+end
+
+local function NormalizeCarrierRouteTravelType(leg)
+    if type(leg) ~= "table" then return nil end
+    return NS.ResolveCarrierTravelType(leg.routeTravelType, leg.routeLegKind, leg.kind)
+end
+
+local function BuildCarrierSignature(mapID, x, y)
+    if type(Signature) == "function" then
+        return Signature(mapID, x, y)
+    end
+    return string.format("%s:%s:%s", tostring(mapID), tostring(x), tostring(y))
 end
 
 local function RefreshFlightMapAssist()
@@ -2232,49 +2275,45 @@ end
 local function ClearCarrierPresentation()
     local routing = state.routing
     if routing.carrierState then NS.ClearCarrierWaypoint() end
+    if routing.carrierState then return end
     if type(NS.ClearPublishedQueuePins) == "function" then
         NS.ClearPublishedQueuePins()
     end
+    if routing.carrierState then return end
+    routing.presentationState = nil
     if routing.specialActionState then
         routing.specialActionState = nil
         if NS.DisarmSpecialActionButton then NS.DisarmSpecialActionButton() end
     end
-    if routing.lastPushedOverlaySig ~= nil then
+    if routing.lastPushedOverlayUID or routing.lastPushedOverlaySig ~= nil then
+        if routing.carrierState then return end
+        routing.lastPushedOverlaySig, routing.lastPushedOverlayUID = nil, nil
         if type(NS.SyncWorldOverlay) == "function" then
             SafeCall(NS.SyncWorldOverlay, nil, nil, nil, nil, nil, nil, nil, nil)
         end
-        routing.lastPushedOverlaySig = nil
     end
-    routing.presentationState = nil
     if type(NS.SyncGuideVisualState) == "function" then
         NS.SyncGuideVisualState()
     end
     RefreshFlightMapAssist()
 end
 
-local function PollCoreCurrentLeg(record, source)
-    return AdvanceAuthorityLeg(record, source == "manual" and "manual_progress" or "guide_progress")
-end
-
 function NS.RecomputeCarrier()
-    if _G.InCombatLockdown() then
-        state.routing.pendingCarrierRecompute = true
-        return
-    end
+    if NS.RefreshPolestarNavigationOwnership then NS.RefreshPolestarNavigationOwnership() end
     local routing = state.routing
     local authority, source = ArbitrateAuthority()
-    local advanced = PollCoreCurrentLeg(authority, source)
-    if source == "manual"
-        and authority == routing.manualAuthority
-        and type(NS.CheckManualAuthorityArrival) == "function"
-        and not routing._manualArrivalCheckActive
-    then
-        routing._manualArrivalCheckActive = true
-        local cleared = NS.CheckManualAuthorityArrival()
-        routing._manualArrivalCheckActive = false
-        if cleared then
-            return
-        end
+    NS.ReconcileRoutePlanning(authority, routing.pendingManualAuthority)
+    Progress.EnsureLeg(authority)
+    local monitor = Progress.frame
+    local consumed = authority and monitor and monitor.skipRecord == authority and
+        monitor.skipGeneration == authority._routeAcceptedPlanGeneration
+        and monitor.skipLeg == authority.currentLeg
+    if monitor then monitor.skipRecord, monitor.skipGeneration, monitor.skipLeg = nil, nil, nil end
+    local advanced = not consumed and Progress.PollLeg(authority, source) or false
+    local manualArrival = Progress.Refresh(authority)
+    if Progress.CheckManualArrival(manualArrival) then
+        Progress.Refresh(ArbitrateAuthority())
+        return
     end
     if advanced then
         ScheduleRefreshAfterAdvance(authority)
@@ -2292,14 +2331,15 @@ function NS.RecomputeCarrier()
         ClearCarrierPresentation()
         return
     end
-    if type(NS.SetActiveRouteSource) == "function" then
+    if not authority._corePendingManualRoute and type(NS.SetActiveRouteSource) == "function" then
         SafeCall(NS.SetActiveRouteSource, source)
     end
     local semanticKind, routeLegKind = ResolveCarrierSemanticKind(authority, source, leg)
     local destinationMapID, destinationX, destinationY, destinationTitle = ResolveAuthorityDestination(authority)
 
     -- Surface the active special action (if any) to state.routing.
-    routing.specialActionState = SanitizeSpecialAction(authority.specialAction) or SanitizeSpecialAction(leg.specialAction)
+    routing.specialActionState = SanitizeSpecialAction(authority.specialAction) or
+        SanitizeSpecialAction(leg.specialAction)
     local specialAction = type(routing.specialActionState) == "table" and routing.specialActionState or nil
     if specialAction and rawget(specialAction, "sig") == nil then
         local actionSig = nil
@@ -2315,55 +2355,53 @@ function NS.RecomputeCarrier()
         end
     end
 
-    -- Update carrier (TomTom waypoint + UID), with sig dedupe inside
-    -- PushCarrierWaypoint.
-    local rawTitle = leg.title or authority.title or destinationTitle
-    local title = ResolveCarrierPresentationTitle(
-        routing,
-        authority,
-        source,
-        leg,
-        rawTitle,
-        semanticKind,
-        routeLegKind,
-        destinationMapID,
-        destinationX,
-        destinationY,
-        destinationTitle
-    ) or rawTitle or "AWP Route"
-    local tomTomPushed = NS.PushCarrierWaypoint(leg.mapID, leg.x, leg.y, title, authority.meta)
-    if not tomTomPushed then
-        EnsureCarrierStateWithoutTomTom(leg.mapID, leg.x, leg.y, title)
-    end
-
-    -- carrierState.source/kind annotate where the carrier came from.
-    if routing.carrierState then
-        routing.carrierState.source = source
-        routing.carrierState.kind = semanticKind
-        routing.carrierState.title = title
-        routing.carrierState.authorityPending = authority._corePendingManualRoute == true or nil
-        routing.carrierState.routeLegKind = routeLegKind
-        routing.carrierState.routeTravelType = NormalizeCarrierRouteTravelType(leg)
-        routing.carrierState.plannerLegKind = leg.kind or nil
-        routing.carrierState.finalMapID = destinationMapID
-        routing.carrierState.finalX = destinationX
-        routing.carrierState.finalY = destinationY
-        routing.carrierState.finalTitle = destinationTitle
-    end
-
-    -- Resolve presentation before showing special actions so the secure
-    -- button and TomTom title both see the final mirrored title.
-    local presentation = NS.ResolvePresentation()
+    -- A pending manual request owns the displayed leg. Its queue and saved
+    -- destination change only when the planner accepts it.
+    local previous = routing.carrierState
+    local carrier = {
+        authority = authority,
+        authorityPending = authority._corePendingManualRoute == true or nil,
+        mapID = leg.mapID,
+        x = leg.x,
+        y = leg.y,
+        sig = BuildCarrierSignature(leg.mapID, leg.x, leg.y),
+        title = leg.title or authority.title or destinationTitle or "AWP Route",
+        source = source,
+        kind = semanticKind,
+        routeLegKind = routeLegKind,
+        routeTravelType = NormalizeCarrierRouteTravelType(leg),
+        plannerLegKind = leg.kind,
+        finalMapID = destinationMapID,
+        finalX = destinationX,
+        finalY = destinationY,
+        finalTitle = destinationTitle,
+    }
+    local presentation = NS.ResolvePresentation(carrier)
+    if routing.carrierState ~= previous then return end
+    carrier.title = presentation and presentation.carrierTitle or carrier.title
+    routing.carrierState = carrier
     routing.presentationState = presentation
+
+    -- TomTom can notify listeners synchronously. A replacement published
+    -- from a listener owns all subsequent queue, button and overlay updates.
+    local pushed = NS.PushCarrierWaypoint(carrier.mapID, carrier.x, carrier.y, carrier.title, authority.meta, previous)
+    if routing.carrierState ~= carrier then return end
+    if not pushed then
+        carrier.uid = nil
+        routing.lastPushedCarrierUID = nil
+    end
+    if not carrier.uid then
+        carrier.overlayUID = previous and previous.sig == carrier.sig and previous.overlayUID or
+            { fromAWPOverlayCarrier = true }
+    end
     if type(NS.SyncAuthorityQueueProjection) == "function" then
         SafeCall(NS.SyncAuthorityQueueProjection, authority, source)
     end
+    if routing.carrierState ~= carrier then return end
     if type(NS.PublishQueueProjectionPins) == "function" then
         SafeCall(NS.PublishQueueProjectionPins)
     end
-    if presentation and type(NS.RefreshCarrierWaypointTitle) == "function" then
-        SafeCall(NS.RefreshCarrierWaypointTitle, presentation.carrierTitle or title)
-    end
+    if routing.carrierState ~= carrier then return end
 
     -- Apply the special action (combat-safe via ApplySpecialAction).
     if routing.specialActionState then
@@ -2374,23 +2412,25 @@ function NS.RecomputeCarrier()
         if NS.DisarmSpecialActionButton then NS.DisarmSpecialActionButton() end
     end
 
-    -- Push to world overlay with sig dedupe.
-    if presentation and presentation.overlaySig ~= routing.lastPushedOverlaySig then
+    if routing.carrierState ~= carrier then return end
+
+    -- A TomTom reload can replace the actual pin at identical coordinates.
+    local overlayUID = carrier.uid or carrier.overlayUID
+    if presentation and (presentation.overlaySig ~= routing.lastPushedOverlaySig or overlayUID ~= routing.lastPushedOverlayUID) then
+        routing.lastPushedOverlaySig, routing.lastPushedOverlayUID = presentation.overlaySig, overlayUID
         if type(NS.SyncWorldOverlay) == "function" then
-            local cs = routing.carrierState
-            local overlayUID = cs and (cs.uid or cs.overlayUID or cs) or nil
             SafeCall(NS.SyncWorldOverlay,
                 overlayUID,
-                cs and cs.mapID or nil,
-                cs and cs.x or nil,
-                cs and cs.y or nil,
+                carrier.mapID,
+                carrier.x,
+                carrier.y,
                 presentation.overlayTitle,
                 source,
-                cs and cs.kind or nil,
+                carrier.kind,
                 presentation -- contentSnapshot: world_overlay reads what it needs
             )
         end
-        routing.lastPushedOverlaySig = presentation.overlaySig
+        if routing.carrierState ~= carrier then return end
     end
     if type(NS.SyncGuideVisualState) == "function" then
         NS.SyncGuideVisualState()
@@ -2398,30 +2438,38 @@ function NS.RecomputeCarrier()
     RefreshFlightMapAssist()
 end
 
--- ------------------------------------------------------------
--- Boot
--- ------------------------------------------------------------
+function NS.SetRoutingEnabled(enabled)
+    enabled = enabled == true
+    if not enabled and NS.Internal.ServiceSearch then NS.Internal.ServiceSearch.Cancel() end
+    NS.GetDB().routingEnabled = enabled
+    local mapzeroth = GetBackendObject("mapzeroth")
+    local syncOwnership = mapzeroth and mapzeroth.RefreshNativeNavigationOwnership
+    -- Hold the native prompt until AWP has released its carrier on disable.
+    if enabled and syncOwnership then syncOwnership() end
+    NS.RecomputeCarrier()
+    if not enabled and syncOwnership then syncOwnership() end
+end
+
+-- ============================================================
+-- Routing initialization
+-- ============================================================
 
 function NS.InitializeRoutingCore()
+    NS.InitializeRoutePlanning()
     local db = NS.GetDB()
     if db then
         state.routing.selectedBackend = db.routingBackend or "direct"
     end
 
-    local backends = {
-        NS.RoutingBackend_Direct,
-        NS.RoutingBackend_Zygor,
-        NS.RoutingBackend_Mapzeroth,
-        NS.RoutingBackend_Farstrider,
-    }
-    for index = 1, #backends do
-        local backend = backends[index]
+    for _, id in ipairs(BackendCatalog.initialization) do
+        local backend = GetBackendObject(id)
         if backend and type(backend.Initialize) == "function" then
             SafeCall(backend.Initialize)
         end
     end
 
     NS.TickUpdate = function()
+        if state.routing.queueAfterCorpse then NS.ResumeQueueAfterCorpse() end
         NS.RecomputeCarrier()
     end
 
@@ -2429,8 +2477,4 @@ function NS.InitializeRoutingCore()
         state.routing.cinematicActive = active and true or false
         NS.RecomputeCarrier()
     end
-
-    -- Once Zygor pointer is ready, start guide routing evaluation. The
-    -- ScheduleZygorPointerWork helper in init.lua already gates Zygor-
-    -- dependent work; we add ours through that channel via init.lua.
 end

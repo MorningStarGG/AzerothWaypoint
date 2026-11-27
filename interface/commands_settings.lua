@@ -1,3 +1,10 @@
+-- ============================================================
+-- Settings and queue commands
+-- ============================================================
+--
+-- Implements settings, repair and queue commands used by the slash command
+-- dispatcher.
+
 local NS = _G.AzerothWaypointNS
 local C = NS.Constants
 local state = NS.State
@@ -7,14 +14,11 @@ NS.Internal.Interface.commands = NS.Internal.Interface.commands or {}
 
 local M = NS.Internal.Interface.commands
 local ApplySkinAndScale = Options.ApplySkinAndScale
-local RefreshViewerChromeMode = Options.RefreshViewerChromeMode
+local BackendCatalog = NS.Internal.RoutingBackends
+local BACKEND_USAGE = BackendCatalog.Usage()
 
 state.commands = state.commands or {
     registered = false,
-    whoWhereFallbackHooked = false,
-    whoWhereSearchAdoptionSerial = 0,
-    vendorFallbackToken = 0,
-    pendingVendorFallback = nil,
 }
 
 -- ============================================================
@@ -23,134 +27,6 @@ state.commands = state.commands or {
 
 local function trim(s)
     return (s or ""):match("^%s*(.-)%s*$")
-end
-
-local function normalizeSearchText(s)
-    s = trim((s or ""):lower())
-    s = s:gsub("[%-%_]+", " ")
-    s = s:gsub("%s+", " ")
-    return s
-end
-
--- ============================================================
--- Search data
--- ============================================================
-
-local SEARCH_ALIASES = {
-    ["ah"] = { type = "Auctioneer", label = "Auctioneer" },
-    ["auction"] = { type = "Auctioneer", label = "Auctioneer" },
-    ["auctioneer"] = { type = "Auctioneer", label = "Auctioneer" },
-    ["auctioneers"] = { type = "Auctioneer", label = "Auctioneer" },
-    ["bank"] = { type = "Banker", label = "Banker" },
-    ["banker"] = { type = "Banker", label = "Banker" },
-    ["bankers"] = { type = "Banker", label = "Banker" },
-    ["barber"] = { type = "Barber", label = "Barber" },
-    ["barbers"] = { type = "Barber", label = "Barber" },
-    ["barbershop"] = { type = "Barber", label = "Barber" },
-    ["flight master"] = { type = "Flightmaster", label = "Flightmaster" },
-    ["flightmaster"] = { type = "Flightmaster", label = "Flightmaster" },
-    ["flightmasters"] = { type = "Flightmaster", label = "Flightmaster" },
-    ["inn"] = { type = "Innkeeper", label = "Innkeeper" },
-    ["innkeeper"] = { type = "Innkeeper", label = "Innkeeper" },
-    ["innkeepers"] = { type = "Innkeeper", label = "Innkeeper" },
-    ["mail"] = { mailbox = true, label = "Mailbox" },
-    ["mailbox"] = { mailbox = true, label = "Mailbox" },
-    ["mailboxes"] = { mailbox = true, label = "Mailbox" },
-    ["repair"] = { type = "Repair", label = "Repair" },
-    ["repairs"] = { type = "Repair", label = "Repair" },
-    ["repair vendor"] = { type = "Repair", label = "Repair" },
-    ["riding"] = { type = "TrainerRiding", label = "Riding Trainer" },
-    ["riding trainer"] = { type = "TrainerRiding", label = "Riding Trainer" },
-    ["riding trainers"] = { type = "TrainerRiding", label = "Riding Trainer" },
-    ["stable"] = { type = "Stable Master", label = "Stable Master" },
-    ["stable master"] = { type = "Stable Master", label = "Stable Master" },
-    ["stablemaster"] = { type = "Stable Master", label = "Stable Master" },
-    ["stable masters"] = { type = "Stable Master", label = "Stable Master" },
-    ["stables"] = { type = "Stable Master", label = "Stable Master" },
-    ["mog"] = { type = "Transmogrifier", label = "Transmogrifier" },
-    ["tmog"] = { type = "Transmogrifier", label = "Transmogrifier" },
-    ["transmog"] = { type = "Transmogrifier", label = "Transmogrifier" },
-    ["transmogs"] = { type = "Transmogrifier", label = "Transmogrifier" },
-    ["transmogrifier"] = { type = "Transmogrifier", label = "Transmogrifier" },
-    ["transmogrifiers"] = { type = "Transmogrifier", label = "Transmogrifier" },
-    ["store"] = { type = "Vendor", label = "Vendor" },
-    ["vendor"] = { type = "Vendor", label = "Vendor" },
-    ["vendors"] = { type = "Vendor", label = "Vendor" },
-    ["void storage"] = { type = "Void Storage", label = "Void Storage" },
-    ["voidstorage"] = { type = "Void Storage", label = "Void Storage" },
-    ["void"] = { type = "Void Storage", label = "Void Storage" },
-}
-
-local SEARCH_PROFESSIONS = {
-    ["alchemy"] = "Alchemy",
-    ["archaeology"] = "Archaeology",
-    ["bandages"] = "Bandages",
-    ["blacksmithing"] = "Blacksmithing",
-    ["cooking"] = "Cooking",
-    ["enchanting"] = "Enchanting",
-    ["engineering"] = "Engineering",
-    ["first aid"] = "First Aid",
-    ["fishing"] = "Fishing",
-    ["herbalism"] = "Herbalism",
-    ["inscription"] = "Inscription",
-    ["jewelcrafting"] = "Jewelcrafting",
-    ["leatherworking"] = "Leatherworking",
-    ["mining"] = "Mining",
-    ["skinning"] = "Skinning",
-    ["tailoring"] = "Tailoring",
-}
-
-local SEARCH_PROFESSION_ORDER = {
-    "alchemy",
-    "archaeology",
-    "bandages",
-    "blacksmithing",
-    "cooking",
-    "enchanting",
-    "engineering",
-    "first aid",
-    "fishing",
-    "herbalism",
-    "inscription",
-    "jewelcrafting",
-    "leatherworking",
-    "mining",
-    "skinning",
-    "tailoring",
-}
-
-local SEARCH_HELP_TOPICS = {
-    ["profession trainer"] = true,
-    ["profession trainers"] = true,
-    ["trainer"] = true,
-    ["trainers"] = true,
-    ["profession workshop"] = true,
-    ["profession workshops"] = true,
-    ["workshop"] = true,
-    ["workshops"] = true,
-}
-
--- ============================================================
--- Search help
--- ============================================================
-
-local function getSupportedProfessionNames()
-    local Z = NS.ZGV()
-    local names = {}
-
-    for _, key in ipairs(SEARCH_PROFESSION_ORDER) do
-        if key ~= "first aid" or not (Z and Z.IsRetail) then
-            if key ~= "bandages" or not (Z and (Z.IsClassicMOP or Z.IsClassicTBC or Z.IsClassicWOTLK or Z.IsClassic)) then
-                if key ~= "inscription" or not (Z and (Z.IsClassicTBC or Z.IsClassic)) then
-                    if key ~= "jewelcrafting" or not (Z and Z.IsClassic) then
-                        names[#names + 1] = key
-                    end
-                end
-            end
-        end
-    end
-
-    return names
 end
 
 local function joinKeys(keys)
@@ -173,22 +49,14 @@ local function getSkinUsage()
     return "/awp skin " .. joinKeys(getSkinCommandKeys())
 end
 
-local function showSearchHelp()
-    NS.Msg("Usage: /awp search <type> | /awp search help")
-    NS.Msg("Services: vendor, auctioneer, banker, barber, innkeeper, flightmaster, mailbox, repair, riding trainer, stable master, transmogrifier, void storage")
-    NS.Msg("Profession trainers: trainer <profession>")
-    NS.Msg("Professions:", joinKeys(getSupportedProfessionNames()))
-    NS.Msg("Profession workshops: workshop <profession>")
-    NS.Msg("Examples: /awp search vendor | /awp search trainer alchemy | /awp search workshop blacksmithing")
-end
 
 local function usage()
-    NS.Msg("Usage: /awp status | debug | diag | mem | routedump [legs] | routeenv | stepdebug | resolvercases | plaque | waytype | options")
-    NS.Msg("       /awp help | changelog")
+    NS.Msg("Usage: /awp status | debug | diag | mem | routedump [legs] | routeenv | stepdebug | resolvercases | plaque | waytype")
+    NS.Msg("       /awp options | config | settings | help | changelog")
     NS.Msg("       " .. getSkinUsage())
     NS.Msg("       /awp scale <" .. string.format("%.2f", C.SCALE_MIN) .. "-" .. string.format("%.2f", C.SCALE_MAX) .. ">")
     NS.Msg("       /awp routing on|off|toggle")
-    NS.Msg("       /awp backend direct|zygor|mapzeroth|farstrider")
+    NS.Msg("       /awp backend " .. BACKEND_USAGE)
     NS.Msg("       /awp manualclear on|off|toggle")
     NS.Msg("       /awp cleardistance <" .. tostring(C.MANUAL_CLEAR_DISTANCE_MIN) .. "-" .. tostring(C.MANUAL_CLEAR_DISTANCE_MAX) .. ">")
     NS.Msg("       /awp trackroute on|off|toggle")
@@ -196,10 +64,9 @@ local function usage()
     NS.Msg("       /awp questclear on|off|toggle")
     NS.Msg("       /awp addontakeover on|off|toggle|status")
     NS.Msg("       /awp addontakeover allowlist|blocklist add|remove|list|clear <addon>")
-    NS.Msg("       /awp compact on|off|toggle")
-    NS.Msg("       /awp trackerviewer on|off|toggle|status")
-    NS.Msg("       /awp zygorviewer show|hide|toggle|status")
-    NS.Msg("       /awp zygor next|prev|skip|picker|load <title>|output [full|sticky]|menu|settings|reset|list|switch <index>|close [index]")
+    NS.Msg("       /awp zygor|dugi|rxp|polestar|apr|wowpro|questierouter <action> (use <provider> help for controls)")
+    NS.Msg("       /awp <provider> viewer on|off|toggle|status")
+    NS.Msg("       /awp <provider> native show|hide|toggle|status")
     NS.Msg("       /awp minimap show|hide|toggle|reset|status")
     NS.Msg("       /awp flightassist marker on|off|toggle|status")
     NS.Msg("       /awp flightassist auto disabled|exact|strong|status")
@@ -219,56 +86,17 @@ end
 -- ============================================================
 
 local function handleRouting(arg)
-    local db = NS.GetDB()
-    if arg == "on" then
-        db.routingEnabled = true
-        NS.Msg("Routing: enabled")
-    elseif arg == "off" then
-        db.routingEnabled = false
-        NS.Msg("Routing: disabled")
-    elseif arg == "toggle" then
-        db.routingEnabled = db.routingEnabled == false
-        NS.Msg("Routing:", db.routingEnabled and "enabled" or "disabled")
-    else
-        NS.Msg("Routing:", db.routingEnabled ~= false and "enabled" or "disabled")
+    if arg == "toggle" then arg = NS.IsRoutingEnabled() and "off" or "on" end
+    local setRouting = arg == "on" or arg == "off"
+    if setRouting then NS.SetRoutingEnabled(arg == "on") end
+    NS.Msg("Routing:", NS.IsRoutingEnabled() and "enabled" or "disabled")
+    if not setRouting then
         NS.Msg("Usage: /awp routing on | off | toggle")
     end
-    if type(NS.RecomputeCarrier) == "function" then
-        NS.RecomputeCarrier()
-    end
 end
 
-local function IsBackendAvailable(id)
-    if id == "direct" then
-        return true
-    end
-    if id == "zygor" then
-        return type(NS.RoutingBackend_Zygor) == "table" and NS.RoutingBackend_Zygor.IsAvailable()
-    end
-    if id == "mapzeroth" then
-        return type(NS.RoutingBackend_Mapzeroth) == "table" and NS.RoutingBackend_Mapzeroth.IsAvailable()
-    end
-    if id == "farstrider" then
-        return type(NS.RoutingBackend_Farstrider) == "table" and NS.RoutingBackend_Farstrider.IsAvailable()
-    end
-    return false
-end
-
-local function FormatBackendName(id)
-    if id == "direct" then
-        return "TomTom Direct"
-    end
-    if id == "zygor" then
-        return "Zygor"
-    end
-    if id == "mapzeroth" then
-        return "Mapzeroth"
-    end
-    if id == "farstrider" then
-        return "FarstriderLib"
-    end
-    return tostring(id or "-")
-end
+local IsBackendAvailable = BackendCatalog.IsAvailable
+local FormatBackendName = BackendCatalog.Label
 
 local function FormatCombatHideMode(mode)
     mode = type(NS.NormalizeCombatHideMode) == "function"
@@ -314,7 +142,7 @@ end
 
 local function handleBackend(arg)
     local db = NS.GetDB()
-    if arg == "direct" or arg == "zygor" or arg == "mapzeroth" or arg == "farstrider" then
+    if BackendCatalog.byID[arg] then
         if not IsBackendAvailable(arg) then
             local backend = arg == "mapzeroth" and NS.RoutingBackend_Mapzeroth or nil
             local status = type(backend) == "table" and type(backend.GetCompatibilityStatus) == "function"
@@ -328,7 +156,7 @@ local function handleBackend(arg)
     else
         local effective = type(NS.GetEffectiveBackendID) == "function" and NS.GetEffectiveBackendID() or "direct"
         NS.Msg("Routing backend:", FormatBackendName(db.routingBackend or "direct"), "(effective:", FormatBackendName(effective) .. ")")
-        NS.Msg("Usage: /awp backend direct | zygor | mapzeroth | farstrider")
+        NS.Msg("Usage: /awp backend " .. BACKEND_USAGE)
     end
 end
 
@@ -523,332 +351,12 @@ local function handleAddonTakeover(arg)
     NS.Msg("Usage: /awp addontakeover allowlist|blocklist add|remove|list|clear <addon>")
 end
 
-local function handleCompact(arg)
-    local current = NS.IsGuideStepsOnlyHoverEnabled()
-
-    if arg == "on" then
-        NS.SetGuideStepsOnlyHoverEnabled(true)
-        RefreshViewerChromeMode()
-        NS.Msg("Guide viewer compact mode: enabled")
-    elseif arg == "off" then
-        NS.SetGuideStepsOnlyHoverEnabled(false)
-        RefreshViewerChromeMode()
-        NS.Msg("Guide viewer compact mode: disabled")
-    elseif arg == "toggle" then
-        local enabled = NS.SetGuideStepsOnlyHoverEnabled(not current)
-        RefreshViewerChromeMode()
-        NS.Msg("Guide viewer compact mode:", enabled and "enabled" or "disabled")
-    else
-        NS.Msg("Guide viewer compact mode:", current and "enabled" or "disabled")
-        NS.Msg("Usage: /awp compact on | off | toggle")
-    end
-end
-
-local function ApplyZygorTrackerViewerSettings()
-    if type(NS.ApplyZygorTrackerViewerSettings) == "function" then
-        NS.ApplyZygorTrackerViewerSettings()
-    end
-end
-
-local function GetZygorTrackerViewerSettings()
-    if type(NS.GetZygorTrackerViewerSettings) ~= "function" then
-        return nil
-    end
-    return NS.GetZygorTrackerViewerSettings()
-end
-
-local function SetZygorTrackerViewerSetting(key, value)
-    if type(NS.SetZygorTrackerViewerSetting) ~= "function" then
-        return false
-    end
-    NS.SetZygorTrackerViewerSetting(key, value)
-    ApplyZygorTrackerViewerSettings()
-    return true
-end
-
-local function handleTrackerViewer(arg)
-    local settings = GetZygorTrackerViewerSettings()
-    if not settings then
-        NS.Msg("Tracker Viewer settings are unavailable.")
-        return
-    end
-
-    if arg == "on" or arg == "show" or arg == "enable" then
-        if SetZygorTrackerViewerSetting("enabled", true) then
-            NS.Msg("Tracker Viewer: enabled")
-        end
-    elseif arg == "off" or arg == "hide" or arg == "disable" then
-        if SetZygorTrackerViewerSetting("enabled", false) then
-            NS.Msg("Tracker Viewer: disabled")
-        end
-    elseif arg == "toggle" then
-        local enabled = not settings.enabled
-        if SetZygorTrackerViewerSetting("enabled", enabled) then
-            NS.Msg("Tracker Viewer:", enabled and "enabled" or "disabled")
-        end
-    elseif arg == "" or arg == "status" then
-        NS.Msg("Tracker Viewer:", settings.enabled and "enabled" or "disabled")
-    else
-        NS.Msg("Tracker Viewer:", settings.enabled and "enabled" or "disabled")
-        NS.Msg("Usage: /awp trackerviewer on | off | toggle | status")
-    end
-end
-
-local function handleZygorViewer(arg)
-    local settings = GetZygorTrackerViewerSettings()
-    if not settings then
-        NS.Msg("Zygor viewer hide setting is unavailable.")
-        return
-    end
-
-    if arg == "show" or arg == "on" or arg == "enable" then
-        if SetZygorTrackerViewerSetting("hideZygorFrame", false) then
-            NS.Msg("Zygor native viewer: shown")
-        end
-    elseif arg == "hide" or arg == "off" or arg == "disable" then
-        if SetZygorTrackerViewerSetting("hideZygorFrame", true) then
-            NS.Msg("Zygor native viewer: hidden")
-        end
-    elseif arg == "toggle" then
-        local hidden = not settings.hideZygorFrame
-        if SetZygorTrackerViewerSetting("hideZygorFrame", hidden) then
-            NS.Msg("Zygor native viewer:", hidden and "hidden" or "shown")
-        end
-    elseif arg == "" or arg == "status" then
-        NS.Msg("Zygor native viewer:", settings.hideZygorFrame and "hidden" or "shown")
-    else
-        NS.Msg("Zygor native viewer:", settings.hideZygorFrame and "hidden" or "shown")
-        NS.Msg("Usage: /awp zygorviewer show | hide | toggle | status")
-    end
-end
-
-local function GetZygorGuideActions()
-    local shared = NS.Internal
-        and NS.Internal.ZygorTrackerViewer
-    if type(shared) ~= "table" or type(shared.GetZygor) ~= "function" then
-        return nil
-    end
-
-    local Z = shared.GetZygor()
-    if not Z then
-        return nil
-    end
-
-    return shared, Z
-end
-
-local function PrintZygorGuideUsage()
-    NS.Msg("Usage: /awp zygor next | prev | skip | picker | load <guide title> [step N] | output [full|sticky] | menu | settings | reset | list | switch <index> | close [current|index|all]")
-end
-
-local function GetIndexedZygorGuideTabs(shared)
-    local tabs = {}
-    if type(shared.GetZygorGuideTabs) ~= "function" then
-        return tabs
-    end
-
-    local pool = shared.GetZygorGuideTabs()
-    if type(pool) ~= "table" then
-        return tabs
-    end
-
-    for _, tab in ipairs(pool) do
-        if type(tab) == "table" and tab.guide then
-            tabs[#tabs + 1] = tab
-        end
-    end
-
-    return tabs
-end
-
-local function GetZygorGuideTitle(shared, tab)
-    if type(shared.GetZygorGuideTitle) == "function" then
-        return shared.GetZygorGuideTitle(tab)
-    end
-    return "Guide"
-end
-
-local function PrintZygorGuideList(shared)
-    local tabs = GetIndexedZygorGuideTabs(shared)
-    if #tabs == 0 then
-        NS.Msg("No open Zygor guides.")
-        return
-    end
-
-    local activeTab = type(shared.GetActiveZygorGuideTab) == "function" and shared.GetActiveZygorGuideTab() or nil
-    NS.Msg("Open Zygor guides:")
-    for index, tab in ipairs(tabs) do
-        local prefix = tab == activeTab and "* " or "  "
-        NS.Msg(string.format("%s%d. %s", prefix, index, GetZygorGuideTitle(shared, tab)))
-    end
-end
-
-local function RunZygorGuideAction(shared, fnName, successText, failureText, ...)
-    local fn = shared and shared[fnName]
-    if type(fn) ~= "function" then
-        NS.Msg(failureText)
-        return
-    end
-
-    local ok, result = pcall(fn, ...)
-    if ok and result then
-        NS.Msg(successText)
-    else
-        NS.Msg(failureText)
-    end
-end
-
-local function ParseZygorGuideLoadArgs(rest)
-    local title, step = rest:match("^(.-)%s+[sS][tT][eE][pP]%s+(%d+)$")
-    if title then
-        return trim(title), tonumber(step)
-    end
-    return trim(rest), nil
-end
-
-local function CloseZygorGuideTab(shared, tab)
-    if not tab then
-        return false
-    end
-    if type(shared.CloseZygorTab) ~= "function" then
-        return false
-    end
-    local ok, result = pcall(shared.CloseZygorTab, tab)
-    return ok and result == true
+local function handleGuideCommand(providerKey, arg)
+    NS.Internal.GuideTrackerViewer.Actions.Handle(providerKey, arg)
 end
 
 local function handleZygorGuide(arg)
-    local input = trim(arg)
-    local subcmd, rest = input:match("^(%S+)%s*(.-)$")
-    subcmd = (subcmd or ""):lower()
-    rest = trim(rest)
-
-    if subcmd == "" or subcmd == "help" then
-        PrintZygorGuideUsage()
-        return
-    end
-
-    local shared = GetZygorGuideActions()
-    if not shared then
-        NS.Msg("Zygor guide controls require Zygor Guides Viewer.")
-        return
-    end
-
-    if subcmd == "next" or subcmd == "forward" then
-        RunZygorGuideAction(shared, "NextZygorStep", "Zygor guide: next step.", "Unable to move to the next Zygor step.")
-    elseif subcmd == "prev" or subcmd == "previous" or subcmd == "back" then
-        RunZygorGuideAction(shared, "PreviousZygorStep", "Zygor guide: previous step.", "Unable to move to the previous Zygor step.")
-    elseif subcmd == "skip" or subcmd == "force" then
-        RunZygorGuideAction(shared, "SkipZygorStep", "Zygor guide: skipped to next step.", "Unable to skip the Zygor step.")
-    elseif subcmd == "picker" or subcmd == "new" then
-        RunZygorGuideAction(shared, "OpenZygorNewGuide", "Opened Zygor guide picker.", "Unable to open Zygor guide picker.")
-    elseif subcmd == "load" or subcmd == "open" then
-        if rest == "" then
-            RunZygorGuideAction(shared, "OpenZygorNewGuide", "Opened Zygor guide picker.", "Unable to open Zygor guide picker.")
-        else
-            local title, step = ParseZygorGuideLoadArgs(rest)
-            if type(shared.LoadZygorGuide) == "function" then
-                local ok, result = pcall(shared.LoadZygorGuide, title, step)
-                if ok and result then
-                    NS.Msg("Loaded Zygor guide:", title)
-                else
-                    NS.Msg("Unable to load Zygor guide:", title)
-                end
-            else
-                NS.Msg("Unable to load Zygor guide:", title)
-            end
-        end
-    elseif subcmd == "menu" or subcmd == "guidemenu" then
-        if type(shared.OpenZygorViewerMenu) == "function" then
-            local ok = pcall(shared.OpenZygorViewerMenu, _G.UIParent)
-            NS.Msg(ok and "Opened Zygor guide menu." or "Unable to open Zygor guide menu.")
-        else
-            NS.Msg("Unable to open Zygor guide menu.")
-        end
-    elseif subcmd == "settings" or subcmd == "options" then
-        RunZygorGuideAction(shared, "OpenZygorSettings", "Opened Zygor settings.", "Unable to open Zygor settings.")
-    elseif subcmd == "reset" or subcmd == "resetwindow" or subcmd == "fix" then
-        -- Recover a lost or glitched native viewer: stop AWP from cloaking it,
-        -- then reset Zygor's own window back to its default position.
-        if type(NS.SetZygorTrackerViewerSetting) == "function" then
-            NS.SetZygorTrackerViewerSetting("hideZygorFrame", false)
-        end
-        if type(NS.ApplyZygorTrackerViewerSettings) == "function" then
-            NS.ApplyZygorTrackerViewerSettings()
-        end
-        local Z = shared.GetZygor()
-        local didReset = Z and Z.Frame and type(Z.Frame.ResetWindow) == "function"
-            and pcall(Z.Frame.ResetWindow, Z.Frame) or false
-        if didReset then
-            NS.Msg("Zygor viewer reset: unhidden and window moved back to default.")
-        else
-            NS.Msg("Unhid Zygor's viewer (Zygor's own window reset was unavailable).")
-        end
-    elseif subcmd == "output" or subcmd == "print" or subcmd == "step" then
-        local mode = rest ~= "" and rest or nil
-        if type(shared.OutputCurrentZygorStepToChat) == "function" then
-            local ok, result = pcall(shared.OutputCurrentZygorStepToChat, mode)
-            if not ok then
-                NS.Msg("Unable to show the current Zygor step in your chat.")
-            end
-        else
-            NS.Msg("Unable to show the current Zygor step in your chat.")
-        end
-    elseif subcmd == "list" or subcmd == "guides" or subcmd == "tabs" or subcmd == "status" then
-        PrintZygorGuideList(shared)
-    elseif subcmd == "switch" or subcmd == "select" or subcmd == "activate" then
-        local index = tonumber(rest)
-        local tabs = GetIndexedZygorGuideTabs(shared)
-        local tab = index and tabs[index]
-        if tab and type(shared.ActivateZygorTab) == "function" then
-            local title = GetZygorGuideTitle(shared, tab)
-            local ok, result = pcall(shared.ActivateZygorTab, tab)
-            if ok and result then
-                NS.Msg("Switched to Zygor guide:", title)
-            else
-                NS.Msg("Unable to switch to Zygor guide:", title)
-            end
-        else
-            NS.Msg("No open Zygor guide at that index.")
-            PrintZygorGuideList(shared)
-        end
-    elseif subcmd == "close" or subcmd == "clear" then
-        local target = rest:lower()
-        if target == "all" then
-            local tabs = GetIndexedZygorGuideTabs(shared)
-            local closed = 0
-            for index = #tabs, 1, -1 do
-                if CloseZygorGuideTab(shared, tabs[index]) then
-                    closed = closed + 1
-                end
-            end
-            NS.Msg("Closed Zygor guides:", closed)
-        else
-            local tab
-            if target ~= "" and target ~= "current" then
-                local index = tonumber(target)
-                tab = index and GetIndexedZygorGuideTabs(shared)[index] or nil
-            elseif type(shared.GetActiveZygorGuideTab) == "function" then
-                tab = shared.GetActiveZygorGuideTab()
-            end
-
-            if tab then
-                local title = GetZygorGuideTitle(shared, tab)
-                if CloseZygorGuideTab(shared, tab) then
-                    NS.Msg("Closed Zygor guide:", title)
-                else
-                    NS.Msg("Unable to close Zygor guide:", title)
-                end
-            elseif target == "" or target == "current" then
-                RunZygorGuideAction(shared, "ClearCurrentZygorGuide", "Closed current Zygor guide.", "No current Zygor guide to close.")
-            else
-                NS.Msg("No open Zygor guide at that index.")
-                PrintZygorGuideList(shared)
-            end
-        end
-    else
-        PrintZygorGuideUsage()
-    end
+    handleGuideCommand("zygor", arg)
 end
 
 local function handleMinimap(arg)
@@ -1024,13 +532,6 @@ local function collectRepairChanges()
         fixed[#fixed + 1] = "TomTom: cleardistance restored to 10"
     end
 
-    -- Clean up stale AWP saved variable keys from previous versions
-    local awpDB = NS.GetDB()
-    if awpDB.tomtomOverride ~= nil then
-        awpDB.tomtomOverride = nil
-        fixed[#fixed + 1] = "AWP: removed stale tomtomOverride setting"
-    end
-
     return fixed
 end
 
@@ -1066,10 +567,17 @@ local function handleStatus()
         and NS.GetZygorAddonName()
         or "ZygorGuidesViewer"
     local clientFlavor = type(NS.GetClientFlavor) == "function" and NS.GetClientFlavor() or "retail"
+    local dugi = rawget(_G, "DugisGuideViewer")
     local _, _, _, interfaceVersion = GetBuildInfo()
     NS.Msg(
         "Client:", clientFlavor == "forever" and "WoW Forever" or "Retail",
         "Interface:", tostring(interfaceVersion or "unknown")
+    )
+    NS.Msg(
+        "Guide providers - Zygor:", Z and "loaded" or "missing",
+        "Dugi:", dugi and "loaded" or "missing",
+        "RestedXP:", NS.IsRXPLoaded() and "loaded" or "missing",
+        "active:", type(NS.GetActiveGuideProvider) == "function" and (NS.GetActiveGuideProvider() or "none") or "unknown"
     )
     if clientFlavor == "forever" then
         NS.Msg("Forever integration availability: WorldQuestTab unavailable")
@@ -1084,6 +592,14 @@ local function handleStatus()
         "Scale:", NS.GetArrowScale(),
         "v" .. NS.VERSION
     )
+    local activeRoute = NS.GetActiveAuthorityRecord and NS.GetActiveAuthorityRecord()
+    local planning = NS.GetRoutePlanningStatus and NS.GetRoutePlanningStatus(activeRoute)
+    if planning and (planning.preferred ~= planning.active or planning.attempting or planning.deferred) then
+        NS.Msg("Route planner:", "preferred=" .. FormatBackendName(planning.preferred),
+            "active=" .. FormatBackendName(planning.active),
+            planning.attempting and ("attempting=" .. FormatBackendName(planning.attempting)) or "",
+            planning.deferred and "waiting for safe planning" or "")
+    end
     NS.Msg(
         "Manual auto-clear:",
         NS.IsManualWaypointAutoClearEnabled() and "on" or "off",
@@ -1120,16 +636,69 @@ local function handleStatus()
             NS.Msg("Flight Map Taxi List:", NS.GetFlightMapCatalogStatus())
         end
     end
-    local trackerSettings = GetZygorTrackerViewerSettings()
+    local trackerSettings = type(NS.GetGuideTrackerViewerSettings) == "function"
+        and NS.GetGuideTrackerViewerSettings("zygor") or nil
     if trackerSettings then
+        local dugiTracker = NS.GetGuideTrackerViewerSettings("dugi")
         NS.Msg(
-            "Tracker Viewer:",
+            "Zygor Tracker Viewer:",
             trackerSettings.enabled and "on" or "off",
             "Zygor native viewer:",
-            trackerSettings.hideZygorFrame and "hidden" or "shown",
+            trackerSettings.hideNative and "hidden" or "shown",
             "native warning popup:",
             trackerSettings.nativeDockWarningPopup ~= false and "on" or "off"
         )
+        if dugiTracker then
+            local hideStatus = type(NS.GetDugiNativeFrameHideStatus) == "function"
+                and select(1, NS.GetDugiNativeFrameHideStatus()) or "unavailable"
+            local viewerStatus = type(NS.GetDugiTrackerViewerStatus) == "function"
+                and NS.GetDugiTrackerViewerStatus() or nil
+            NS.Msg(
+                "Dugi Tracker Viewer:", dugiTracker.enabled and "on" or "off",
+                "attached:", viewerStatus and tostring(viewerStatus.attached) or "unknown",
+                "host:", viewerStatus and viewerStatus.host or "unknown",
+                "Dugi native frame:", hideStatus,
+                "chat:", dugiTracker.chatOutputOnChange and "on" or "off"
+            )
+        end
+    end
+    if NS.IsPolestarLoaded and NS.IsPolestarLoaded() then
+        local viewer = NS.GetPolestarTrackerViewerStatus()
+        NS.Msg("Polestar:", viewer.state, "Viewer:", viewer.enabled and "on" or "off",
+            "attached:", tostring(viewer.attached), "host:", viewer.host)
+    end
+    if type(NS.GetRXPTrackerViewerStatus) == "function" and NS.IsRXPLoaded() then
+        local viewer = NS.GetRXPTrackerViewerStatus()
+        local settings = NS.GetGuideTrackerViewerProviderSettings("rxp")
+        NS.Msg("RestedXP Tracker Viewer:", viewer.enabled and "on" or "off",
+            "attached:", tostring(viewer.attached), "host:", viewer.host,
+            "guide:", viewer.state, "native frames:", viewer.nativeHidden and "cloaked" or "shown",
+            "chat:", settings.chatOutputOnChange and "on" or "off")
+    end
+    local questie = NS.Internal.QuestieData
+    if questie and NS.IsWoWForever() then
+        local status = questie.GetStatus()
+        if status.questieLoaded or status.databaseLoaded then
+            NS.Msg("Quest support:", "Questie " .. (status.questieReady and "ready" or "unavailable"),
+                "QuestieDB " .. (status.databaseReady and "ready" or "unavailable"))
+        end
+    end
+    for _, definition in ipairs(C.GUIDE_PROVIDERS) do
+        local provider = NS.GetGuideTargetProvider(definition.key)
+        if provider and provider.isLoaded() then
+            if definition.key == "apr" or definition.key == "wowpro" or definition.key == "questierouter" then
+                local viewer = NS["Get" .. definition.suffix .. "TrackerViewerStatus"]()
+                NS.Msg(definition.label .. " Viewer:", viewer.enabled and "on" or "off", "state:", viewer.state,
+                    "attached:", tostring(viewer.attached), "host:", viewer.host,
+                    "native:", viewer.nativeHidden and "cloaked" or viewer.hideReason or "shown")
+            end
+            local actions = NS.Internal.GuideTrackerViewer.GuideActions
+            if actions then
+                local count, shown, pending, failure = actions.GetStatus(definition.key)
+                if count > 0 or shown then NS.Msg(definition.label .. " actions:", count, "panel:", shown, "pending:", pending) end
+                if failure then NS.Msg(definition.label .. " actions unavailable:", failure) end
+            end
+        end
     end
     if type(NS.GetZygorStepChatSettings) == "function" then
         local stepChatSettings = NS.GetZygorStepChatSettings()
@@ -1152,6 +721,26 @@ local function handleStatus()
             "opacity:",
             tracker.opacity or "unknown"
         )
+    end
+    local daylight = NS.Internal.Daylight
+    if daylight and daylight.GetAPI() then
+        local host = NS.Internal.GuideTrackerViewer.DaylightHost
+        local status, count, reason = host.GetStatus()
+        NS.Msg("DaylightUI:", "styling:", daylight.GetSettings().enabled and "on" or "off",
+            "tracker:", host.IsSelected() and status or "not selected", "Viewers:", count,
+            daylight.lastError or (host.IsSelected() and reason) or "")
+    end
+    local gw2Host = NS.Internal.GuideTrackerViewer and NS.Internal.GuideTrackerViewer.GW2UIHost
+    if gw2Host and rawget(_G, "GW2_ADDON") then
+        local status, count, reason = gw2Host.GetStatus()
+        NS.Msg("GW2 UI tracker:", status, "Viewers:", count, reason or "")
+    end
+    NS.Msg("UI Style:", NS.Internal.Appearance.GetSelectionStatus())
+    for _, provider in ipairs(NS.Internal.Appearance.GetProviders()) do
+        if provider.GetStatus and provider.GetSettings().enabled then
+            local status, reason = provider.GetStatus()
+            NS.Msg("UI Style:", provider.label, status or "not ready", reason or "")
+        end
     end
     if type(NS.GetMinimapButtonStatus) == "function" then
         NS.Msg("Minimap button:", NS.GetMinimapButtonStatus())
@@ -1260,14 +849,7 @@ local function handleQueuePanel()
 end
 
 M.trim = trim
-M.normalizeSearchText = normalizeSearchText
-M.searchAliases = SEARCH_ALIASES
-M.searchProfessions = SEARCH_PROFESSIONS
-M.searchProfessionOrder = SEARCH_PROFESSION_ORDER
-M.searchHelpTopics = SEARCH_HELP_TOPICS
-M.getSupportedProfessionNames = getSupportedProfessionNames
 M.joinKeys = joinKeys
-M.showSearchHelp = showSearchHelp
 M.showUsage = usage
 M.handleRepair = handleRepair
 M.handleRouting = handleRouting
@@ -1280,9 +862,7 @@ M.handleTrackRoute = handleTrackRoute
 M.handleUntrackClear = handleUntrackClear
 M.handleQuestClear = handleQuestClear
 M.handleAddonTakeover = handleAddonTakeover
-M.handleCompact = handleCompact
-M.handleTrackerViewer = handleTrackerViewer
-M.handleZygorViewer = handleZygorViewer
+M.handleGuideCommand = handleGuideCommand
 M.handleZygorGuide = handleZygorGuide
 M.handleMinimap = handleMinimap
 M.handleFlightAssist = handleFlightAssist

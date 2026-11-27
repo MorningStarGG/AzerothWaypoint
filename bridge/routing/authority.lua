@@ -4,20 +4,8 @@ local state = NS.State
 -- ============================================================
 -- Manual authority lifecycle
 -- ============================================================
---
--- Owns state.routing.manualAuthority — the persisted route that always
--- outranks guide routing in carrier arbitration. Sources include:
---   - manual /way commands
---   - Blizzard takeovers (quest, taxi, vignette, area POI, …)
---   - external TomTom waypoints adopted from other addons
---   - manual queue entries
---   - named/manual searches (Zygor-only)
---   - Zygor POI takeover
---
--- The persisted record (db.manualAuthority) carries enough info to
--- restore the route on /reload via routing_core.RouteViaBackend against
--- the current selected backend. The persisted .backend field is
--- diagnostic-only — restore does NOT honor it.
+-- The saved manual route takes precedence over guide routing. On reload, the
+-- selected backend replans it. The stored backend identifies its previous planner.
 
 local Signature = NS.Signature
 local SafeCall = NS.SafeCall
@@ -44,10 +32,6 @@ local function NormalizeSourceAddonCandidate(value)
         return externalSource
     end
     return value
-end
-
-local function NormalizeSearchKindCandidate(value)
-    return TrimString(value)
 end
 
 local function NormalizeManualQuestIDCandidate(value)
@@ -120,9 +104,9 @@ function NS.SetActiveRouteSource(source)
     return true
 end
 
--- ------------------------------------------------------------
+-- ============================================================
 -- Record building
--- ------------------------------------------------------------
+-- ============================================================
 
 -- Build a manual-authority record from a route request. Called by
 -- routing_core.RouteViaBackend when opts.authority == "manual".
@@ -144,6 +128,10 @@ function NS.BuildManualAuthorityRecord(mapID, x, y, title, meta, backendID)
                 sourceAddonIconKey = meta.sourceAddonIconKey,
                 searchKind = meta.searchKind,
                 manualQuestID = meta.manualQuestID,
+                backendOverride = meta.backendOverride,
+                questContext = meta.questContext,
+                navigationHeight = meta.navigationHeight,
+                navigationContinent = meta.navigationContinent,
                 mapPinInfo = meta.mapPinInfo,
             })
         end
@@ -156,16 +144,17 @@ function NS.BuildManualAuthorityRecord(mapID, x, y, title, meta, backendID)
     end
 
     local record = {
-        mapID     = mapID,
-        map       = mapID,
-        x         = x,
-        y         = y,
-        title     = title,
-        type      = "manual",
-        sig       = Signature and Signature(mapID, x, y) or nil,
-        meta      = routeMeta,
-        backend   = backendID,    -- diagnostic only; restore does NOT honor this
-        createdAt = GetTime_Safe(),
+        mapID           = mapID,
+        map             = mapID,
+        x               = x,
+        y               = y,
+        title           = title,
+        type            = "manual",
+        sig             = Signature and Signature(mapID, x, y) or nil,
+        meta            = routeMeta,
+        backend         = backendID, -- diagnostic only, restore does NOT honor this
+        backendOverride = NS.GetRouteBackendOverride(routeMeta),
+        createdAt       = GetTime_Safe(),
         -- legs / currentLeg / specialAction populated by the backend in PlanRoute.
     }
 
@@ -176,14 +165,40 @@ function NS.BuildManualAuthorityRecord(mapID, x, y, title, meta, backendID)
     record.sourceAddonIconKey = routeMeta.sourceAddonIconKey
     record.searchKind = routeMeta.searchKind
     record.manualQuestID = routeMeta.manualQuestID
+    record.questContext = routeMeta.questContext
+    record.navigationHeight, record.navigationContinent = routeMeta.navigationHeight, routeMeta.navigationContinent
     record.mapPinInfo = routeMeta.mapPinInfo
 
     return record
 end
 
--- ------------------------------------------------------------
+-- ============================================================
 -- Lifecycle
--- ------------------------------------------------------------
+-- ============================================================
+
+local function NotifyManualWaypointOwner(previous, releasedPending)
+    local current = state.routing.pendingManualAuthority or state.routing.manualAuthority
+    local overlay = NS.Internal and NS.Internal.WorldOverlay
+    if current ~= previous and overlay and overlay.OnManualAuthorityChanged then
+        overlay.OnManualAuthorityChanged(previous, current, releasedPending)
+    end
+end
+
+function NS.SetPendingManualAuthority(record)
+    local routing = state.routing
+    local previous = routing.pendingManualAuthority or routing.manualAuthority
+    routing.pendingManualAuthority = record
+    NotifyManualWaypointOwner(previous, record == nil)
+end
+
+local function ChangeManualAuthority(record)
+    local previous = state.routing.manualAuthority
+    if previous == record then return end
+    state.routing.manualAuthority = record
+    local native = NS.Internal and NS.Internal.NativeMapWaypoints
+    if native then native.Retire(previous, true) end
+    NotifyManualWaypointOwner(state.routing.pendingManualAuthority or previous)
+end
 
 function NS.SetManualAuthority(record)
     if type(record) ~= "table"
@@ -192,7 +207,7 @@ function NS.SetManualAuthority(record)
     then
         return false
     end
-    state.routing.manualAuthority = record
+    ChangeManualAuthority(record)
     if type(NS.SetActiveRouteSource) == "function" then
         NS.SetActiveRouteSource("manual")
     end
@@ -215,30 +230,21 @@ end
 function NS.ClearManualAuthority(clearReason)
     local current = state.routing.manualAuthority
     if current and type(current.backend) == "string" then
-        local backend = nil
-        if current.backend == "zygor" then
-            backend = NS.RoutingBackend_Zygor
-        elseif current.backend == "mapzeroth" then
-            backend = NS.RoutingBackend_Mapzeroth
-        elseif current.backend == "farstrider" then
-            backend = NS.RoutingBackend_Farstrider
-        elseif current.backend == "direct" then
-            backend = NS.RoutingBackend_Direct
-        end
+        local backend = NS.GetRoutingBackend(current.backend)
         if backend and type(backend.Clear) == "function" then
             SafeCall(backend.Clear, current, clearReason or "manual_clear")
         end
     end
-    state.routing.manualAuthority = nil
+    ChangeManualAuthority(nil)
     NS.PersistManualAuthority()
 end
 
--- ------------------------------------------------------------
+-- ============================================================
 -- Persistence
--- ------------------------------------------------------------
+-- ============================================================
 --
--- Persist exactly the fields we need to restore the route through the
--- current selected backend. Backend-internal scratch (legs, currentLeg)
+-- Persist the destination and any planner requested for this stop.
+-- Backend-internal scratch (legs, currentLeg)
 -- is NOT persisted — the backend re-plans on restore.
 
 local PERSISTED_FIELDS = {
@@ -262,6 +268,8 @@ local function CopyForPersistence(record)
             sourceAddonIconKey = record.sourceAddonIconKey,
             searchKind = record.searchKind,
             manualQuestID = record.manualQuestID,
+            backendOverride = record.backendOverride,
+            questContext = record.questContext,
             mapPinInfo = record.mapPinInfo,
             queueSourceType = record.queueSourceType,
         })
@@ -280,13 +288,12 @@ function NS.PersistManualAuthority()
     db.manualAuthority = CopyForPersistence(record)
 end
 
--- ------------------------------------------------------------
+-- ============================================================
 -- Restore on boot
--- ------------------------------------------------------------
+-- ============================================================
 --
--- Reads db.manualAuthority and replans through the *currently selected*
--- backend. The persisted .backend field is logged but not honored —
--- this avoids hidden backend stickiness across config changes.
+-- Restores the destination using its requested planner or the current
+-- selection. The last effective backend is retained for diagnostics.
 
 function NS.RestoreManualAuthority()
     local db = NS.GetDB()
@@ -315,6 +322,8 @@ function NS.RestoreManualAuthority()
             sourceAddonIconKey = record.sourceAddonIconKey,
             searchKind = record.searchKind,
             manualQuestID = record.manualQuestID,
+            backendOverride = record.backendOverride,
+            questContext = record.questContext,
             mapPinInfo = record.mapPinInfo,
             queueSourceType = record.queueSourceType,
         })
@@ -324,18 +333,16 @@ function NS.RestoreManualAuthority()
         return false
     end
 
-    -- Re-route via the currently selected backend. opts.authority="manual"
-    -- causes routing_core to build a fresh manualAuthority record and call
-    -- backend.PlanRoute(...) to populate legs/specialAction.
+    -- Rebuild the manual record and let the planning coordinator restore its legs.
     if type(NS.RouteViaBackend) ~= "function" then return false end
     return NS.RouteViaBackend(record.mapID, record.x, record.y, record.title, meta, {
         authority = "manual",
     })
 end
 
--- ------------------------------------------------------------
+-- ============================================================
 -- Adoption helpers (used by carrier_tomtom for external waypoints)
--- ------------------------------------------------------------
+-- ============================================================
 
 function NS.CreateRouteMetaForExternalWaypoint(uid, mapID, x, y, title)
     local sourceAddon = nil
@@ -353,9 +360,12 @@ function NS.CreateRouteMetaForExternalWaypoint(uid, mapID, x, y, title)
     local resolvedIconKey = type(NS.ResolveExternalWaypointIconKey) == "function"
         and NS.ResolveExternalWaypointIconKey(sourceAddon, mapID, x, y)
         or nil
+    local context = NS.GetExternalWaypointMetadata and NS.GetExternalWaypointMetadata(uid)
     return NS.BuildRouteMeta(identity, {
         sourceAddon = sourceAddon,
         sourceAddonIconKey = type(resolvedIconKey) == "string" and resolvedIconKey ~= "" and resolvedIconKey or nil,
+        manualQuestID = context and context.questID,
+        questContext = context,
     })
 end
 
@@ -373,9 +383,27 @@ function NS.RequestManualRoute(mapID, x, y, title, meta, opts)
     return NS.RouteViaBackend(mapID, x, y, title, meta, opts)
 end
 
--- ------------------------------------------------------------
+function NS.RequestCorpseRoute(mapID, x, y, title, sourceAddon, preferred)
+    local active, pending = state.routing.manualAuthority, state.routing.pendingManualAuthority
+    local corpse = NS.IsCorpseRoute(pending) and pending or NS.IsCorpseRoute(active) and active
+    if corpse then
+        -- A native TomTom corpse may already own this death. Keep its queue
+        -- and lifetime, and switch only the planner if the player chose one.
+        local planning = NS.GetRoutePlanningStatus(corpse)
+        if preferred and (not planning or planning.preferred ~= preferred) then
+            return NS.RequestRoutePlan(corpse, preferred, corpse.meta, "initial")
+        end
+        return true
+    end
+    local meta = NS.BuildRouteMeta(NS.BuildCorpseIdentity(mapID, x, y), { sourceAddon = sourceAddon })
+    if not meta then return false end
+    -- A corpse is transient even when its preferred planner falls back.
+    return NS.RequestManualRoute(mapID, x, y, title, meta, { backendOverride = preferred })
+end
+
+-- ============================================================
 -- Explicit remove coordinator
--- ------------------------------------------------------------
+-- ============================================================
 
 local function ResolveExternalSignatureForRecord(record)
     local identity = type(record) == "table" and type(record.identity) == "table" and record.identity or nil
@@ -397,6 +425,8 @@ local function ClearBlizzardUserWaypointRecord(record)
     if type(identity) ~= "table" or identity.kind ~= "blizzard_user_waypoint" then
         return false
     end
+    -- The native slot releases a world-map click when its authority changes.
+    if NS.GetWorldMapClickIdentity(record) then return false end
     if type(C_SuperTrack) == "table"
         and type(C_SuperTrack.IsSuperTrackingUserWaypoint) == "function"
         and type(C_SuperTrack.SetSuperTrackedUserWaypoint) == "function"
@@ -531,15 +561,15 @@ end
 local function ClearRoutePresentationState()
     if state.routing.carrierState and type(NS.ClearCarrierWaypoint) == "function" then
         NS.ClearCarrierWaypoint()
+        if state.routing.carrierState then return end
     else
         state.routing.carrierState = nil
         state.routing.lastPushedCarrierUID = nil
     end
-    if state.routing.specialActionState and type(NS.DisarmSpecialActionButton) == "function" then
-        NS.DisarmSpecialActionButton()
-    end
+    local action = state.routing.specialActionState
     state.routing.specialActionState = nil
     state.routing.presentationState = nil
+    if action and type(NS.DisarmSpecialActionButton) == "function" then NS.DisarmSpecialActionButton() end
 end
 
 local function ShouldResolveQueueFollowup(opts)
@@ -554,7 +584,8 @@ end
 
 local function ClearManualAuthorityWithFollowup(clearReason, opts)
     local reason = clearReason or "manual_clear"
-    local cancelledPending = type(NS.CancelPendingManualRoute) == "function"
+    local keepPending = type(opts) == "table" and opts.preservePendingManualRoute
+    local cancelledPending = not keepPending and type(NS.CancelPendingManualRoute) == "function"
         and NS.CancelPendingManualRoute(reason)
         or false
     local record = state.routing.manualAuthority
@@ -566,17 +597,24 @@ local function ClearManualAuthorityWithFollowup(clearReason, opts)
     end
 
     local nextQueuedRoute = ShouldResolveQueueFollowup(opts) and ResolveQueuedFollowup(record) or nil
+    local pending = state.routing.pendingManualAuthority
 
     RunSourceClearHandlers(record, reason)
+    if state.routing.manualAuthority ~= record or state.routing.pendingManualAuthority ~= pending then return true end
 
     local externalSig = ResolveExternalSignatureForRecord(record)
     if externalSig and type(NS.RemoveExternalTomTomWaypointsBySig) == "function" then
         NS.RemoveExternalTomTomWaypointsBySig(externalSig)
+        if state.routing.manualAuthority ~= record or state.routing.pendingManualAuthority ~= pending then return true end
     end
 
     ResetManualArrivalState()
     NS.ClearManualAuthority(reason)
+    if state.routing.manualAuthority or state.routing.pendingManualAuthority ~= pending then return true end
     ClearRoutePresentationState()
+    -- Removing the old pin can select a new manual route inside TomTom.
+    -- That selection takes precedence over the old queue's successor.
+    if state.routing.manualAuthority or state.routing.pendingManualAuthority ~= pending then return true end
 
     if type(nextQueuedRoute) == "table" and type(NS.RouteViaBackend) == "function" then
         return NS.RouteViaBackend(
@@ -612,6 +650,23 @@ end
 
 function NS.ClearManualRoute(clearReason, opts)
     return ClearManualAuthorityWithFollowup(type(clearReason) == "string" and clearReason or "system", opts)
+end
+
+function NS.EndCorpseRoute()
+    local routing = state.routing
+    if NS.IsCorpseRoute(routing.pendingManualAuthority) then NS.CancelPendingManualRoute("corpse_ended") end
+    local active = routing.manualAuthority
+    if NS.IsCorpseRoute(active) then
+        if routing.pendingManualAuthority then
+            -- A newer explicit route already owns the arrow. Its pending
+            -- transaction must survive retirement of the corpse underneath.
+            NS.RetireTransientCorpseQueues()
+            return NS.ClearManualRoute("corpse_ended", { preservePendingManualRoute = true, queueFollowup = false })
+        end
+        NS.RetireTransientCorpseQueues(active.queueID)
+        return NS.ClearManualRoute("corpse_ended")
+    end
+    NS.RetireTransientCorpseQueues()
 end
 
 local function IsAutoClearableManualAuthority(record)
@@ -666,11 +721,7 @@ local function GetManualAuthorityArrivalTarget(record)
     return nil
 end
 
-local function GetManualAuthorityArrivalKey(record)
-    if type(record) ~= "table" then
-        return nil
-    end
-    local target = GetManualAuthorityArrivalTarget(record)
+local function GetManualAuthorityArrivalKey(record, target)
     local targetSig = target and target.sig
     if type(targetSig) ~= "string"
         and type(Signature) == "function"
@@ -717,88 +768,82 @@ local function IsAreaPoiManualAuthority(record)
     return type(mapPinInfo) == "table" and mapPinInfo.kind == "area_poi" or false
 end
 
-local function IsManualAuthorityMapTransitionArrival(record, target, arrival)
-    if type(arrival) ~= "table" or arrival.seenTarget ~= true then
-        return false
-    end
-    if not IsAreaPoiManualAuthority(record) then
-        return false
-    end
-    if type(NS.GetPlayerMapID) ~= "function" or type(target) ~= "table" or type(target.mapID) ~= "number" then
+local function IsManualAuthorityMapTransitionArrival(arrival)
+    if not arrival.seenTarget or not IsAreaPoiManualAuthority(arrival.record) or not NS.GetPlayerMapID then
         return false
     end
     local playerMapID = NS.GetPlayerMapID()
-    return type(playerMapID) == "number" and playerMapID ~= target.mapID
+    return type(playerMapID) == "number" and playerMapID ~= arrival.mapID
 end
 
-function NS.CheckManualAuthorityArrival()
-    local record = state.routing.manualAuthority
-    if type(record) ~= "table" then
+-- Resolve queue ownership and settings when the active route changes. Movement
+-- samples reuse this state without reconciling the queue or building a key.
+function NS.PrepareManualAuthorityArrival(record)
+    if not state.routing.manualAuthority
+        or not NS.IsManualWaypointAutoClearEnabled or not NS.IsManualWaypointAutoClearEnabled() then
         ResetManualArrivalState()
-        return false
+        return
     end
-
-    if not NS.IsManualWaypointAutoClearEnabled or not NS.IsManualWaypointAutoClearEnabled() then
+    if record ~= state.routing.manualAuthority then return end
+    local clearDistance = NS.GetManualWaypointClearDistance and NS.GetManualWaypointClearDistance()
+    if type(clearDistance) ~= "number" or clearDistance <= 0 or not IsAutoClearableManualAuthority(record) then
         ResetManualArrivalState()
-        return false
-    end
-
-    local clearDistance = type(NS.GetManualWaypointClearDistance) == "function" and NS.GetManualWaypointClearDistance() or 0
-    if type(clearDistance) ~= "number" or clearDistance <= 0 then
-        ResetManualArrivalState()
-        return false
-    end
-
-    if not IsAutoClearableManualAuthority(record) then
-        ResetManualArrivalState()
-        return false
-    end
-
-    if type(NS.GetPlayerWaypointDistance) ~= "function" then
-        return false
+        return
     end
 
     local target = GetManualAuthorityArrivalTarget(record)
-    local key = GetManualAuthorityArrivalKey(record)
+    if not target then
+        ResetManualArrivalState()
+        return
+    end
+    local key = GetManualAuthorityArrivalKey(record, target)
     local arrival = state.routing.manualArrival
-    local distance = target and NS.GetPlayerWaypointDistance(target.mapID, target.x, target.y) or nil
-    if type(distance) ~= "number" then
-        if type(arrival) == "table" and arrival.key == key
-            and IsManualAuthorityMapTransitionArrival(record, target, arrival)
-        then
-            return ClearManualAuthorityWithFollowup("arrival_map_transition")
-        end
-        return false
-    end
-
-    if type(arrival) ~= "table" or arrival.key ~= key then
-        arrival = {
-            key = key,
-            armed = distance > clearDistance,
-            seenTarget = true,
-            mapID = target and target.mapID or nil,
-        }
+    if not arrival or arrival.key ~= key then
+        arrival = { key = key }
         state.routing.manualArrival = arrival
+    end
+    arrival.record, arrival.clearDistance = record, clearDistance
+    arrival.mapID, arrival.x, arrival.y = target.mapID, target.x, target.y
+    return arrival
+end
+
+local function FinishManualArrival(reason)
+    local routing = state.routing
+    routing._manualArrivalCheckActive = true
+    local cleared = ClearManualAuthorityWithFollowup(reason)
+    routing._manualArrivalCheckActive = false
+    return cleared
+end
+
+function NS.CheckManualAuthorityArrival(arrival, canFinish)
+    local routing = state.routing
+    if not arrival or routing.manualArrival ~= arrival or routing.manualAuthority ~= arrival.record
+        or routing._manualArrivalCheckActive or not NS.GetPlayerWaypointDistance then
         return false
     end
 
-    arrival.seenTarget = true
-    arrival.mapID = target and target.mapID or nil
-
-    if not arrival.armed then
-        if distance > clearDistance then
-            arrival.armed = true
+    local record = arrival.record
+    local final = record.currentLeg and record.legs and record.currentLegIndex == #record.legs
+    local distance = NS.GetPlayerWaypointDistance(arrival.mapID, arrival.x, arrival.y)
+    if type(distance) ~= "number" or issecretvalue and issecretvalue(distance) then
+        if final and (not record.hasSanctumCrossing or canFinish(record)) and IsManualAuthorityMapTransitionArrival(arrival) then
+            return FinishManualArrival("arrival_map_transition")
         end
         return false
     end
+    if not (distance >= 0 and distance < math.huge) then return false end
+    arrival.seenTarget = true
 
-    if distance > clearDistance then
+    if distance > arrival.clearDistance then
+        arrival.armed = true
         return false
     end
 
-    return ClearManualAuthorityWithFollowup("arrival")
+    if arrival.armed and final and canFinish(record) then return FinishManualArrival("arrival") end
+    return false
 end
 
 function NS.HandleExplicitManualAuthorityRemove()
+    if NS.Internal.ServiceSearch then NS.Internal.ServiceSearch.Cancel() end
     return ClearManualAuthorityWithFollowup("explicit")
 end

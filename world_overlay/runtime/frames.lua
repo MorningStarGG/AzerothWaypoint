@@ -11,11 +11,11 @@ local unpackCoords                    = M.unpackCoords
 local CFG                             = M.Config
 
 local WAYPOINT_TEXTURE                = CFG.WAYPOINT_TEXTURE
-local WAYPOINT_BEACON_TEXTURE           = CFG.WAYPOINT_BEACON_TEXTURE
+local WAYPOINT_BEACON_TEXTURE         = CFG.WAYPOINT_BEACON_TEXTURE
 local CONTEXT_TEXTURE                 = CFG.CONTEXT_TEXTURE
-local WAYPOINT_BEACON_MASK_TEXTURE      = CFG.WAYPOINT_BEACON_MASK_TEXTURE
-local WAYPOINT_BEACON_TEX_COORDS        = CFG.WAYPOINT_BEACON_TEX_COORDS
-local WAYPOINT_BEACON_LAYOUT            = CFG.WAYPOINT_BEACON_LAYOUT
+local WAYPOINT_BEACON_MASK_TEXTURE    = CFG.WAYPOINT_BEACON_MASK_TEXTURE
+local WAYPOINT_BEACON_TEX_COORDS      = CFG.WAYPOINT_BEACON_TEX_COORDS
+local WAYPOINT_BEACON_LAYOUT          = CFG.WAYPOINT_BEACON_LAYOUT
 local PINPOINT_ARROW_TEXTURE          = CFG.PINPOINT_ARROW_TEXTURE
 local PINPOINT_ARROW_TEX_COORDS       = CFG.PINPOINT_ARROW_TEX_COORDS
 local PINPOINT_ARROW_WIDTH            = CFG.PINPOINT_ARROW_WIDTH
@@ -28,10 +28,10 @@ local NAVIGATOR_ARROW_HEIGHT          = CFG.NAVIGATOR_ARROW_HEIGHT
 local Plaques                         = M.Plaques
 local PlaqueAnimations                = M.PlaqueAnimations
 local UPDATE_INTERVAL                 = CFG.UPDATE_INTERVAL
-local WAYPOINT_BEACON_WIDTH             = CFG.WAYPOINT_BEACON_WIDTH
-local WAYPOINT_BEACON_HEIGHT            = CFG.WAYPOINT_BEACON_HEIGHT
-local WAYPOINT_BEACON_OFFSET_Y          = CFG.WAYPOINT_BEACON_OFFSET_Y
-local WAYPOINT_BEACON_MASK_SIZE         = CFG.WAYPOINT_BEACON_MASK_SIZE
+local WAYPOINT_BEACON_WIDTH           = CFG.WAYPOINT_BEACON_WIDTH
+local WAYPOINT_BEACON_HEIGHT          = CFG.WAYPOINT_BEACON_HEIGHT
+local WAYPOINT_BEACON_OFFSET_Y        = CFG.WAYPOINT_BEACON_OFFSET_Y
+local WAYPOINT_BEACON_MASK_SIZE       = CFG.WAYPOINT_BEACON_MASK_SIZE
 local WAYPOINT_CONTEXT_SIZE           = CFG.WAYPOINT_CONTEXT_SIZE
 local PINPOINT_CONTEXT_SIZE           = CFG.PINPOINT_CONTEXT_SIZE
 local NAVIGATOR_CONTEXT_SIZE          = CFG.NAVIGATOR_CONTEXT_SIZE
@@ -46,10 +46,7 @@ local WAYPOINT_FOOTER_TITLE_MAX_LINES = CFG.WAYPOINT_FOOTER_TITLE_MAX_LINES
 local PINPOINT_TITLE_MAX_LINES        = CFG.PINPOINT_TITLE_MAX_LINES
 local PINPOINT_SUBTEXT_MAX_LINES      = CFG.PINPOINT_SUBTEXT_MAX_LINES
 local PINPOINT_TEXT_INSET_X           = CFG.PINPOINT_TEXT_INSET_X
-local PINPOINT_TEXT_INSET_TOP         = CFG.PINPOINT_TEXT_INSET_TOP
-local PINPOINT_TEXT_INSET_BOTTOM      = CFG.PINPOINT_TEXT_INSET_BOTTOM
 local PINPOINT_TEXT_GAP               = CFG.PINPOINT_TEXT_GAP
-local PINPOINT_CONTEXT_OFFSET_Y       = CFG.PINPOINT_CONTEXT_OFFSET_Y
 local PINPOINT_FRAME_EXTRA_HEIGHT     = CFG.PINPOINT_FRAME_EXTRA_HEIGHT
 local DEFAULT_TINT                    = CFG.DEFAULT_TINT
 local CONTEXT_DISPLAY_DIAMOND_ICON    = C.WORLD_OVERLAY_CONTEXT_DISPLAY_DIAMOND_ICON
@@ -60,54 +57,15 @@ local SetIconTexture                  = M.SetIconTexture
 local ResolveContextDiamondColor      = M.ResolveContextDiamondColor
 local ResolveIconGlyphStyle           = M.ResolveIconGlyphStyle
 
-local DEFAULT_PINPOINT_PANEL_SPEC = {
-    minW = 140,
-    baseH = 72,
-    maxH = 96,
-    heightRatio = 0.28,
-    textInsetX = PINPOINT_TEXT_INSET_X,
-}
-
 local function GetDefaultPinpointPanelSpec()
-    local spec = Plaques and Plaques.GetSpec and Plaques.GetSpec(C.WORLD_OVERLAY_PLAQUE_DEFAULT) or nil
-    if type(spec) ~= "table" then
-        return DEFAULT_PINPOINT_PANEL_SPEC
-    end
-
-    return {
-        minW = spec.minW or DEFAULT_PINPOINT_PANEL_SPEC.minW,
-        baseH = spec.baseH or DEFAULT_PINPOINT_PANEL_SPEC.baseH,
-        maxH = spec.maxH or DEFAULT_PINPOINT_PANEL_SPEC.maxH,
-        heightRatio = spec.heightRatio or DEFAULT_PINPOINT_PANEL_SPEC.heightRatio,
-        textInsetX = spec.textInsetX or DEFAULT_PINPOINT_PANEL_SPEC.textInsetX,
-    }
+    return Plaques.GetLayoutSpec()
 end
 
-local function GetPinpointPlaqueSpec(frame)
-    local defaultSpec = GetDefaultPinpointPanelSpec()
-    if not frame then
-        return defaultSpec
-    end
 
-    local spec = frame.__awpPlaqueSpec
-    if type(spec) ~= "table" and frame.Panel then
-        spec = frame.Panel.__awpPlaqueSpec
-    end
+local GetPinpointPlaqueSpec = Plaques.GetLayoutSpec
 
-    if type(spec) ~= "table" then
-        return defaultSpec
-    end
 
-    return {
-        minW = spec.minW or defaultSpec.minW,
-        baseH = spec.baseH or defaultSpec.baseH,
-        maxH = spec.maxH or defaultSpec.maxH,
-        heightRatio = spec.heightRatio or defaultSpec.heightRatio,
-        textInsetX = spec.textInsetX or defaultSpec.textInsetX,
-    }
-end
-
-local function ApplyPinpointTextHostAnchors(frame)
+local function ApplyPinpointLayoutAnchors(frame)
     if not frame or not frame.TextHost or not frame.PanelHost then
         return
     end
@@ -116,9 +74,39 @@ local function ApplyPinpointTextHostAnchors(frame)
     local textInsetX = spec.textInsetX or PINPOINT_TEXT_INSET_X
 
     frame.TextHost:ClearAllPoints()
-    frame.TextHost:SetPoint("TOPLEFT", frame.PanelHost, "TOPLEFT", textInsetX, -PINPOINT_TEXT_INSET_TOP)
-    frame.TextHost:SetPoint("TOPRIGHT", frame.PanelHost, "TOPRIGHT", -textInsetX, -PINPOINT_TEXT_INSET_TOP)
-    frame.TextHost:SetPoint("BOTTOM", frame.PanelHost, "BOTTOM", 0, PINPOINT_TEXT_INSET_BOTTOM)
+    frame.TextHost:SetPoint("TOPLEFT", frame.PanelHost, "TOPLEFT", textInsetX, -spec.textInsetTop)
+    frame.TextHost:SetPoint("TOPRIGHT", frame.PanelHost, "TOPRIGHT", -textInsetX, -spec.textInsetTop)
+    frame.TextHost:SetPoint("BOTTOM", frame.PanelHost, "BOTTOM", 0, spec.textInsetBottom)
+    if frame.ContextIcon then
+        -- Layout specifies how far the diamond's top overlaps the border.
+        -- Derive the center anchor from its size, not the panel's text height.
+        frame.ContextIcon:ClearAllPoints()
+        frame.ContextIcon:SetPoint("CENTER", frame.PanelHost, "BOTTOM", 0,
+            spec.contextOverlap - frame.ContextIcon:GetHeight() * 0.5)
+    end
+end
+
+local function SyncPinpointPlaqueAppearance(frame, showPlaque, force)
+    local appearance = NS.Internal.Appearance
+    local record = appearance and appearance.shells[frame.ThemedPanel]
+    local themed = record and record.applied == true or false
+    local thickness = frame.Panel._borderThickness or 0
+    if not force and frame.__awpThemedPlaque == themed and frame.__awpShowPlaque == showPlaque
+        and frame.__awpBorderThickness == thickness then
+        return
+    end
+    local layoutChanged = frame.__awpThemedPlaque ~= themed or frame.__awpBorderThickness ~= thickness
+    frame.__awpBorderThickness = thickness
+    frame.__awpThemedPlaque, frame.__awpShowPlaque = themed, showPlaque
+    frame.PanelHost:SetShown(showPlaque)
+    frame.TextHost:SetShown(showPlaque)
+    frame.NativeArt:SetShown(showPlaque and not themed)
+    frame.ThemedPanel:SetShown(showPlaque and themed)
+    if layoutChanged or force then
+        ApplyPinpointLayoutAnchors(frame)
+        local cache = M.frameCache and M.frameCache.pinpoint
+        if cache then cache.panelWidth, cache.layoutWidth = nil, nil end
+    end
 end
 
 -- ============================================================
@@ -297,7 +285,7 @@ local function CreateWaypointBeacon(parent)
         beacon.Core,
         beacon.Glow,
     }
-    
+
     beacon.LeftVeils = { beacon.LeftVeilA, beacon.LeftVeilB, beacon.LeftVeilC }
     beacon.RightVeils = { beacon.RightVeilA, beacon.RightVeilB, beacon.RightVeilC }
 
@@ -524,13 +512,12 @@ local function LayoutPinpointText(frame, panelWidth)
     local _, titleHeight, subtextHeight, totalHeight = GetPinpointTextMetrics(frame, actualPanelWidth)
 
     local aspectHeight = math.floor((actualPanelWidth * (spec.heightRatio or defaultSpec.heightRatio)) + 0.5)
-    local verticalPadding = PINPOINT_TEXT_INSET_TOP + PINPOINT_TEXT_INSET_BOTTOM
-    local panelHeight = math.max(
+    local verticalPadding = spec.textInsetTop + spec.textInsetBottom
+    local panelHeight = spec.contentSized and math.max(spec.baseH, totalHeight + verticalPadding) or math.max(
         spec.baseH or defaultSpec.baseH,
         math.min(spec.maxH or defaultSpec.maxH, math.max(totalHeight + verticalPadding, aspectHeight))
     )
-    frame.Panel:SetHeight(panelHeight)
-    if frame.PanelHost then frame.PanelHost:SetHeight(panelHeight) end
+    frame.PanelHost:SetHeight(panelHeight)
     frame:SetHeight(panelHeight + PINPOINT_FRAME_EXTRA_HEIGHT)
 
     local textHost = frame.TextHost or frame.PanelHost or frame.Panel
@@ -606,6 +593,12 @@ local function CreateFooter(parent)
     footer.ArrivalTimeText:SetMaxLines(1)
     ApplyFooterFontStringStyle(footer.ArrivalTimeText)
 
+    if NS.Internal.Appearance then
+        local appearance = NS.Internal.Appearance
+        appearance.Text(footer.InfoText, "waypoint")
+        appearance.Text(footer.DistanceText, "navigator")
+        appearance.Text(footer.ArrivalTimeText, "navigator")
+    end
     return footer
 end
 
@@ -642,31 +635,27 @@ local function RestoreSuppressedRegionSet(stateKey)
     overlay[stateKey] = nil
 end
 
-local function CollectSuperTrackedVisualRegions(owner, depth, visited, regions)
-    if not owner or visited[owner] or depth > SUPER_TRACKED_VISUAL_MAX_DEPTH then
-        return
-    end
-    visited[owner] = true
-
-    local numRegions = type(owner.GetNumRegions) == "function" and owner:GetNumRegions() or 0
-    for regionIndex = 1, numRegions do
-        local region = select(regionIndex, owner:GetRegions())
-        if region and region.IsObjectType then
-            if region:IsObjectType("Texture") or region:IsObjectType("FontString") then
-                regions[#regions + 1] = region
-            end
+local function AppendVisualRegions(regions, ...)
+    for index = 1, select("#", ...) do
+        local region = select(index, ...)
+        if region and region.IsObjectType and (region:IsObjectType("Texture") or region:IsObjectType("FontString")) then
+            regions[#regions + 1] = region
         end
     end
+end
 
-    if depth >= SUPER_TRACKED_VISUAL_MAX_DEPTH or type(owner.GetNumChildren) ~= "function" then
-        return
-    end
-
-    local numChildren = owner:GetNumChildren()
-    for childIndex = 1, numChildren do
-        local child = select(childIndex, owner:GetChildren())
-        if child then
-            CollectSuperTrackedVisualRegions(child, depth + 1, visited, regions)
+-- Consume each frame's region and child lists once without allocating a table per frame.
+local function CollectSuperTrackedVisualRegions(depth, visited, regions, ...)
+    for index = 1, select("#", ...) do
+        local owner = select(index, ...)
+        if owner and not visited[owner] then
+            visited[owner] = true
+            if type(owner.GetRegions) == "function" then
+                AppendVisualRegions(regions, owner:GetRegions())
+            end
+            if depth < SUPER_TRACKED_VISUAL_MAX_DEPTH and type(owner.GetChildren) == "function" then
+                CollectSuperTrackedVisualRegions(depth + 1, visited, regions, owner:GetChildren())
+            end
         end
     end
 end
@@ -687,7 +676,7 @@ local function SuppressSuperTrackedVisuals(superTrackedFrame)
     ClearTable(regions)
     ClearTable(visited)
     ClearTable(active)
-    CollectSuperTrackedVisualRegions(superTrackedFrame, 0, visited, regions)
+    CollectSuperTrackedVisualRegions(0, visited, regions, superTrackedFrame)
 
     local suppressed = overlay.suppressedSuperTrackedVisuals
     if type(suppressed) ~= "table" then
@@ -699,10 +688,11 @@ local function SuppressSuperTrackedVisuals(superTrackedFrame)
         local region = regions[index]
         if type(region.SetAlpha) == "function" and type(region.GetAlpha) == "function" then
             active[region] = true
+            local alpha = region:GetAlpha()
             if suppressed[region] == nil then
-                suppressed[region] = region:GetAlpha()
+                suppressed[region] = alpha
             end
-            if region:GetAlpha() ~= 0 then
+            if alpha ~= 0 then
                 region:SetAlpha(0)
             end
         end
@@ -724,7 +714,7 @@ end
 
 local function ShouldSuppressSuperTrackedVisuals()
     local init = NS.State and NS.State.init or nil
-    return init and init.playerLoggedIn == true or false
+    return init and init.playerLoggedIn == true and not M.CorpseOwnsNavigationFrame() or false
 end
 
 local function ApplySuperTrackedFrameVisibility()
@@ -776,6 +766,8 @@ local function EnsureDriverRoot()
         driver:SetPoint("TOPLEFT", WorldFrame, "TOPLEFT", 0, 0)
         driver:Hide()
         driver:SetScript("OnUpdate", function(_, elapsed)
+            -- Animate visible frames from cached content each frame. The interval
+            -- update below refreshes layout and resolves stale icon and objective text.
             local churn = NS.State.churn
             if churn and churn.active then
                 churn.driverUpdate = churn.driverUpdate + 1
@@ -841,7 +833,7 @@ local function EnsurePinpointFrame()
         return
     end
 
-    local plaqueType = NS.GetWorldOverlaySetting("worldOverlayPinpointPlaqueType") or C.WORLD_OVERLAY_PLAQUE_DEFAULT
+    local plaqueType = NS.GetWorldOverlaySetting("worldOverlayPinpointPlaqueType") or NS.GetDefaultPlaqueType()
     local plaqueSpec = Plaques.GetSpec(plaqueType)
 
     local pinpoint = CreateFrame("Frame", "AWPWorldOverlayPinpoint", overlay.root)
@@ -853,23 +845,36 @@ local function EnsurePinpointFrame()
     pinpoint:Hide()
     pinpoint.__awpPlaqueType = plaqueType
     pinpoint.__awpPlaqueSpec = plaqueSpec
-    pinpoint.Panel = Plaques.CreatePanel(pinpoint, plaqueType)
-    pinpoint.Panel:SetPoint("TOP", pinpoint, "TOP", 0, 0)
+    pinpoint.PanelHost = CreateFrame("Frame", nil, pinpoint)
+    pinpoint.PanelHost:SetPoint("TOP", pinpoint, "TOP", 0, 0)
+    pinpoint.PanelHost:SetSize(plaqueSpec.minW, plaqueSpec.baseH)
+    pinpoint.NativeArt = CreateFrame("Frame", nil, pinpoint.PanelHost)
+    pinpoint.NativeArt:SetAllPoints(pinpoint.PanelHost)
+    pinpoint.Panel = Plaques.CreatePanel(pinpoint.NativeArt, plaqueType)
+    pinpoint.Panel:SetAllPoints(pinpoint.PanelHost)
+    pinpoint.ThemedPanel = CreateFrame("Frame", nil, pinpoint.PanelHost)
+    pinpoint.ThemedPanel:SetAllPoints(pinpoint.PanelHost)
+    pinpoint.ThemedPanel:EnableMouse(false)
     pinpoint.Panel:SetVertexColor(1, 1, 1, 0.95)
     local anim         = PlaqueAnimations.CreateAnimations(pinpoint, pinpoint.Panel, plaqueType)
     pinpoint.Gems      = anim.Gems    -- nil if plaque has no corner_gems (render.lua guards with "if frame.Gems then")
-    pinpoint.Overlay   = anim.Overlay -- nil if plaque has no full_overlay (render.lua guards with "if frame.Overlay then")
-    pinpoint.PanelHost = pinpoint.Panel
+    pinpoint.Overlay   = anim
+    .Overlay                          -- nil if plaque has no full_overlay (render.lua guards with "if frame.Overlay then")
+    -- Artwork has nested frames (including animation layers). Keep semantic
+    -- content above both renderers, independently of their creation order.
+    local contentLevel = math.max(pinpoint.Panel:GetFrameLevel(), pinpoint.ThemedPanel:GetFrameLevel()) + 2
     pinpoint.TextHost  = CreateFrame("Frame", nil, pinpoint)
-    ApplyPinpointTextHostAnchors(pinpoint)
+    pinpoint.TextHost:SetFrameLevel(contentLevel)
     pinpoint.GlowTL = anim.GlowTL -- nil if plaque has no glow (render.lua guards with "if frame.GlowTL then")
     pinpoint.GlowTR = anim.GlowTR
     pinpoint.GlowBL = anim.GlowBL
     pinpoint.GlowBR = anim.GlowBR
     pinpoint.ContextIcon = CreateContextIcon(pinpoint, PINPOINT_CONTEXT_SIZE, GetContextGlyphSize(PINPOINT_CONTEXT_SIZE))
-    pinpoint.ContextIcon:SetPoint("CENTER", pinpoint.Panel, "BOTTOM", 0, PINPOINT_CONTEXT_OFFSET_Y)
+    pinpoint.ContextIcon:SetFrameLevel(contentLevel)
+    ApplyPinpointLayoutAnchors(pinpoint)
     local arrowSlotStep = PINPOINT_ARROW_HEIGHT - PINPOINT_ARROW_SLOT_OVERLAP
     pinpoint.ArrowGroup = CreateFrame("Frame", nil, pinpoint)
+    pinpoint.ArrowGroup:SetFrameLevel(contentLevel)
     pinpoint.ArrowGroup:SetSize(PINPOINT_ARROW_WIDTH, PINPOINT_ARROW_HEIGHT + (arrowSlotStep * 2))
     pinpoint.ArrowGroup:SetPoint("TOP", pinpoint.ContextIcon, "BOTTOM", 0, PINPOINT_ARROW_GROUP_Y)
     pinpoint.ArrowSlot1 = CreateFrame("Frame", nil, pinpoint.ArrowGroup)
@@ -907,10 +912,20 @@ local function EnsurePinpointFrame()
     pinpoint.SubtextMeasure:SetMaxLines(1)
     pinpoint.SubtextMeasure:Hide()
     pinpoint.HitArea = CreateFrame("Frame", nil, pinpoint)
-    pinpoint.HitArea:SetPoint("TOPLEFT", pinpoint.Panel, "TOPLEFT", 18, -4)
-    pinpoint.HitArea:SetPoint("TOPRIGHT", pinpoint.Panel, "TOPRIGHT", -18, -4)
+    pinpoint.HitArea:SetPoint("TOPLEFT", pinpoint.PanelHost, "TOPLEFT", 18, -4)
+    pinpoint.HitArea:SetPoint("TOPRIGHT", pinpoint.PanelHost, "TOPRIGHT", -18, -4)
     pinpoint.HitArea:SetPoint("BOTTOM", pinpoint.ArrowGroup, "BOTTOM", 0, 2)
     overlay.pinpoint = pinpoint
+    if NS.Internal.Appearance then
+        local appearance = NS.Internal.Appearance
+        appearance.Tag(pinpoint, "plaque")
+        appearance.Text(pinpoint.Title, "plaque", nil, nil, "heading")
+        appearance.Text(pinpoint.Subtext, "plaque", nil, nil, "tip")
+        appearance.Text(pinpoint.TitleMeasure, "plaque", nil, nil, "heading")
+        appearance.Text(pinpoint.SubtextMeasure, "plaque", nil, nil, "tip")
+        appearance.Shell(pinpoint.ThemedPanel, "plaque")
+    end
+    SyncPinpointPlaqueAppearance(pinpoint, _settings.worldOverlayPinpointMode ~= "no_plaque")
     SetHoverHandlers(pinpoint.HitArea)
     ApplyOverlayAdornmentStyleToAll(true)
 end
@@ -1014,6 +1029,7 @@ M.ApplyOverlayAdornmentStyleToAll = ApplyOverlayAdornmentStyleToAll
 M.SetContextIconSpec = SetContextIconSpec
 M.GetPinpointTextMetrics = GetPinpointTextMetrics
 M.LayoutPinpointText = LayoutPinpointText
+M.SyncPinpointPlaqueAppearance = SyncPinpointPlaqueAppearance
 M.SetHoverHandlers = SetHoverHandlers
 M.CreateFooter = CreateFooter
 M.ApplySuperTrackedFrameVisibility = ApplySuperTrackedFrameVisibility
@@ -1031,10 +1047,10 @@ M.SwapPinpointPlaqueType = function(plaqueType)
     local pinpoint = overlay.pinpoint
     if not pinpoint or not pinpoint.Panel then return end
     if pinpoint.__awpPlaqueType == plaqueType then return end
-    plaqueType = plaqueType or C.WORLD_OVERLAY_PLAQUE_DEFAULT
+    plaqueType = plaqueType or NS.GetDefaultPlaqueType()
     Plaques.UpdatePanel(pinpoint.Panel, plaqueType)
+    plaqueType               = pinpoint.Panel.__awpPlaqueType
     pinpoint.__awpPlaqueSpec = pinpoint.Panel.__awpPlaqueSpec or Plaques.GetSpec(plaqueType)
-    ApplyPinpointTextHostAnchors(pinpoint)
     local updated            = PlaqueAnimations.UpdateAnimations(pinpoint, pinpoint.Panel, plaqueType)
     pinpoint.Gems            = updated.Gems
     pinpoint.GlowTL          = updated.GlowTL
@@ -1043,6 +1059,7 @@ M.SwapPinpointPlaqueType = function(plaqueType)
     pinpoint.GlowBR          = updated.GlowBR
     pinpoint.Overlay         = updated.Overlay
     pinpoint.__awpPlaqueType = plaqueType
+    SyncPinpointPlaqueAppearance(pinpoint, pinpoint.__awpShowPlaque, true)
 
     local frameCache = M.frameCache and M.frameCache.pinpoint
     if frameCache then
@@ -1050,7 +1067,7 @@ M.SwapPinpointPlaqueType = function(plaqueType)
         frameCache.layoutWidth = nil
     end
 
-    M.frameCacheDirty        = true
+    M.frameCacheDirty = true
 end
 M.ResetFrameTextCaches = ResetFrameTextCaches
 M.ShowOnlyFrame = ShowOnlyFrame

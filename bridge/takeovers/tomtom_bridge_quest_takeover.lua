@@ -1,3 +1,10 @@
+-- ============================================================
+-- Blizzard quest waypoints
+-- ============================================================
+--
+-- Adopts selected quests and quest offers into manual routing and releases the
+-- route when its quest is cleared.
+
 local NS = _G.AzerothWaypointNS
 local state = NS.State
 
@@ -33,20 +40,9 @@ local TASK_QUEST_RESOLUTION_SOURCES = {
     task_zone = true,
 }
 
--- ============================================================
--- Forward declarations
--- ============================================================
-
-local CancelQuestAdoptionRetry
-local AdoptQuestAsManual
-local ScheduleQuestAdoptionRetry
-local ClearQuestBackedManual
-local ClearQuestBackedManualForReason
-local ClearQuestOfferBackedManual
-local ResolveQuestDestination
 
 -- ============================================================
--- Normalizers
+-- Quest identifiers and takeover sources
 -- ============================================================
 
 local function NormalizeQuestID(questID)
@@ -75,11 +71,7 @@ local function GetQuestOfferMapPinType()
     return 1
 end
 
-local function GetWaypointSignature(mapID, x, y)
-    if type(Signature) ~= "function" then return nil end
-    if type(mapID) ~= "number" or type(x) ~= "number" or type(y) ~= "number" then return nil end
-    return Signature(mapID, x, y)
-end
+local GetWaypointSignature = NS.GetWaypointSignatureForCoords
 
 -- ============================================================
 -- Quest resolution
@@ -210,7 +202,7 @@ local function ShouldPreferQuestOfferResolution(takeoverSource)
     return NormalizeQuestTakeoverSource(takeoverSource) == QUEST_TAKEOVER_SOURCE_QUEST_OFFER
 end
 
-ResolveQuestDestination = function(questID, preferredMapID, takeoverSource)
+local function ResolveQuestDestination(questID, preferredMapID, takeoverSource)
     if type(questID) ~= "number" then return nil end
     local preferQuestOffer = ShouldPreferQuestOfferResolution(takeoverSource)
 
@@ -256,6 +248,8 @@ ResolveQuestDestination = function(questID, preferredMapID, takeoverSource)
         end
     end
 
+    local data = NS.Internal.QuestieData
+    if data then return data.ResolveDestination(questID) end
     return nil
 end
 
@@ -302,7 +296,8 @@ end
 
 local function GetQuestTakeoverSource(destination)
     if GetQuestIDForQuestBackedManual(destination) == nil then return nil end
-    local identity = type(destination) == "table" and type(destination.identity) == "table" and destination.identity or nil
+    local identity = type(destination) == "table" and type(destination.identity) == "table" and destination.identity or
+    nil
     local source = type(identity) == "table" and identity.questSource or nil
     return NormalizeQuestTakeoverSource(source)
 end
@@ -496,10 +491,11 @@ local function IsQuestWatched(questID)
 end
 
 -- ============================================================
--- Metadata builder
+-- Destination metadata
 -- ============================================================
 
-local function BuildQuestTakeoverMeta(questID, destMapID, destX, destY, takeoverSource, sourceAddon, resolutionSource)
+local function BuildQuestTakeoverMeta(questID, destMapID, destX, destY, takeoverSource, sourceAddon, resolutionSource,
+                                      backendOverride)
     local normalizedSource = NormalizeQuestTakeoverSource(takeoverSource)
     return NS.BuildRouteMeta(NS.BuildQuestIdentity(questID, destMapID, destX, destY, {
         questSource = normalizedSource,
@@ -508,6 +504,7 @@ local function BuildQuestTakeoverMeta(questID, destMapID, destX, destY, takeover
     }), {
         manualQuestID = questID,
         sourceAddon = sourceAddon,
+        backendOverride = backendOverride,
     })
 end
 
@@ -515,23 +512,63 @@ end
 -- Retry and adoption
 -- ============================================================
 
-CancelQuestAdoptionRetry = function()
+local function CancelQuestAdoptionRetry()
     quest.adoptionRetrySerial = (quest.adoptionRetrySerial or 0) + 1
 end
 
-AdoptQuestAsManual = function(questID, takeoverSource, explicit, preferredMapID, sourceAddon)
+-- Compare route intent, not its current carrier leg or publication source.
+-- A pending replacement owns the decision even while the old queue is saved.
+local function SameQuestRoute(record, questID, mapID, x, y, preferred)
+    if type(record) ~= "table" then return false end
+    local identity = record.identity
+    local ownedQuest
+    if type(identity) == "table" and identity.kind == "quest" then
+        ownedQuest = identity.questID
+    elseif record.type == "manual" then
+        ownedQuest = record.manualQuestID
+    else
+        ownedQuest = record.semanticQuestID
+    end
+    if ownedQuest ~= questID then return false end
+    local planning = NS.GetRoutePlanningStatus(record)
+    local requested = record.backendOverride or planning and planning.preferred or NS.GetSelectedBackendID()
+    if requested ~= preferred then return false end
+    local map, px, py = NS.RoutePlanningCore.GetDestination(record)
+    local wanted = GetWaypointSignature(mapID, x, y)
+    return wanted ~= nil and wanted == GetWaypointSignature(map, px, py)
+end
+
+function M.IsQuestRouteCurrent(questID, backendOverride)
+    questID = NormalizeQuestID(questID)
+    if not questID or not NS.IsRoutingEnabled() then return false end
+    local mapID, x, y = ResolveQuestDestination(questID, nil, QUEST_TAKEOVER_SOURCE_SUPERTRACK)
+    if not mapID then return false end
+    local record = state.routing.pendingManualAuthority or NS.RoutePlanningCore.GetActiveRecord()
+    return SameQuestRoute(record, questID, mapID, x, y, backendOverride or NS.GetSelectedBackendID())
+end
+
+local function AdoptQuestAsManual(questID, takeoverSource, explicit, preferredMapID, sourceAddon, backendOverride)
     local desiredQuestID = NormalizeQuestID(questID)
     if not desiredQuestID then return false, "invalid_quest" end
     if not (state.init and state.init.playerLoggedIn) then return false, "not_ready" end
     if type(NS.IsRoutingEnabled) ~= "function" or not NS.IsRoutingEnabled() then
         return false, "routing_disabled"
     end
+    if not explicit and UnitIsDeadOrGhost and UnitIsDeadOrGhost("player") then
+        return false, "corpse_priority"
+    end
 
     local desiredSource = NormalizeQuestTakeoverSource(takeoverSource)
+    local pending = state.routing.pendingManualAuthority
     local destMapID, destX, destY, resolutionSource, resolvedTitle =
         ResolveQuestDestination(desiredQuestID, preferredMapID, desiredSource)
     if not (type(destMapID) == "number" and type(destX) == "number" and type(destY) == "number") then
         return false, "unresolved"
+    end
+
+    if not explicit and pending and SameQuestRoute(pending, desiredQuestID, destMapID, destX, destY,
+            backendOverride or pending.backendOverride or NS.GetSelectedBackendID()) then
+        return false, "already_current"
     end
 
     local isExplicit = explicit == true
@@ -539,22 +576,27 @@ AdoptQuestAsManual = function(questID, takeoverSource, explicit, preferredMapID,
         or ResolveQuestTitle(desiredQuestID)
     local title = ResolveQuestTakeoverTitle(desiredQuestID, baseTitle)
     local destination, activeQuestID, activeSource = GetActiveQuestBackedManual()
-    if activeQuestID == desiredQuestID then
+    if not pending and destination and activeQuestID == desiredQuestID then
+        local activeBackendOverride = NS.GetRouteBackendOverride(destination.meta)
+        if not isExplicit and not backendOverride then backendOverride = activeBackendOverride end
         local activeMapID, activeX, activeY = ReadWaypointCoords(destination)
         local activeTitle = type(destination) == "table" and destination.title or nil
         if GetWaypointSignature(activeMapID, activeX, activeY) == GetWaypointSignature(destMapID, destX, destY)
             and activeTitle == title
             and activeSource == desiredSource
+            and activeBackendOverride == backendOverride
         then
             return false, "already_current"
         end
     end
 
-    NS.RequestManualRoute(
+    local accepted = NS.RequestManualRoute(
         destMapID, destX, destY, title,
-        BuildQuestTakeoverMeta(desiredQuestID, destMapID, destX, destY, desiredSource, sourceAddon, resolutionSource),
+        BuildQuestTakeoverMeta(desiredQuestID, destMapID, destX, destY, desiredSource, sourceAddon, resolutionSource,
+            backendOverride),
         isExplicit and { clickContext = { source = desiredSource, explicit = true } } or nil
     )
+    if not accepted then return false, "route_rejected" end
     NS.Log(
         "Quest takeover route",
         tostring(desiredQuestID), tostring(destMapID), tostring(destX), tostring(destY),
@@ -584,7 +626,7 @@ local function ShouldRetryQuestAdoption(questID, takeoverSource)
     return GetCurrentSuperTrackedQuestID() == normalizedQuestID
 end
 
-ScheduleQuestAdoptionRetry = function(questID, takeoverSource, attempt, explicit, preferredMapID)
+local function ScheduleQuestAdoptionRetry(questID, takeoverSource, attempt, explicit, preferredMapID)
     local normalizedQuestID = NormalizeQuestID(questID)
     local desiredSource = NormalizeQuestTakeoverSource(takeoverSource)
     local nextAttempt = type(attempt) == "number" and attempt or 1
@@ -613,7 +655,7 @@ end
 -- Clear helpers
 -- ============================================================
 
-ClearQuestBackedManual = function()
+local function ClearQuestBackedManual()
     local destination = GetActiveQuestBackedManual()
     if not destination then return false end
     local visibilityState = GetGuideVisibilityState and GetGuideVisibilityState() or nil
@@ -621,7 +663,7 @@ ClearQuestBackedManual = function()
     return ClearActiveManualDestination(visibilityState, "system")
 end
 
-ClearQuestBackedManualForReason = function(clearReason)
+local function ClearQuestBackedManualForReason(clearReason)
     local destination, questID = GetActiveQuestBackedManual()
     if not destination then return false end
     local visibilityState = GetGuideVisibilityState and GetGuideVisibilityState() or nil
@@ -630,7 +672,7 @@ ClearQuestBackedManualForReason = function(clearReason)
     return ClearActiveManualDestination(visibilityState, clearReason or "system")
 end
 
-ClearQuestOfferBackedManual = function(clearReason)
+local function ClearQuestOfferBackedManual(clearReason)
     local destination, questID, source = GetActiveQuestBackedManual()
     if not destination or source ~= QUEST_TAKEOVER_SOURCE_QUEST_OFFER then return false end
     local visibilityState = GetGuideVisibilityState and GetGuideVisibilityState() or nil
@@ -683,6 +725,13 @@ end
 -- ============================================================
 
 local function HandleSuperTrackedQuestIDChanged(questID)
+    local routing = state.routing
+    local current = routing.pendingManualAuthority or routing.manualAuthority
+    local identity = current and current.identity
+    if identity and identity.questSource == QUEST_TAKEOVER_SOURCE_SUPERTRACK and identity.questID == questID
+        and current.backendOverride == "mapzeroth" then
+        return false
+    end
     local explicit = NS.IsExplicitUserSupertrack()
     if not explicit then NS.ClearPendingGuideTakeover() end
     if not explicit and not IsTrackedQuestAutoRouteEnabled() then return false end
@@ -717,7 +766,9 @@ local function HandleSuperTrackedQuestIDChanged(questID)
             type(addonContext) == "table" and addonContext.mapID or nil,
             type(addonContext) == "table" and addonContext.sourceAddon or nil
         )
-        if adopted then CancelQuestAdoptionRetry(); return true end
+        if adopted then
+            CancelQuestAdoptionRetry(); return true
+        end
         if reason == "unresolved" then
             ScheduleQuestAdoptionRetry(normalizedQuestID, QUEST_TAKEOVER_SOURCE_SUPERTRACK, nil, explicit)
         end
@@ -755,7 +806,9 @@ local function HandleQuestOfferMapPinChanged(pinID, preferredMapID, explicit)
         return false
     end
     local adopted, reason = AdoptQuestAsManual(questID, QUEST_TAKEOVER_SOURCE_QUEST_OFFER, explicit, preferredMapID)
-    if adopted then CancelQuestAdoptionRetry(); return true end
+    if adopted then
+        CancelQuestAdoptionRetry(); return true
+    end
     if reason == "unresolved" then
         ScheduleQuestAdoptionRetry(questID, QUEST_TAKEOVER_SOURCE_QUEST_OFFER, nil, explicit, preferredMapID)
     end
@@ -772,10 +825,51 @@ local function HandleQuestWatchAdded(questID)
         return false
     end
     local adopted, reason = AdoptQuestAsManual(normalizedQuestID, QUEST_TAKEOVER_SOURCE_WATCH)
-    if adopted then CancelQuestAdoptionRetry(); return true end
+    if adopted then
+        CancelQuestAdoptionRetry(); return true
+    end
     if reason == "unresolved" then
         ScheduleQuestAdoptionRetry(normalizedQuestID, QUEST_TAKEOVER_SOURCE_WATCH)
     end
+    return false
+end
+
+function M.RouteQuestExplicitly(questID, backendOverride)
+    local adopted, reason = AdoptQuestAsManual(questID, QUEST_TAKEOVER_SOURCE_WATCH, true, nil, nil, backendOverride)
+    if adopted or reason == "already_current" then
+        NS.ClearPendingGuideTakeover()
+        CancelQuestAdoptionRetry()
+        return true
+    end
+    if reason == "unresolved" then
+        NS.Msg("Could not find a destination for that quest.")
+    elseif reason ~= "routing_disabled" then
+        NS.Msg("Could not start a route to that quest.")
+    end
+    return false
+end
+
+function M.RouteFollowedQuest(questID, backendOverride, confirmed)
+    questID = NormalizeQuestID(questID)
+    if not questID or questID ~= GetCurrentSuperTrackedQuestID()
+        or (UnitIsDeadOrGhost and UnitIsDeadOrGhost("player"))
+        or (NS.IsInternalSuperTrackMutation and NS.IsInternalSuperTrackMutation()) then
+        return false
+    end
+    if M.IsQuestRouteCurrent(questID, backendOverride) then return true end
+    if not confirmed and GetGuideVisibilityState and GetGuideVisibilityState() == "visible"
+        and IsCurrentGuideStepQuest(questID) then
+        return false
+    end
+
+    local adopted, reason = AdoptQuestAsManual(questID, QUEST_TAKEOVER_SOURCE_SUPERTRACK, false, nil, nil,
+        backendOverride)
+    if adopted or reason == "already_current" then
+        NS.ClearPendingGuideTakeover()
+        CancelQuestAdoptionRetry()
+        return true
+    end
+    if confirmed and reason == "unresolved" then NS.Msg("Could not find a destination for that quest.") end
     return false
 end
 
@@ -819,6 +913,8 @@ end
 local function RefreshActiveQuestBackedManual(eventName, eventQuestID)
     local destination, activeQuestID, activeSource = GetActiveQuestBackedManual()
     if not activeQuestID then return false end
+    -- An external pin is an exact user selection, not an automatic quest follower.
+    if destination and destination.questContext and destination.identity and destination.identity.kind == "external_tomtom" then return false end
 
     local normalizedEventQuestID = NormalizeQuestID(eventQuestID)
     if normalizedEventQuestID and normalizedEventQuestID ~= activeQuestID then return false end
@@ -899,7 +995,7 @@ local function ScheduleActiveQuestBackedManualRefresh(eventName, eventQuestID)
 end
 
 -- ============================================================
--- NS exports
+-- Public takeover handlers
 -- ============================================================
 
 function NS.IsCurrentGuideStepQuest(questID)
@@ -937,7 +1033,9 @@ function NS.SyncSuperTrackedQuestToManual()
 
     if questID then
         local adopted, reason = AdoptQuestAsManual(questID, QUEST_TAKEOVER_SOURCE_SUPERTRACK)
-        if adopted then CancelQuestAdoptionRetry(); return true end
+        if adopted then
+            CancelQuestAdoptionRetry(); return true
+        end
         if reason == "unresolved" then
             ScheduleQuestAdoptionRetry(questID, QUEST_TAKEOVER_SOURCE_SUPERTRACK)
         end
@@ -1030,11 +1128,11 @@ function NS.GetManualDestinationPersistenceIdentity(destination)
 end
 
 -- ============================================================
--- BlizzardKinds registration
+-- Pin type registration
 -- ============================================================
 
 M.BlizzardKinds["quest"] = {
-    onChanged = nil,  -- adopted via SetSuperTrackedQuestID hook NS.HandleSuperTrackedQuestIDChanged
+    onChanged = nil, -- adopted via SetSuperTrackedQuestID hook NS.HandleSuperTrackedQuestIDChanged
     resolvePending = function(pending)
         local mapID, x, y = ResolveQuestDestination(
             pending.questID,
@@ -1051,7 +1149,9 @@ M.BlizzardKinds["quest"] = {
             pending.preferredMapID,
             pending.sourceAddon
         )
-        if adopted then CancelQuestAdoptionRetry(); return true end
+        if adopted then
+            CancelQuestAdoptionRetry(); return true
+        end
         if reason == "unresolved" then
             ScheduleQuestAdoptionRetry(
                 pending.questID,
@@ -1084,7 +1184,9 @@ M.BlizzardKinds["quest_offer"] = {
         local adopted, reason = AdoptQuestAsManual(
             pending.questID, QUEST_TAKEOVER_SOURCE_QUEST_OFFER, true, pending.preferredMapID, pending.sourceAddon
         )
-        if adopted then CancelQuestAdoptionRetry(); return true end
+        if adopted then
+            CancelQuestAdoptionRetry(); return true
+        end
         if reason == "unresolved" then
             ScheduleQuestAdoptionRetry(
                 pending.questID, QUEST_TAKEOVER_SOURCE_QUEST_OFFER, nil, true, pending.preferredMapID

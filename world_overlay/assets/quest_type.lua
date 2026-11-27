@@ -234,7 +234,8 @@ local function IsGenericWorldQuest(classification, questTagID, questTagName, que
         or worldQuestType ~= nil
 end
 
-local function ResolveBonusObjectiveQuestSource(classification, classificationName, questTagID, questTagName, questType, questTypeName)
+local function ResolveBonusObjectiveQuestSource(classification, classificationName, questTagID, questTagName, questType,
+                                                questTypeName)
     if IsEnumValue(QuestClassification, classification, "BonusObjective", QUEST_CLASSIFICATION_FALLBACKS)
         or IsQuestTagNameMatch(classificationName, "BonusObjective")
         or IsQuestTagNameMatch(classificationName, "Bonus Objective")

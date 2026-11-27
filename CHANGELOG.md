@@ -1,5 +1,245 @@
 # Changelog
 
+## 5.0.0
+
+A major update expanding AzerothWaypoint into a more complete navigation and guide experience across Retail and WoW Forever. This release introduces new guide and routing integrations, controller support on Forever, expanded appearance customization, shared guide actions, settings profiles, and improvements to travel and waypoint management.
+
+### Release Highlights
+
+- **New guide integrations:** Dugi Guides, RestedXP, Polestar and QuestieRouter join the supported guide sources: Zygor, APR, and WoWPro. New independent Tracker Viewers for APR and WoWPro as well.
+- **Controller support (WoW Forever):** Navigate guide steps, action panels, waypoint queues, settings, menus and dialogs using a controller.
+- **Smarter travel routing:** New Dugi, Polestar and QuestieRouter routing backends, including support for walking routes, automatic planner fallback and route recovery.
+- **Expanded quest support:** Improved quest details and objective progress, plus Questie and QuestieDB integration on Forever.
+- **Flight Map Assist:** Taxi List, route markers, hover highlights and optional automatic flight selection now support both clients. Added flight fare cost to the AWP Taxi List.
+- **Guide Actions:** Optional movable action panels and inline item, spell and target controls for supported guides.
+- **Expanded UI integration:** DaylightUI, Ellesmere UI, ElvUI and GW2 UI appearance matching, with automatic style selection and additional tracker integrations.
+- **New destination styles:** Additional pinpoint plaques with independent background, border and thickness controls.
+- **Settings profiles:** Share, back up and import AWP settings across characters and supported clients.
+
+### Guide Integrations
+
+- **Dugi Guides (Retail and Forever)**
+  - Added guide navigation through the selected AWP routing backend, an independent Tracker Viewer, native guide controls and Find Nearest service search.
+  - Added optional Dugi Taxi System routing for guide and manual destinations, including travel actions and wearable teleport items. Dugi's travel preferences are respected.
+  - Added six numbered guide slots, including multiple copies of a guide, using native tabs where available or AWP-managed slots when needed. Closing inactive slots preserves the current guide, opening a guide when all slots are full requires choosing one to close.
+  - Hiding Dugi's native guide frame also hides its companion model viewer. Both are restored when hiding is disabled or anchored mode is used.
+
+- **RestedXP (Retail and Forever)**
+  - Added guide navigation, an independent Tracker Viewer, native guide selection and settings, and six remembered recent guides with progress preserved.
+  - Supports native settings menus, including when the native guide window is hidden.
+  - Added native Back, Next and objective-skip controls, Go to Step, and guide reload without losing progress. Back can recover a missing quest from its earlier acceptance step or open Go to Step when the correct step is uncertain.
+  - Respects RestedXP's pause settings and displays a paused message in the Viewer.
+
+- **Polestar (WoW Forever)**
+  - Added Polestar as both a guide source and an optional routing backend. Its backend can plan routes for any AWP destination.
+  - Added an independent Tracker Viewer with access to Polestar's native guide menu, tabs, goal controls and settings, even when its native window is hidden.
+  - Travel planning respects Polestar's own travel, class teleport, terrain walking and route-style preferences.
+  - Expanded travel support including airships, item-required portals, inventory-aware routing, probable flight paths and Astral Recall. Routes can use connections offered by the flight master you are talking to.
+  - Tracker Viewer shows Polestar's escort and group quest choices, escort notes and warnings about hard fights.
+  - Support for native buff, equipment, banking, training, reputation and achievement goals, along with material requirements, special hand-ins and quest explanations.
+  - Displays Polestar's optional left-out quest summary and supports its bag-space helper, including spare-bag equipment and the native two-click junk deletion confirmation.
+  - Previewing steps with Back or Next won't interrupt an active manual waypoint. Explicit guide or goal selection will switch navigation.
+  - Uses Polestar's supported follower integration and offers a **Let AWP Show Navigation** prompt to avoid competing arrows without silently changing native preferences.
+
+- **QuestieRouter (WoW Forever)**
+  - Added QuestieRouter as a guide source, independent Tracker Viewer and selectable travel backend.
+  - Supports dynamic task ordering, manual task selection, return to automatic order, native quest skipping and six remembered recent guides. Progress reflects completed quests rather than artificial linear steps.
+  - Displays quest titles, descriptions, objective progress and grouped notes. The Visible Tasks setting supports up to 14 tasks, including the current task.
+  - Includes an optional native banner above guide tasks, disabled by default.
+  - Select a task from its heading or objective, or use **Choose Task** and **Return to Automatic Order** in the Viewer header.
+  - Travel routing respects native walking and transport preferences, flight destinations, required crossings and exact final destinations. Optional navigation packs provide terrain walking directions.
+  - Includes floor handling, instance entrance labels, native NPC and quest identification, and route updates when settings or travel data change.
+
+- **Azeroth Pilot Reloaded and WoWPro (Retail and Forever)**
+  - Added independent Tracker Viewers with the shared appearance, progress, tips, checkboxes, chat, native-window hiding and guide controls available to other providers.
+  - APR uses its native Back, Skip and route browser. Loot and merchant steps now retain the correct associated quest in the Viewer, arrow, plaque and queue.
+  - WoWPro Back can recover an earlier missing quest acceptance or offer earlier-step selection when needed. Dependent skips retain their confirmation.
+  - Added WoWPro's native Current Guide Steps window and guide selector, plus six remembered recent guides with progress restoration.
+  - Preserved WoWPro's multi-point waypoint progression and prevented already completed points from reappearing.
+
+### Tracker Viewers and Guide Actions
+
+- **Shared Tracker Viewers**
+  - Expanded the common Viewer experience across supported guide addons, with independent appearance, progress, chat and visibility settings. Multiple guides can be displayed while only one controls navigation.
+  - Added support for reordering guide Viewers under **General > Guide Viewer Order**. The order is saved in the active profile and also determines nearby service search priority.
+  - Auto text colors now use consistent colors across guides for NPC headings, training and learning, warnings, completed objectives and skipped work. Added a **UI colors** option.
+  - Added **Use custom Viewer text sizes** to each guide's Tracker Viewer settings, with separate heading, goal, notes/context and progress sizes. Existing sizes remain unchanged until enabled, fonts, outlines and shadows continue to follow the selected style. Rows resize to fit, and size overrides are included in guide profile imports and exports.
+  - Added **Hide Guide Addon Name**, **Hide Guide Title**, and **Compact Active Indicator** to each Tracker Viewer. Hidden names remain in the progress and guide-menu tooltips.
+  - Improved header spacing, alignment, progress sizing, collapse controls and narrow-width layouts across tracker hosts. Inactive Viewers no longer reserve unnecessary active-indicator space.
+  - Improved step checkbox placement and spacing when guide titles are hidden.
+  - Added consistent local chat output options: none, count or titles for sticky summaries, full instructions, or sticky instructions only.
+  - Guide arrow recommendations are coordinated with other startup notices and change native settings only when explicitly accepted.
+
+- **Guide Actions and quest details**
+  - Added independent movable action panels, optional inline action buttons and category filters for supported guides. Panels include drag handles and remember their positions separately.
+  - Native action controls can be hidden independently of the AWP panel, inline buttons and native guide window. Inventory Cleanup is disabled by default and retains native confirmations.
+  - Prepared item, spell and target actions can remain available during combat. If the guide changes, the panel indicates that an update is pending and applies the replacement after combat. Native helper actions remain subject to their original restrictions.
+  - Action buttons show native item, equipment, toy and spell tooltips, including supported tooltip-addon styling and comparisons.
+  - Added **Open Quest Details** to quest-related guide row and section menus. Sections containing several quests offer a choice, viewing details does not change guide progress, tracking or navigation.
+  - Guide actions remain separate from the travel button used for route-related items and spells.
+
+- **Guide menus and commands**
+  - Expanded named guide commands, including guide switching, loading, local chat output, Viewer visibility, native-window visibility and safe window recovery. Unsupported native actions report that they are unavailable rather than changing unrelated settings.
+  - Removed the old Zygor Viewer shortcuts `/awp trackerviewer` and `/awp zygorviewer` and their aliases. Use `/awp zygor viewer` and `/awp zygor native` for their respective controls.
+  - Moved Zygor's compact-window control to `/awp zygor compact on|off|toggle|status`.
+  - The minimap menu now lists loaded guides in the configured Viewer order, including disabled Viewers, with provider-specific shortcuts and independent visibility controls. Added **Search Nearby** for browsing supported services.
+  - Added support for native guide transitions from Zygor guide-loading rows and Polestar's suggested alternative guides.
+  - Background guide updates no longer take navigation away from another active guide or manual destination.
+
+### Controller Support (WoW Forever)
+
+- Added shared controller navigation for guide Viewers, action panels, settings, waypoint queues, help, menus and dialogs.
+- Guide toolbars and task rows support directional navigation, skipping disabled controls and decorative elements. Navigation between docked guide sections preserves the correct guide's actions and menu controls without making that guide active.
+- Press the right stick on a focused task to use its available action or open a picker when multiple actions are available. Additional task actions remain available through menus.
+- Added three optional, unbound key bindings under **AzerothWaypoint**: Navigate AWP Guides, Open AWP Menu and Use Active Guide Action.
+- Added controller-friendly slider adjustment, numeric editing, paged dropdowns, color editing and guide reordering with confirm/cancel controls.
+- DaylightUI and GW2 UI controller scrolling respects visible tracker boundaries, pinned headers, scroll indicators and quest-item buttons.
+- Added a Controller settings page and `/awp controllerdiag` for diagnostics without changing the player's controller layout.
+
+### Navigation and Travel
+
+- **Search Nearby**
+  - Added shared nearby-service search through the minimap menu and `/awp search`. Available Zygor, Dugi and Polestar (Forever) integrations are checked in Guide Viewer Order, the first matching result uses the selected travel planner, even when that guide's Viewer is disabled.
+  - Browse supported vendor, profession, class, weapon master and workshop categories. Specific searches do not substitute unrelated services, and each guide's native Find Nearest menu remains provider-specific.
+
+- **Automatic route fallback and recovery**
+  - If a travel planner fails, AWP now tries other available planners before falling back to TomTom Direct. Your selected backend remains preferred, intentional direct and walking settings are respected.
+  - Existing guidance remains visible while a replacement route is calculated. AWP can return to the preferred planner automatically and announces successful fallback or recovery in chat.
+  - Recovery attempts are spaced out to avoid repeated searches while moving. After 100 yards of movement, retries use increasing 10/20/40/60-second delays, meaningful map or travel changes can trigger an earlier retry.
+  - Improved handling of loading, casts, equipment use, transport transitions and combat. Late results no longer replace cleared or superseded destinations.
+  - Added preferred/active planner information and per-backend fallback and recovery diagnostics.
+
+- **Walking routes and destination guidance**
+  - Added Mapzeroth road and capital-street walking routes on Forever, respecting its native Walking routes setting.
+  - Improved fixed walking directions for Mapzeroth, Polestar and QuestieRouter. Ordinary route points advance when reached or passed nearby, including during fast mounted movement, while required crossings, floors and transport stops remain protected.
+  - Arrow, world marker and map pins advance together. Route updates preserve walking progress and exact destinations instead of returning to already passed points.
+  - Added recovery when leaving Mapzeroth roads or QuestieRouter paths, and Polestar lift boarding, departure and missed-landings.
+  - Added **Follow ground paths while flying**, disabled by default. On supported Retail routes, self-flight can bypass ground directions when the planner approves flight connectivity, landing restores walking guidance. Required stops remain intact.
+  - Walking instructions now name the destination when known, with quest or objective context underneath. Named lifts, stairs, passages and transport approaches retain their specific instructions.
+  - Improved consistency of walking labels across TomTom, plaques and queue details, including consecutive hand-ins at the same identified NPC.
+
+- **Travel actions and transport**
+  - Added distinct boat, airship and zeppelin icons across supported route planners, guides and world markers.
+  - Improved travel-button icons for items, spells and Hearthstones, including Polestar's Hearthstone.
+  - Travel buttons hide during combat to prevent use of an action from an earlier route and return with the current action afterward.
+  - Switching destinations during a travel spell cast allows the cast to finish before deferred planning resumes.
+  - Farstrider connecting flights identify the departure flight master and the final landing. Boat, zeppelin and Deeprun Tram legs advance at the receiving dock. Dungeon and raid exits advance when you leave the instance.
+  - Farstrider routes update when its travel data changes, including newly discovered Forever flight paths.
+  - Routes to waypoints inside dungeons and raids can use Farstrider's verified entrance when Blizzard's entrance is unavailable.
+  - Polestar points toward the receiving dock once a ride is underway. Queue details show the estimated time remaining when available.
+  - Mapzeroth quest-follow requests reuse equivalent active routes, and corpse-trip resumption respects AWP routing without interfering with native previews.
+
+### Flight Map Assist (Retail and Forever)
+
+- Extended the Taxi List, route marker, hover highlights and optional automatic flight selection to WoW Forever.
+- InFlight timing works on both clients. On Forever, the Taxi List can also use DaylightUI's recorded or bundled times, then Farstrider or Ellesmere UI estimates.
+- Reachable destinations show their current fare in the Taxi List and tooltip.
+- Automatic flight selection rechecks the route and departure flight master before boarding, including when the route changes as the flight map opens. A connecting ticket is selected when the flight map confirms the planned stops.
+- Improved tooltip and hover-marker updates when the destination beneath the cursor changes.
+
+### Quest, Map and Waypoint Improvements
+
+- **Quest support and Questie (WoW Forever)**
+  - Improved ordinary quest destinations with shared action information, objective progress and quest context across the arrow, overlay, plaque and queue.
+  - Optional QuestieDB data can enrich identified quests even when Questie is not running or the waypoint came from another source. Missing data retains normal Blizzard behavior.
+  - Questie pins and tracker waypoints retain the correct quest and objective while preserving explicitly selected coordinates. Ready quest data can also fill missing destinations for existing automatic quest following.
+  - Added **Route with AzerothWaypoint** to DaylightUI's quest tracker and journal menus without changing watched quests.
+
+- **Map waypoints and queues**
+  - Added export of all saved manual waypoints or the open queue as copyable TomTom commands.
+  - Improved map clicks near zone boundaries, including Forever QuestieRouter clicks, so destinations use the outdoor zone beneath the cursor when identifiable.
+  - Improved waypoint placement when map information becomes available late and preserved quest icons and NPC context on final walking approaches.
+  - Switching between guides and manual waypoints now consistently honors the latest selection, even during route calculation or TomTom pin updates.
+  - Clearing a manual route after the guide has advanced now resumes the latest guide step through the selected planner.
+  - Original Ctrl-click map pins remain visible when a route starts with a Hearthstone or another travel action, removing the pin clears its manual route.
+  - Improved Forever Shift- and Alt-click handling with Zygor, Polestar and QuestieRouter, preventing duplicate or leftover waypoints.
+  - TomTom's **Remove all waypoints** now cancels pending manual routes, including those cleared during combat.
+  - Queue counts include collapsed sections, and empty queues display a properly spaced empty-state message. Wrapped queue names fit their rows.
+
+- **Combat navigation**
+  - Manual waypoints and current guide destinations can update during combat.
+  - TomTom Direct, Farstrider, Mapzeroth and Dugi can plan during combat on both clients. Forever also supports combat planning with Zygor, QuestieRouter and Polestar. Retail Zygor displays direct guidance while waiting for its native planner.
+  - AWP rechecks destinations after combat when travel options were restricted. Interrupted QuestieRouter terrain searches resume from the current position when needed.
+  - Clearing or replacing a route during combat no longer allows an outdated planning result to restore it afterward.
+
+- **Corpse waypoints**
+  - Improved corpse recognition across all travel backends.
+  - Corpse routes remain temporary, preserve saved manual queues and clear with TomTom's normal corpse waypoint removal.
+  - Clearing a corpse waypoint while dead or ghosted clears the arrow, the interrupted guide or queue resumes on resurrection. New manual destinations remain available while ghosted.
+  - When Blizzard tracks the corpse, its world marker points to the body while TomTom can follow a walking route.
+
+### UI Integrations and Appearance
+
+- **Automatic appearance selection**
+  - AWP now automatically matches a supported UI addon when exactly one is ready. When several are available, a startup chooser offers each style and the original AWP appearance.
+  - Supports DaylightUI, Ellesmere UI, ElvUI and GW2 UI, with DaylightUI limited to Forever. Only one provider styles AWP at a time.
+  - Explicit choices are remembered. Select **General > UI Style > Automatic** to restore automatic selection.
+  - If the selected UI addon is unavailable, AWP temporarily restores its original appearance and offers available alternatives without discarding saved preferences. Escape dismisses the chooser for that session.
+  - Styling remains independent of routing and tracker hosting. Tracker Viewer Auto colors remain contextual, even when UI text matching is enabled, choose UI colors to use the UI style instead.
+
+- **Tracker hosting**
+  - Added Questie tracker hosting on Forever, placing enabled guide Viewers above quests in its shared scrolling area. Fixed empty-tracker sizing when Viewers detach.
+  - Added GW2 UI tracker hosting on Retail and Forever, with independently collapsible guide sections above native quests.
+  - Improved DaylightUI and Ellesmere UI custom tracker spacing, guide widths, action placement and shared scrolling behavior. DaylightUI's native tracker opacity and mouseover fade also apply to guide sections.
+  - Ellesmere UI supports guide Viewers on both clients. Dedicated tracker hosting is available on Forever. AWP uses Blizzard docking on Retail and on Forever when the custom tracker is off. AWP still selects Kaliel's Tracker first when available.
+  - Supported dedicated trackers avoid experimental Blizzard docking. The warning still applies when ElvUI or Ellesmere UI uses Blizzard's tracker.
+
+- **DaylightUI (WoW Forever)**
+  - Added DaylightUI styling for guide Viewers, action panels, plaques, navigation labels, travel controls and AWP windows.
+  - Independent appearance settings for guide Viewers, action panels, plaques, navigation labels and AWP windows.
+  - Headers and panels use DaylightUI's full appearance, with independent border-width and background-opacity overrides for plaques and windows.
+  - AWP's DaylightUI settings are shared between both settings windows.
+  - DaylightUI's minimap drawer stays open while AWP menus are in use and resumes its normal timeout afterward.
+
+- **Ellesmere UI (Retail and Forever)**
+  - Added Ellesmere UI styling for the EUI, Blizzard, Classic and Forever looks for guide Viewers, action panels, plaques, navigation labels, travel controls and AWP windows.
+  - Added independent styling controls for guide Viewers, action panels, navigation labels, plaques and AWP windows, with shared settings in Ellesmere UI's AzerothWaypoint section.
+  - Added live search across the Ellesmere UI AzerothWaypoint settings pages, including setting descriptions, Clear Search and empty-result feedback. Search retains focus while results update.
+  - AWP's Ellesmere UI settings are shared between both settings windows.
+  - Requires Blizzard Skins+ and its AzerothWaypoint addon skin. Preset changes follow Ellesmere UI's normal reload requirements.
+
+- **ElvUI (Retail and Forever)**
+  - Added ElvUI styling for guide Viewers, action panels, plaques, navigation labels, travel controls and AWP windows.
+  - Uses ElvUI's native fonts, media, controls and settings-widget styling, with improved sidebar buttons, sliders and close controls.
+  - AWP and ElvUI settings share appearance preferences for related ElvUI settings. ElvUI also provides shortcuts to AWP options, queue and help.
+
+- **GW2 UI (Retail and Forever)**
+  - Added GW2 UI styling with shared config in AWP settings and GW2 UI's AzerothWaypoint section.
+  - When the GW2 UI map skin is active, Waypoint Queues opens beside the map when space allows and keeps the quest pane accessible.
+  - Appearance and tracker updates preserve unchanged layouts and apply deferred changes after combat.
+
+### Arrow and Pinpoint Customization
+
+- Added standalone **Minimal, Forever, Blizzard, Classic, Clean and Modern** plaques on Retail and Forever.
+- Forever uses a bronze frame, Blizzard a silver frame, Classic the traditional dialog border, Minimal a compact dark panel, Clean a rounded dark panel, and Modern a warm rounded design with bevel and shadow.
+- Renamed the previous Modern plaque to **Future**, preserving its artwork and saved selection. The original Default plaque is now **Fantasy**.
+- Added independent background and border opacity for all six new standalone styles. Minimal, Clean and Modern also support 1–8 pixel border thickness with automatic text spacing.
+- Plaque adjustments are remembered per style.
+
+### Settings, Profiles and Help
+
+- **Settings profiles and sharing**
+  - Added a Profiles page with shared account defaults and optional per-character profile selection. Existing settings become the Default profile.
+  - Create, duplicate, rename and back up profiles, or export a copyable settings string for sharing across Retail and Forever.
+  - Imports preview changes and unavailable integrations before saving a new profile or explicitly replacing an existing one.
+  - Profiles include AWP appearance, preferences and frame positions. Queues, active navigation, guide progress and other addons' settings are not included. Queue's can be exported in AWP's Queue window.
+  - In-game Help links jump directly to related pages and sections. On WoW Forever, you can follow them with a controller.
+
+- **Settings usability**
+  - Added individual Reset controls for AWP settings on both clients, with or without appearance matching. Reset icons appear only when values differ from their defaults and show the default in a tooltip.
+  - Improved slider spacing, editable values, labels and NEW/UPDATED badges, including disabled settings and narrow layouts.
+  - Fixed settings refreshes interrupting dropdown clicks, slider drags or color editing.
+  - Updated in-game Help for guide controls, routing, UI Style, provider-specific commands and live plaque previews.
+
+### Performance, Stability and Diagnostics
+
+- Reduced unnecessary guide progress scans, route searches, layout rebuilds and appearance refreshes when information has not changed.
+- Improved shared route and guide handling to prevent outdated results, empty guide queues, stale helper actions and inactive guide updates from interfering with current navigation.
+- Improved startup handling for optional addons, late tracker initialization and appearance selection.
+- Deferred settings search and release-badge indexing, along with certain diagnostic setup, until first use.
+- Expanded `/awp mem` with startup file-group and initialization timings, and improved `/awp churn` cancellation and routing statistics.
+- Improved saved-settings validation, removing retired or unrecognized fields while preserving recognized queues, guide identities, positions and disabled-integration preferences.
+
 ## 4.2.0
 - **WoW Forever support**
   - Added WoW Forever to the same addon package as Retail, with shared SavedVariables names and capability-based feature checks.
@@ -433,7 +673,7 @@
   - Added Gray as a neutral preset.
   - Waypoint footer text defaults to Gray, while Auto uses contextual icon/spec tint.
   - Removed the old None color option because it because it was identical to White which we already offered.
-  - Color dropdown options are alphabetized (excluding Custom) and include Auto, Custom, Blue,  Cyan, Gold, Gray, Green, Pink, Purple, Red, Silver, and White.
+  - Color dropdown options are alphabetized and include Auto, Custom, Blue,  Cyan, Gold, Gray, Green, Pink, Purple, Red, Silver, and White.
   - Added shared Auto dropdown preview text explaining contextual target hints.
   - Added icon/tint support for gossip services, external sources, quest families, world quests, racing quests, dungeons, raids, delves, portals, taxis, inns, route legs, and travel actions.
   - Available quest POIs no longer show in-progress objective subtext before the quest is accepted.

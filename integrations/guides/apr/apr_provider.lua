@@ -1,8 +1,14 @@
+-- ============================================================
+-- APR guide provider
+-- ============================================================
+--
+-- Observes APR step changes and publishes the selected guide target and its
+-- available actions.
+
 local NS = _G.AzerothWaypointNS
-if not NS.IsAPRLoaded() then return end
 
 local PROVIDER = "apr"
-local APRPresentation = NS.Internal and NS.Internal.APRPresentation or nil
+local APRPresentation = NS.Internal.APRPresentation
 
 local function GetAPR()
     return rawget(_G, "APR")
@@ -56,6 +62,7 @@ local function GetVisibilityState()
     if not APR.ActiveRoute or not GetCurrentStep(APR) then
         return "absent"
     end
+    if NS.GetGuideTrackerViewerProviderSettings("apr").enabled then return "visible" end
     if type(profile) == "table" and profile.currentStepShow == false then
         return "hidden"
     end
@@ -75,19 +82,16 @@ local function GetRouteFallbackMapID(APR)
             return mapID
         end
     end
-    return type(C_Map) == "table" and type(C_Map.GetBestMapForUnit) == "function" and C_Map.GetBestMapForUnit("player") or nil
+    return type(C_Map) == "table" and type(C_Map.GetBestMapForUnit) == "function" and C_Map.GetBestMapForUnit("player") or
+    nil
 end
 
-local function ExtractTarget()
-    local APR = GetAPR()
-    if type(APR) ~= "table" then
-        return nil, false
-    end
+-- ============================================================
+-- Native target and snapshot
+-- ============================================================
 
-    local step, stepIndex = GetCurrentStep(APR)
-    if type(step) ~= "table" then
-        return nil, true
-    end
+local function ExtractNativeTarget(APR, step, stepIndex, presentation)
+    if step.NoArrow and (APR.IsInRouteZone or step.Dungeon) then return nil, true end
 
     local fallbackMapID = GetRouteFallbackMapID(APR)
     local zoneHint = type(APR.GetPlayerParentMapID) == "function" and APR:GetPlayerParentMapID() or fallbackMapID
@@ -106,31 +110,218 @@ local function ExtractTarget()
         return nil, true
     end
 
-    local presentation = type(APRPresentation) == "table"
-        and type(APRPresentation.ResolveStep) == "function"
-        and APRPresentation.ResolveStep(APR, step)
-        or nil
-    local title = type(presentation) == "table" and presentation.title or "APR step"
-    local questID = type(presentation) == "table" and presentation.primaryQuestID or nil
-    return {
+    local title, questID = presentation.title, presentation.primaryQuestID
+    local kind = (questID or presentation.handoffAction) and "quest" or nil
+    local target = {
         mapID = mapID,
         x = x,
         y = y,
         title = title,
-        rawTitle = type(presentation) == "table" and presentation.rawTitle or title,
-        subtext = type(presentation) == "table" and presentation.subtext or nil,
+        rawTitle = presentation.rawTitle or title,
+        subtext = presentation.subtext,
         source = stepIndex and ("apr.step#" .. tostring(stepIndex)) or "apr.step",
         kind = "guide_goal",
         guideProvider = PROVIDER,
-        semanticKind = questID and "quest" or nil,
+        guideStepIdentity = APR.ActiveRoute .. "\031" .. stepIndex,
+        semanticKind = kind,
         semanticQuestID = questID,
-        iconHintKind = questID and "quest" or nil,
+        iconHintKind = kind,
         iconHintQuestID = questID,
-        aprStepKey = type(presentation) == "table" and presentation.stepKey or nil,
-        aprQuestIDs = type(presentation) == "table" and presentation.questIDs or nil,
-        aprTitleSource = type(presentation) == "table" and presentation.titleSource or nil,
-        aprSubtextSource = type(presentation) == "table" and presentation.subtextSource or nil,
-    }, false
+        aprStepKey = presentation.stepKey,
+        aprQuestIDs = presentation.questIDs,
+        aprTitleSource = presentation.titleSource,
+        aprSubtextSource = presentation.subtextSource,
+    }
+    NS.Internal.GuidePresentation.SetDestinationContext(target, nil, nil, presentation.handoffAction,
+        questID, title)
+    return target, false
+end
+
+local R = NS.Internal.GuideSourceRuntime
+local P = NS.Internal.GuidePresentation
+local actionNames = {
+    PickUp = "accept",
+    Done = "turnin",
+    Qpart = "complete",
+    QpartPart = "complete",
+    Scenario = "complete",
+    Waypoint = "goto",
+    UseFlightPath = "fly",
+    GetFP = "fpath",
+    UseItem = "use",
+    UseSpell = "cast",
+    TakePortal = "goto",
+    Note = "info",
+    Grind = "kill",
+    LootItems = "collect"
+}
+local observation = R.CreateObservation()
+local function Changed()
+    local a = GetAPR()
+    observation:Begin()
+    observation:Push(a and a.ActiveRoute)
+    observation:Push(a and GetCurrentStepIndex(a))
+    observation:Push(a and a.settings and a.settings.profile and a.settings.profile.enableAddon)
+    observation:Push(a and a.startupQuestStatePending)
+    local runtime = a and a.runtimeRouteStep and a.runtimeRouteStep.step
+    observation:Push(runtime and runtime.NoArrow)
+    for _, name in ipairs({ "questsList", "questsExtraTextList", "fillersList" }) do
+        for key, row in pairs(a and a.currentStep and a.currentStep[name] or {}) do
+            observation:Push(key)
+            observation:Push(row.font and row.font:GetText())
+            for _, sub in ipairs(row.subTexts or {}) do observation:Push(sub.text) end
+        end
+    end
+    if type(C_Map) == "table" and C_Map.GetBestMapForUnit then observation:Push(C_Map.GetBestMapForUnit("player")) end
+    return observation:Finish()
+end
+
+local function HasQuest(list, questID)
+    if type(list) ~= "table" or not questID then return false end
+    for key, value in pairs(list) do
+        if type(value) == "number" and value == questID or type(value) == "table" and tonumber(key) == questID then return true end
+    end
+    return false
+end
+local function RowFacts(a, step, entry, presentation)
+    local native = a.currentStep and a.currentStep.questsList and a.currentStep.questsList[entry.key]
+    local questID = APRPresentation.ResolveRowQuestID(step, presentation.stepKey, native and native.questID, entry.key)
+    local action = HasQuest(step.PickUp, questID) and "accept" or HasQuest(step.Done, questID) and "turnin"
+        or native and native.isQuestObjective and "complete" or actionNames[presentation.stepKey] or "goal"
+    local status = "incomplete"
+    if questID and C_QuestLog then
+        if action == "accept" and C_QuestLog.IsOnQuest and R.Scalar(C_QuestLog.IsOnQuest(questID)) == true then
+            status = "complete"
+        elseif action == "complete" and native and tonumber(native.objectiveIndex) and C_QuestLog.GetQuestObjectives then
+            local objectives = C_QuestLog.GetQuestObjectives(questID)
+            local objective = objectives and objectives[tonumber(native.objectiveIndex)]
+            if objective and R.Scalar(objective.finished) == true then status = "complete" end
+        end
+    end
+    return action, status, questID
+end
+local function NativeText(value)
+    local text = R.PlainText(value)
+    return text and text:gsub("^%-%s+", "") or nil
+end
+
+local function ReadSnapshot()
+    local a = GetAPR()
+    if not IsLoaded() or type(a) ~= "table" then return { state = "absent" } end
+    local id, index = a.ActiveRoute, GetCurrentStepIndex(a)
+    if not id or not index then return { state = "empty" } end
+    local profile = a.settings and a.settings.profile
+    local state = profile and profile.enableAddon == false and "paused"
+        or a.startupQuestStatePending and "loading" or "ready"
+    local data = R.Call(a, "GetRouteData", id)
+    local s = {
+        state = state,
+        id = id,
+        current = index,
+        rawCurrent = index,
+        title = P.NormalizeText(data and data.label) or id,
+        steps = {}
+    }
+    if state ~= "ready" then return s end
+    local step = GetCurrentStep(a)
+    if not step then
+        s.state = "loading"; return s
+    end
+    local presentation = APRPresentation.ResolveStep(a, step)
+    s.handoffAction = presentation.handoffAction
+    s.handoffQuestIDs = s.handoffAction and presentation.questIDs or nil
+    local details = (not profile or profile.currentStepShow ~= false) and
+    R.Call(a.currentStep, "GetCurrentStepDetails", true) or nil
+    local progress = details and details.progress or {}
+    s.displayCurrent, s.total = progress.step or index, progress.total or 0
+    local main = { title = s.title, ownerStepIndex = index, rows = {} }
+    for _, entry in ipairs(details and details.questSteps or {}) do
+        local action, status, questID = RowFacts(a, step, entry, presentation)
+        local rows = R.Rows(NativeText(entry.text), nil, action, status)
+        for _, row in ipairs(rows) do
+            row.objectiveKey, row.questID = entry.key, questID; main.rows[#main.rows + 1] = row
+        end
+        for _, sub in ipairs(entry.subSteps or {}) do
+            for _, row in ipairs(R.Rows(NativeText(sub.text), nil, "complete")) do
+                row.questID, row.objectiveKey = sub.questID, entry.key
+                main.rows[#main.rows + 1] = row
+            end
+        end
+    end
+    if #main.rows == 0 then
+        main.rows = R.Rows(presentation.title, presentation.subtext, actionNames[presentation.stepKey] or "goal")
+        for _, row in ipairs(main.rows) do
+            if row.kind == "goal" then row.questID, row.questIDs = presentation.primaryQuestID, presentation.questIDs end
+        end
+    else
+        local notes = {}
+        for _, extra in ipairs(details and details.extraLines or {}) do
+            if type(extra.text) == "string" then notes[#notes + 1] = extra.text end
+        end
+        if #notes > 0 then
+            local primary = table.remove(main.rows)
+            for _, row in ipairs(R.Rows(primary.text, table.concat(notes, "\n"), primary.action)) do
+                row.objectiveKey, row.questID = primary.objectiveKey, primary.questID
+                main.rows[#main.rows + 1] = row
+            end
+        end
+    end
+    s.steps[1] = main
+    for _, entry in ipairs(details and details.fillerSteps or {}) do
+        s.steps[#s.steps + 1] = {
+            title = "Along the way",
+            ownerStepIndex = index,
+            sticky = true,
+            rows = R.Rows(NativeText(entry.text), nil, "complete")
+        }
+    end
+    s.target = ExtractNativeTarget(a, step, index, presentation)
+    return s
+end
+
+local API = R.Create({ key = PROVIDER, read = ReadSnapshot, changed = Changed, questHandoffs = true })
+NS.Internal.APRProvider = API
+API.GetRuntime = GetAPR
+
+-- ============================================================
+-- Guide target and actions
+-- ============================================================
+
+local function ExtractTarget()
+    local s = API.GetSnapshot()
+    return s.target, s.state ~= "ready" or s.target == nil
+end
+
+function API.RunAction(action, expectedGuide, expectedStep, _, expectedEpoch)
+    local a, s = GetAPR(), API.GetSnapshot()
+    if not a or not IsLoaded() then return false, "provider_unavailable" end
+    if InCombatLockdown() then return false, "combat" end
+    if action == "chooser" then
+        if not a.RouteBrowser or type(a.RouteBrowser.Show) ~= "function" then return false, "chooser_unavailable" end
+        local ok, result = pcall(a.RouteBrowser.Show, a.RouteBrowser)
+        return ok and result ~= false, not ok and "chooser_failed" or nil
+    end
+    if action == "settings" then
+        if not a.settings or type(a.settings.OpenSettings) ~= "function" then return false, "settings_unavailable" end
+        a.settings:OpenSettings(a.title); return true
+    end
+    if action == "menu" then
+        if not a.currentStep or type(a.currentStep.ShowHeaderMenu) ~= "function" then return false end
+        a.currentStep:ShowHeaderMenu(UIParent); return true
+    end
+    if action == "active" or action == "route" then return API.Activate("APRViewerAction") end
+    if expectedGuide and (s.id ~= expectedGuide or s.current ~= expectedStep or s.epoch ~= expectedEpoch
+            or a.ActiveRoute ~= expectedGuide or GetCurrentStepIndex(a) ~= expectedStep) then
+        return false, "stale"
+    end
+    if s.state ~= "ready" then return false, "unavailable" end
+    local method = ({ previous = "PreviousQuestStep", next = "SkipQuestStep", skip = "SkipQuestStep",
+        complete = "SkipQuestStep", reload = "UpdateQuestAndStep" })[action]
+    if not method or type(a[method]) ~= "function" then return false, "unsupported_action" end
+    local ok, result = pcall(a[method], a)
+    if not ok then return false, "action_failed" end
+    API.Schedule("APRViewerAction")
+    return result ~= false, action == "reload" and "Progress recheck requested." or nil
 end
 
 local function GetActivationToken()
@@ -145,43 +336,47 @@ local function GetActivationToken()
 end
 
 local function HookFrameVisibility(schedule)
-    local switchOpts = { allowProviderSwitch = true }
     local frame = rawget(_G, "CurrentStepScreenPanel")
     if frame and type(frame.HookScript) == "function" and not frame._awpAPRVisibilityHooked then
-        frame:HookScript("OnShow", function() schedule("APRCurrentStepOnShow", switchOpts) end)
+        frame:HookScript("OnShow", function() schedule("APRCurrentStepOnShow") end)
         frame:HookScript("OnHide", function() schedule("APRCurrentStepOnHide") end)
         frame._awpAPRVisibilityHooked = true
     end
 end
 
-local function InstallHooks(schedule)
+local hooked = setmetatable({}, { __mode = "k" })
+local function InstallHooks()
     local APR = GetAPR()
     if type(APR) ~= "table" then
         return
     end
 
-    local switchOpts = { allowProviderSwitch = true }
-    local function scheduleFor(reason, opts)
+    local function scheduleFor(reason)
         return function()
-            schedule(reason, opts)
-            HookFrameVisibility(schedule)
+            API.Schedule(reason)
         end
     end
-
-    if type(APR.UpdateStep) == "function" then
-        hooksecurefunc(APR, "UpdateStep", scheduleFor("APRUpdateStep", switchOpts))
+    local function hook(owner, name, callback)
+        if not owner or type(owner[name]) ~= "function" then return end
+        local names = hooked[owner] or {}; hooked[owner] = names
+        if names[name] then return end
+        names[name] = true; hooksecurefunc(owner, name, callback)
     end
-    if type(APR.UpdateNextStep) == "function" then
-        hooksecurefunc(APR, "UpdateNextStep", scheduleFor("APRUpdateNextStep", switchOpts))
+    for _, name in ipairs({ "UpdateStep", "UpdateNextStep", "ResetRoute", "ActivateRoute", "UpdateQuestAndStep" }) do
+        hook(APR, name, scheduleFor("APR" .. name))
     end
-    if type(APR.ResetRoute) == "function" then
-        hooksecurefunc(APR, "ResetRoute", scheduleFor("APRResetRoute", switchOpts))
-    end
-    if type(APR.Arrow) == "table" and type(APR.Arrow.SetCoord) == "function" then
-        hooksecurefunc(APR.Arrow, "SetCoord", scheduleFor("APRArrowSetCoord", switchOpts))
-    end
-    HookFrameVisibility(schedule)
+    hook(APR.Arrow, "SetCoord", scheduleFor("APRArrowSetCoord"))
+    hook(APR.RouteCatalog, "ChangePath", function()
+        -- Current native callers are route-browser actions. Merely adding a
+        -- future route must not take ownership of the currently running guide.
+        API.Schedule("APRRouteChoice", APR.ActiveRoute ~= API.GetSnapshot().id)
+    end)
+    HookFrameVisibility(function(reason) API.Schedule(reason) end)
 end
+
+-- ============================================================
+-- Diagnostics and registration
+-- ============================================================
 
 local function FormatCoords(mapID, x, y)
     if type(mapID) ~= "number" or type(x) ~= "number" or type(y) ~= "number" then
@@ -279,6 +474,7 @@ local function GetDebugLines(genericLines)
 end
 
 NS.RegisterGuideTargetProvider(PROVIDER, {
+    structuredPresentation = true,
     label = "Azeroth Pilot Reloaded",
     displayName = "APR",
     icon = "Interface\\AddOns\\APR\\APR-Core\\assets\\APR_logo.blp",
@@ -291,3 +487,15 @@ NS.RegisterGuideTargetProvider(PROVIDER, {
     getDebugLines = GetDebugLines,
     installHooks = InstallHooks,
 })
+
+local watcher = CreateFrame("Frame")
+for _, event in ipairs({ "PLAYER_LOGIN", "ADDON_LOADED", "QUEST_LOG_UPDATE", "BAG_UPDATE_DELAYED",
+    "GET_ITEM_INFO_RECEIVED", "SPELLS_CHANGED", "ZONE_CHANGED_NEW_AREA", "PLAYER_REGEN_ENABLED",
+    "SCENARIO_UPDATE", "SCENARIO_CRITERIA_UPDATE", "CRITERIA_UPDATE" }) do watcher:RegisterEvent(event) end
+watcher:SetScript("OnEvent", function(_, event, addon)
+    if event == "ADDON_LOADED" and addon ~= "APR" and addon ~= "AzerothWaypoint" then return end
+    if IsLoaded() then
+        InstallHooks(); API.Schedule(event)
+    end
+end)
+API.InstallHooks = InstallHooks

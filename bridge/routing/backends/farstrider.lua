@@ -1,8 +1,15 @@
+-- ============================================================
+-- Farstrider routing backend
+-- ============================================================
+--
+-- Converts Farstrider's graph edges, instance entrances and travel actions
+-- into route legs.
+
 local NS = _G.AzerothWaypointNS
 local RouteSpecials = NS.RouteSpecials or {}
 
 -- ============================================================
--- FarstriderLib backend
+-- Planner constants and graph state
 -- ============================================================
 
 local backend = {}
@@ -14,6 +21,8 @@ local MOVEMENT_ADVANCE_YARDS = 55
 local INSTANCE_NODE_COORD_EPSILON = 0.025
 local COORD_BOUNDS_EPSILON = 0.0001
 local FARSTRIDER_LOCA_ENTER_WIZARDS_SANCTUM = 9
+local GRAPH_REBUILT = "farstrider_graph_rebuilt"
+local COMBAT_TRAVEL_STATE = RouteSpecials.COMBAT_TRAVEL_STATE
 
 local FARSTRIDER_INVALIDATION_EVENTS = {
     BAG_UPDATE_DELAYED = true,
@@ -25,14 +34,18 @@ local FARSTRIDER_INVALIDATION_EVENTS = {
 }
 
 local EdgeType = {
-    TRAVEL     = 1000,
-    FLIGHTPATH = 1001,
-    PORTAL     = 1002,
-    BOAT       = 1003,
-    ZEPPELIN   = 1004,
-    ITEM       = 1005,
-    SPELL      = 1006,
+    TRAVEL         = 1000,
+    FLIGHTPATH     = 1001,
+    PORTAL         = 1002,
+    BOAT           = 1003,
+    ZEPPELIN       = 1004,
+    ITEM           = 1005,
+    SPELL          = 1006,
+    LEAVE_INSTANCE = 1007,
+    TRAM           = 1008,
 }
+
+local transportTypes = { [EdgeType.BOAT] = "ship", [EdgeType.ZEPPELIN] = "zeppelin", [EdgeType.TRAM] = "tram" }
 
 local function GetFarstriderAPI()
     local api = rawget(_G, "FarstriderLib_API")
@@ -45,94 +58,84 @@ end
 local function GetFarstriderPathfinding()
     local farstrider = rawget(_G, "FarstriderLib")
     local pathfinding = type(farstrider) == "table" and farstrider.Pathfinding or nil
-    if type(pathfinding) == "table" and type(pathfinding.GetValidTravelNodes) == "function" then
+    if type(pathfinding) == "table" and type(pathfinding.allNodes) == "table" then
         return pathfinding
     end
     return nil
 end
 
-local function FingerprintCoord(value, scale)
-    if type(value) ~= "number" then
-        return "-"
-    end
-    scale = scale or 10000
-    return tostring(math.floor(value * scale + 0.5))
-end
+local graphRevision, travelRevision = 0, 0
+local travelState, combatGraph
 
-local function DynamicNodeLocationToken(node)
-    if type(node) ~= "table" or node.isDynamic ~= true or type(node.getLocation) ~= "function" then
-        return "-"
-    end
-
-    local ok, location = pcall(node.getLocation)
-    if not ok or type(location) ~= "table" then
-        return "dynamic:unknown"
-    end
-
-    local pos = type(location.pos) == "table" and location.pos or nil
-    return tostring(location.mapId or "-")
-        .. "/"
-        .. FingerprintCoord(pos and pos.x)
-        .. "/"
-        .. FingerprintCoord(pos and pos.y)
-        .. "/"
-        .. FingerprintCoord(pos and pos.z, 1)
-        .. "/"
-        .. tostring(location.isUI == true)
-end
-
-local function BuildValidTravelNodeFingerprint(validNodes)
-    if type(validNodes) ~= "table" then
-        return nil
-    end
-
-    local count = 0
-    local sumA = 0
-    local sumB = 0
-    for key, node in pairs(validNodes) do
-        local text = tostring(key) .. "@" .. DynamicNodeLocationToken(node)
-        local hash = 5381
-        for index = 1, #text do
-            hash = (hash * 33 + string.byte(text, index)) % 2147483647
+local function IndexTravelState(nodes)
+    local indexed = { nodes = nodes, revision = graphRevision, conditions = {}, arrivals = {} }
+    local seenConditions = {}
+    for _, node in pairs(nodes) do
+        for _, edge in ipairs(node.edges) do
+            local condition = edge.condition
+            if type(condition) == "function" and not seenConditions[condition] then
+                seenConditions[condition] = true
+                indexed.conditions[#indexed.conditions + 1] = { read = condition }
+            end
         end
-        count = count + 1
-        sumA = (sumA + hash) % 2147483647
-        sumB = (sumB + (hash * ((hash % 8191) + 1)) % 2147483629) % 2147483629
+        -- The dynamic origin tracks the player. Only changing landings affect the itinerary.
+        if node.isDynamic and node.key ~= "dynamic:from" then
+            indexed.arrivals[#indexed.arrivals + 1] = { read = node.getLocation }
+        end
     end
-    return tostring(count) .. ":" .. tostring(sumA) .. ":" .. tostring(sumB)
+    return indexed
 end
 
-local function GetFarstriderTravelStateFingerprint(refresh)
+local function UpdateArrivalState(arrival)
+    local ok, location = pcall(arrival.read)
+    if not ok then return false end
+    local pos = location and location.pos
+    local map, x, y, z, isUI
+    if pos then map, x, y, z, isUI = location.mapId, pos.x, pos.y, pos.z, location.isUI end
+    if arrival.map == map and arrival.x == x and arrival.y == y and arrival.z == z and arrival.isUI == isUI then
+        return false
+    end
+    arrival.map, arrival.x, arrival.y, arrival.z, arrival.isUI = map, x, y, z, isUI
+    return true
+end
+
+local function GetFarstriderTravelStateFingerprint(selectedActionChanged)
     local pathfinding = GetFarstriderPathfinding()
-    if not pathfinding then
-        return nil
-    end
-    if refresh and type(pathfinding.InvalidateCache) == "function" then
-        pathfinding:InvalidateCache()
+    if not pathfinding then return nil end
+    if combatGraph == pathfinding then pathfinding._validTravelNodesCache = nil end
+    combatGraph = nil
+    local changed = false
+    if not travelState or travelState.nodes ~= pathfinding.allNodes or travelState.revision ~= graphRevision then
+        travelState = IndexTravelState(pathfinding.allNodes)
+        changed = true
     end
 
-    local ok, validNodes = pcall(pathfinding.GetValidTravelNodes, pathfinding)
-    if not ok then
-        return nil
+    for _, condition in ipairs(travelState.conditions) do
+        local ok, value = pcall(condition.read)
+        if ok then
+            local usable = not not value
+            if condition.usable ~= usable then
+                condition.usable = usable
+                changed = true
+            end
+        end
     end
-    return BuildValidTravelNodeFingerprint(validNodes)
+    for _, arrival in ipairs(travelState.arrivals) do
+        if UpdateArrivalState(arrival) then changed = true end
+    end
+    if changed or selectedActionChanged then
+        travelRevision = travelRevision + 1
+        travelState.fingerprint = tostring(travelRevision)
+        -- Farstrider has a separate two-second eligibility cache. Expire
+        -- it on a real change and retain the graph's map and geometry caches.
+        pathfinding._validTravelNodesCache = nil
+    end
+    return travelState.fingerprint
 end
 
-local function RememberTravelStateFingerprint(record, refresh)
-    if type(record) ~= "table" then
-        return nil
-    end
-    local fingerprint = GetFarstriderTravelStateFingerprint(refresh)
-    record._routeBackendStateFingerprint = fingerprint
-    return fingerprint
-end
-
-local function ValidateTravelState()
-    local fingerprint = GetFarstriderTravelStateFingerprint(true)
-    if type(fingerprint) ~= "string" then
-        return false, nil
-    end
-    return true, fingerprint
+local function ValidateTravelState(_, _, requestClass)
+    local fingerprint = GetFarstriderTravelStateFingerprint(requestClass == "selected_action")
+    return fingerprint ~= nil, fingerprint
 end
 
 local function IsFarstriderWizardsSanctumNode(node)
@@ -149,11 +152,115 @@ local function IsFarstriderWizardsSanctumSourceEdge(edge)
     return type(edge) == "table" and IsFarstriderWizardsSanctumNode(edge.from)
 end
 
-function backend.IsAvailable()
-    if not (type(NS.IsAddonLoaded) == "function" and NS.IsAddonLoaded("FarstriderLibData")) then
-        return false
+local observedRebuildState, rebuiltGraph
+
+function backend.GetReadiness()
+    if not NS.IsAddonLoaded("FarstriderLib") then
+        return "unavailable", "farstrider_not_loaded"
     end
-    return GetFarstriderAPI() ~= nil
+    if not NS.IsAddonLoaded("FarstriderLibData") then return "unavailable", "farstrider_data_not_loaded" end
+    local graph = GetFarstriderPathfinding()
+    local api = GetFarstriderAPI()
+    if not api or type(api.RegisterRebuildCallback) ~= "function" or not graph then
+        return "unavailable", "farstrider_missing_planner"
+    end
+    if next(graph.allNodes) ~= nil then return "ready" end
+    if graph == rebuiltGraph then return "unavailable", "farstrider_empty_graph" end
+    return "waiting", "farstrider_graph_initializing"
+end
+
+-- ============================================================
+-- Planner availability
+-- ============================================================
+
+function backend.IsAvailable()
+    return backend.GetReadiness() == "ready"
+end
+
+function backend.InstallReadinessHooks(notify)
+    local api = GetFarstriderAPI()
+    if not api or type(api.RegisterRebuildCallback) ~= "function" then return end
+    local callbackState = api.State or api
+    if observedRebuildState == callbackState then return end
+    api.RegisterRebuildCallback(function()
+        rebuiltGraph = GetFarstriderPathfinding()
+        graphRevision = graphRevision + 1
+        travelState = nil
+        notify()
+        backend.OnPlanInvalidated(GRAPH_REBUILT)
+    end)
+    observedRebuildState = callbackState
+end
+
+function backend.GetFlightDataStatus(mapID)
+    local api = rawget(_G, "FarstriderLibData_API")
+    if type(mapID) ~= "number" or type(api) ~= "table" or type(api.HasFlightData) ~= "function" then return nil end
+    local ok, available = pcall(api.HasFlightData, mapID)
+    if ok and type(available) == "boolean" then return available end
+end
+
+local function GetTaxiPaths()
+    local data = rawget(_G, "FarstriderLibData")
+    local paths = type(data) == "table" and rawget(data, "TaxiPaths")
+    return type(paths) == "table" and paths or nil
+end
+
+function backend.HasTaxiTimes() return GetTaxiPaths() ~= nil end
+
+local taxiPaths, taxiTimes
+function backend.GetTaxiTime(path)
+    local paths = GetTaxiPaths()
+    if not paths or not path or #path < 2 then return end
+    if taxiPaths ~= paths then
+        taxiPaths, taxiTimes = paths, {}
+        for _, hop in pairs(paths) do
+            local from = type(hop) == "table" and hop[1]
+            local to = type(hop) == "table" and hop[2]
+            local seconds = type(hop) == "table" and hop[3]
+            if type(from) == "number" and type(to) == "number" and type(seconds) == "number"
+                and seconds > 0 and seconds < math.huge then
+                local key = from .. ":" .. to
+                local previous = taxiTimes[key]
+                taxiTimes[key] = (previous == nil or previous == seconds) and seconds or false
+            end
+        end
+    end
+    local total = 0
+    for i = 2, #path do
+        local seconds = taxiTimes[path[i - 1] .. ":" .. path[i]]
+        if not seconds then return end
+        total = total + seconds
+    end
+    return total
+end
+
+local taxiNodeData, taxiNodeRevision, taxiNodeKeys
+local function ReadTaxiNodeID(node)
+    if type(node) ~= "table" or type(node.key) ~= "string" then return end
+    local data, runtime = rawget(_G, "FarstriderLibData"), rawget(_G, "FarstriderLib")
+    local nodes = type(data) == "table" and rawget(data, "TaxiNodes")
+    local navNode = type(runtime) == "table" and rawget(runtime, "NavNode")
+    local graph = GetFarstriderPathfinding()
+    if type(nodes) ~= "table" or type(navNode) ~= "table" or type(navNode.makeNavKey) ~= "function"
+        or not graph or type(graph.GetNavMapPosFromWorldPos) ~= "function" then
+        return
+    end
+    if taxiNodeData ~= nodes or taxiNodeRevision ~= graphRevision then
+        taxiNodeData, taxiNodeRevision, taxiNodeKeys = nodes, graphRevision, {}
+        for id, entry in pairs(nodes) do
+            local z = entry[4]
+            local ok, map, pos = pcall(graph.GetNavMapPosFromWorldPos, graph,
+                { mapId = entry[1], pos = { x = entry[2], y = entry[3], z = z }, isUI = false })
+            if ok and type(map) == "number" and pos and type(z) == "number" then
+                local x, y = pos.x, pos.y
+                if type(x) == "number" and type(y) == "number" then
+                    local key = navNode.makeNavKey(map, { x = x, y = y, z = z })
+                    taxiNodeKeys[key] = taxiNodeKeys[key] == nil and id or false
+                end
+            end
+        end
+    end
+    return taxiNodeKeys[node.key] or nil
 end
 
 local function ResolveSpellName(spellID)
@@ -304,6 +411,10 @@ local function MakeCoords(mapID, x, y)
     return { mapID = mapID, x = x, y = y }
 end
 
+-- ============================================================
+-- Entrance and destination matching
+-- ============================================================
+
 local function CoordsMatch(mapID, x, y, targetMapID, targetX, targetY, epsilon)
     return type(mapID) == "number"
         and type(x) == "number"
@@ -431,17 +542,10 @@ local function AppendInstanceDestinationLeg(legs, target)
         return
     end
 
-    legs[#legs + 1] = {
-        mapID = finalMapID,
-        x = finalX,
-        y = finalY,
-        kind = "destination",
-        routeLegKind = "destination",
-        title = finalTitle or target.finalTitle or target.title,
-        source = "farstrider",
-        routeTravelType = intent.travelType,
-        arrivalRadius = 15,
-    }
+    local leg = RouteSpecials.MakeDestinationLeg("farstrider", finalMapID, finalX, finalY,
+        finalTitle or target.finalTitle or target.title)
+    leg.routeTravelType, leg.arrivalRadius = intent.travelType, 15
+    legs[#legs + 1] = leg
 end
 
 local function ReadEdgeLocaArgs(edge)
@@ -519,6 +623,10 @@ local function IsUsableItemID(itemID)
     return true
 end
 
+-- ============================================================
+-- Travel actions and optimized edges
+-- ============================================================
+
 local function SelectFarstriderAction(actionOptions)
     if type(actionOptions) ~= "table" then
         return nil
@@ -551,9 +659,9 @@ local function IsFlightpathEdge(edge)
 end
 
 local function BuildOptimizedEdges(edges, path)
-    local optimizedEdges = {}
+    local optimizedEdges, flightOrigins = {}, {}
     if type(edges) ~= "table" then
-        return optimizedEdges
+        return optimizedEdges, flightOrigins
     end
 
     local virtualGoalKey = nil
@@ -563,6 +671,7 @@ local function BuildOptimizedEdges(edges, path)
 
     -- Mirror FarstriderLib's optimized-path filtering. The final edge is
     -- intentionally kept even when it is a direct TRAVEL edge.
+    local flightOrigin
     for index = 1, #edges do
         local edge = edges[index]
         local skip = false
@@ -580,12 +689,19 @@ local function BuildOptimizedEdges(edges, path)
             skip = true
         end
 
+        if not IsFlightpathEdge(edge) then
+            flightOrigin = nil
+        elseif not flightOrigin then
+            flightOrigin = edge.from
+        end
         if not skip then
             optimizedEdges[#optimizedEdges + 1] = edge
+            flightOrigins[#optimizedEdges] = flightOrigin
+            flightOrigin = nil
         end
     end
 
-    return optimizedEdges
+    return optimizedEdges, flightOrigins
 end
 
 local function BuildSpecialAction(semanticKind, secureType, securePayload, name, destinationName, dependencyID)
@@ -623,7 +739,7 @@ local function BuildFarstriderLegTitle(mapID, x, y, rawTitle)
     return rawTitle
 end
 
-local function StepToLeg(step, edge, isLast, destinationTitle)
+local function StepToLeg(step, edge, isLast, target, startsInsideInstance, flightOrigin)
     if type(step) ~= "table" then return nil end
 
     local edgeType                   = type(edge) == "table" and edge.locaId or nil
@@ -639,14 +755,12 @@ local function StepToLeg(step, edge, isLast, destinationTitle)
     local arrivalRadius              = MOVEMENT_ADVANCE_YARDS
     local specialAction              = nil
     local activationCoords           = nil
+    local taxi, leaveInstanceMapID, transportDestination
     local routeLegKind               = isLast and "destination" or "carrier"
 
     if isLast then
-        -- Final leg: always use completionLoc as the leg coord.
-        mapID, x, y = ReadLocCoords(step.completionLoc)
-        if type(mapID) ~= "number" then
-            mapID, x, y = ReadLocCoords(step.loc)
-        end
+        -- Farstrider can project continent coordinates onto a zone map.
+        mapID, x, y = target.mapID, target.x, target.y
         kind = "destination"
         arrivalRadius = 15
 
@@ -685,14 +799,15 @@ local function StepToLeg(step, edge, isLast, destinationTitle)
             mapID, x, y = ReadLocCoords(step.completionLoc)
         end
         if type(mapID) ~= "number" then return nil end
-        activationCoords = MakeCoords(mapID, x, y)
+        if not startsInsideInstance then activationCoords = MakeCoords(mapID, x, y) end
     elseif actionType == "spell" then
         local spellID = action and action.data or nil
         if type(spellID) ~= "number" then return nil end
         local spellName                    = ResolveSpellName(spellID) or tostring(spellID)
         local sk                           = SpellLooksLikePortal(spellName) and "portal" or "spell"
         local actionTitle, destinationName = ResolveActionPresentation(step, edge, spellName)
-        specialAction                      = BuildSpecialAction(sk, "spell", spellName, actionTitle, destinationName, spellID)
+        specialAction                      = BuildSpecialAction(sk, "spell", spellName, actionTitle, destinationName,
+            spellID)
         routeTravelType                    = sk == "portal" and "portal" or nil
         kind                               = sk
         mapID, x, y                        = ReadLocCoords(step.loc)
@@ -700,7 +815,7 @@ local function StepToLeg(step, edge, isLast, destinationTitle)
             mapID, x, y = ReadLocCoords(step.completionLoc)
         end
         if type(mapID) ~= "number" then return nil end
-        activationCoords = MakeCoords(mapID, x, y)
+        if not startsInsideInstance then activationCoords = MakeCoords(mapID, x, y) end
     elseif actionType == "housing" or actionType == "housing_return" then
         kind          = "carrier"
         arrivalRadius = 55
@@ -712,17 +827,38 @@ local function StepToLeg(step, edge, isLast, destinationTitle)
         arrivalRadius   = 15
         mapID, x, y     = ReadLocCoords(step.loc)
         if type(mapID) ~= "number" then return nil end
+        local landingMap, landingX, landingY = ReadLocCoords(step.completionLoc)
+        if landingMap then
+            local args = ReadEdgeLocaArgs(edge)
+            taxi = {
+                sourceNodeID = ReadTaxiNodeID(flightOrigin),
+                nodeID = ReadTaxiNodeID(edge.to),
+                departure = MakeCoords(mapID, x, y),
+                destination = MakeCoords(landingMap, landingX, landingY),
+                name = args and TrimString(args[1]),
+                operator = "farstrider",
+                final = true
+            }
+        end
     elseif edgeType == EdgeType.PORTAL then
         kind            = "portal"
         routeTravelType = "portal"
         arrivalRadius   = 20
         mapID, x, y     = ReadLocCoords(step.loc)
         if type(mapID) ~= "number" then return nil end
-    elseif edgeType == EdgeType.BOAT or edgeType == EdgeType.ZEPPELIN then
-        kind          = "carrier"
-        arrivalRadius = 55
-        mapID, x, y   = ReadLocCoords(step.loc)
+    elseif edgeType == EdgeType.LEAVE_INSTANCE and action and actionType == "leave_instance" and type(action.data) == "number" then
+        kind, routeTravelType = "leave_instance", "travel"
+        leaveInstanceMapID = action.data
+        mapID, x, y = ReadLocCoords(step.loc)
         if type(mapID) ~= "number" then return nil end
+    elseif transportTypes[edgeType] then
+        routeTravelType = transportTypes[edgeType]
+        kind            = edgeType == EdgeType.BOAT and "boat" or routeTravelType
+        arrivalRadius   = 55
+        mapID, x, y     = ReadLocCoords(step.loc)
+        if type(mapID) ~= "number" then return nil end
+        transportDestination = MakeCoords(ReadLocCoords(step.completionLoc))
+        if not transportDestination then return nil end
     else
         kind            = "carrier"
         routeTravelType = "travel"
@@ -743,55 +879,47 @@ local function StepToLeg(step, edge, isLast, destinationTitle)
 
     local legTitle
     if routeLegKind == "destination" then
-        legTitle = TrimString(destinationTitle) or TrimString(step.loca)
+        legTitle = TrimString(target.finalTitle or target.title) or TrimString(step.loca)
     else
         legTitle = BuildFarstriderLegTitle(mapID, x, y, step.loca)
     end
 
-    return {
-        mapID            = mapID,
-        x                = x,
-        y                = y,
-        kind             = kind,
-        routeLegKind     = routeLegKind,
-        title            = legTitle,
-        source           = "farstrider",
-        routeTravelType  = routeTravelType,
-        arrivalRadius    = arrivalRadius,
-        activationCoords = activationCoords,
-        arrivalGate      = isWizardsSanctumSourceEdge and RouteSpecials.MakeWizardsSanctumArrivalGate() or nil,
-        specialAction    = specialAction,
+    local leg = {
+        mapID                = mapID,
+        x                    = x,
+        y                    = y,
+        kind                 = kind,
+        routeLegKind         = routeLegKind,
+        title                = legTitle,
+        source               = "farstrider",
+        routeTravelType      = routeTravelType,
+        arrivalRadius        = arrivalRadius,
+        activationCoords     = activationCoords,
+        taxi                 = taxi,
+        leaveInstanceMapID   = leaveInstanceMapID,
+        transportDestination = transportDestination,
+        arrivalGate          = isWizardsSanctumSourceEdge and RouteSpecials.MakeWizardsSanctumArrivalGate() or nil,
+        specialAction        = specialAction,
     }
+    if edgeType == EdgeType.TRAVEL and not specialAction and kind == "carrier" and not leg.arrivalGate then
+        NS.Internal.RouteWalkingPresentation.Describe(leg, "path", leg, nil, leg.title)
+    end
+    return leg
 end
+
+-- ============================================================
+-- Plan acceptance and requests
+-- ============================================================
 
 local function AcceptPlan(record, legs, reason)
-    if type(NS.AcceptBackendPlan) == "function" then
-        return NS.AcceptBackendPlan(record, "farstrider", legs, reason)
-    end
-    record.backend         = "farstrider"
-    record.legs            = legs
-    record.currentLegIndex = nil
-    record.currentLeg      = nil
-    record.specialAction   = nil
-    record.replanReason    = reason
-    return true
+    return RouteSpecials.CompletePlan(record, "farstrider", "success", legs, reason)
 end
 
-local function SetDirectFallback(record, mapID, x, y, title, reason)
-    AcceptPlan(record, {
-        {
-            mapID = mapID,
-            x = x,
-            y = y,
-            kind = "destination",
-            routeLegKind = "destination",
-            title = title,
-            source = "farstrider",
-        },
-    }, reason)
+local function ReportFailure(record, reason)
+    RouteSpecials.CompletePlan(record, "farstrider", "failed", nil, reason)
 end
 
-function backend.PlanRoute(record, mapID, x, y, title, meta) --luacheck: ignore 212
+local function PlanRoute(record, mapID, x, y, title, meta)
     if type(record) ~= "table" or type(mapID) ~= "number"
         or type(x) ~= "number" or type(y) ~= "number"
     then
@@ -800,20 +928,33 @@ function backend.PlanRoute(record, mapID, x, y, title, meta) --luacheck: ignore 
 
     local api = GetFarstriderAPI()
     if not api then
-        SetDirectFallback(record, mapID, x, y, title, "farstrider_missing")
+        ReportFailure(record, "farstrider_missing")
         return
     end
 
     local target = BuildPlanningTarget(mapID, x, y, title)
 
+    local combat = InCombatLockdown and InCombatLockdown()
+    if combat then
+        -- Farstrider evaluates the usable edges for this search itself. Its
+        -- two-second cache can still contain out-of-combat spell eligibility.
+        combatGraph = GetFarstriderPathfinding()
+        if combatGraph then combatGraph._validTravelNodesCache = nil end
+        record._routeBackendStateFingerprint = COMBAT_TRAVEL_STATE
+    else
+        record._routeBackendStateFingerprint = GetFarstriderTravelStateFingerprint()
+    end
     local ok, optimizedPath, path, edges = pcall(api.FindTrailTo, target.mapID, target.x, target.y, 0)
-    RememberTravelStateFingerprint(record, false)
     if not ok or type(optimizedPath) ~= "table" or #optimizedPath == 0 then
-        SetDirectFallback(record, mapID, x, y, title, "farstrider_nopath_fallback")
+        if combat and ok then
+            RouteSpecials.CompletePlan(record, "farstrider", "deferred", nil, "combat")
+        else
+            ReportFailure(record, "farstrider_nopath_fallback")
+        end
         return
     end
 
-    local optimizedEdges = BuildOptimizedEdges(edges, path)
+    local optimizedEdges, flightOrigins = BuildOptimizedEdges(edges, path)
     record._farstriderLastStepCount = #optimizedPath
     record._farstriderLastEdgeCount = type(edges) == "table" and #edges or 0
     record._farstriderLastOptimizedEdgeCount = #optimizedEdges
@@ -824,13 +965,22 @@ function backend.PlanRoute(record, mapID, x, y, title, meta) --luacheck: ignore 
         and RouteSpecials.PlayerNeedsWizardsSanctumEntry()
         or false
     local wizardsSanctumEntryQueued = false
+    local originKey = type(path) == "table" and path[1] and path[1].key
+    local startsInsideInstance = type(originKey) == "string" and originKey:match("^instance:%d+$") ~= nil
     for i = 1, #optimizedPath do
         local leg = StepToLeg(
             optimizedPath[i],
             optimizedEdges[i],
             i == #optimizedPath,
-            target.finalTitle or target.title or title
+            target,
+            i == 1 and startsInsideInstance,
+            flightOrigins[i]
         )
+        local edge = optimizedEdges[i]
+        if not leg and edge and transportTypes[edge.locaId] then
+            ReportFailure(record, "farstrider_transport_unresolved")
+            return
+        end
         if leg then
             if leg.kind == "entrance" then
                 wizardsSanctumEntryQueued = true
@@ -843,7 +993,7 @@ function backend.PlanRoute(record, mapID, x, y, title, meta) --luacheck: ignore 
     end
 
     if #legs == 0 then
-        SetDirectFallback(record, mapID, x, y, title, "farstrider_nopath_fallback")
+        ReportFailure(record, "farstrider_nopath_fallback")
         return
     end
 
@@ -853,11 +1003,17 @@ function backend.PlanRoute(record, mapID, x, y, title, meta) --luacheck: ignore 
     AcceptPlan(record, legs, target.reason or "farstrider_plan")
 end
 
-function backend.PollCurrentLeg(record)
-    if type(NS.PollNeutralRouteLeg) == "function" then
-        return NS.PollNeutralRouteLeg(record, "farstrider_poll")
-    end
-    return false
+function backend.BeginPlan(attempt)
+    return PlanRoute(attempt.record, attempt.mapID, attempt.x, attempt.y, attempt.title, attempt.meta)
+end
+
+function backend.AdoptPlan(attempt, owner)
+    local record = attempt.record
+    owner._routeBackendStateFingerprint = record._routeBackendStateFingerprint
+    owner._farstriderLastStepCount, owner._farstriderLastEdgeCount = record._farstriderLastStepCount,
+        record._farstriderLastEdgeCount
+    owner._farstriderLastOptimizedEdgeCount = record._farstriderLastOptimizedEdgeCount
+    owner._farstriderLastCorrelationMismatch = record._farstriderLastCorrelationMismatch
 end
 
 function backend.Clear(record)
@@ -867,25 +1023,7 @@ function backend.Clear(record)
     record._farstriderLastEdgeCount = nil
     record._farstriderLastOptimizedEdgeCount = nil
     record._farstriderLastCorrelationMismatch = nil
-    record._routeBackendStateFingerprint = nil
-    record.legs = nil
-    record.currentLegIndex = nil
-    record.currentLeg = nil
-    record.specialAction = nil
-    record.replanReason = nil
-    record._corePlanning = nil
-    record._coreRoutePending = nil
-    record.planFingerprint = nil
-    record.lastPlanSkippedAt = nil
-    record.lastPlanSkipReason = nil
-    record.lastPlanSkipStatus = nil
-    record.lastPlanSkippedFingerprint = nil
-    record.routeOutcome = nil
-    record.routeOutcomeReason = nil
-    record.routeOutcomeAt = nil
-    if type(NS.ClearRouteTravelDependencies) == "function" then
-        NS.ClearRouteTravelDependencies(record)
-    end
+    NS.ClearAcceptedRoutePlan(record)
 end
 
 function backend.OnPlanInvalidated(reason)

@@ -1,0 +1,46 @@
+local f=assert(loadfile("tests/controller_fixture.lua"))()
+local Frame,Pad=f.FrameMethods,f.Pad
+function Frame:SetPropagateKeyboardInput() end
+function Frame:LockHighlight() assert(self:IsObjectType("Button"),"structural row received button focus") end
+function Frame:UnlockHighlight() assert(self:IsObjectType("Button"),"structural row received button focus") end
+assert(loadfile("interface/framework/panels.lua"))()
+assert(loadfile("interface/controller/modal.lua"))()
+local menus=f.NS.Internal.Menus
+local calls=0
+local window=menus.CreateContextMenu(UIParent,function(_,menu)
+    menu:CreateTitle("QuestieRouter")
+    menu:CreateButton("Make This Task Active",function() error("disabled command") end):SetEnabled(false)
+    local tab=menu:CreateButton("Elwynn Forest");tab:SetIsSelected(true)
+    tab:CreateButton("Switch to Guide",function() calls=calls+1 end)
+    menu:CreateDivider();menu:CreateSpacer()
+    menu:CreateButton("Close Current Guide",function() calls=calls+1 end)
+end)
+local rows=window.rows
+assert(rows[1]:IsObjectType("Frame") and rows[1].label:GetText()=="QuestieRouter" and not rows[1].focus)
+assert(not rows[1]:IsMouseEnabled())
+assert(rows[3].label:GetText():find("* Elwynn Forest",1,true) and not rows[3].label:GetText():find("[x]",1,true))
+assert(rows[4]:IsObjectType("Frame") and rows[4].line and rows[4].line:GetHeight()==1)
+assert(not rows[4].label and not rows[4].focus and not rows[4]:IsMouseEnabled() and rows[4]:GetHeight()<rows[6]:GetHeight())
+assert(rows[5]:IsObjectType("Frame") and not rows[5].line and not rows[5].label and not rows[5].focus)
+assert(Pad.Modal.GetState().index==3 and window.hints:GetText():find(" Select",1,true))
+f.PressKey("PADDUP");assert(Pad.Modal.GetState().index==2 and not window.hints:GetText():find(" Select",1,true))
+f.PressKey("PAD1");assert(calls==0 and Pad.modalActive)
+f.PressKey("PADDDOWN");assert(Pad.Modal.GetState().index==3)
+f.PressKey("PADDRIGHT");assert(#Pad.Modal.GetState().stack==2)
+f.PressKey("PAD2");assert(Pad.Modal.GetState().index==3)
+f.PressKey("PADDDOWN");assert(Pad.Modal.GetState().index==6,"controller stopped on a divider/spacer")
+f.PressKey("PADDUP");assert(Pad.Modal.GetState().index==3)
+f.PressKey("PAD2")
+-- Reuse the action pool at different entry indices and change role at index 1.
+menus.CreateContextMenu(UIParent,function(_,menu)
+    menu:CreateButton("Only command",function() calls=calls+1 end)
+end)
+assert(window.rows[1]:IsObjectType("Button") and window.rows[1].label:GetText()=="Only command")
+f.PressKey("PAD1");assert(calls==1 and not Pad.modalActive)
+menus.CreateContextMenu(UIParent,function(_,menu)
+    menu:CreateTitle("No commands");menu:CreateDivider();menu:CreateSpacer()
+end)
+assert(not Pad.Modal.GetState().index and not window.hints:GetText():find(" Select",1,true))
+f.PressKey("PAD1");assert(Pad.modalActive and calls==1)
+f.PressKey("PAD2");assert(not Pad.modalActive)
+print("Menu roles: real headings/separators/spacers, disabled hints, submenu selection and pooled row reuse passed")

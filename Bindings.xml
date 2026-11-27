@@ -1,0 +1,9 @@
+<Bindings>
+    <Binding name="AWP_CONTROLLER_GUIDES" header="AZEROTHWAYPOINT" category="BINDING_HEADER_AZEROTHWAYPOINT">
+        AzerothWaypointNS.Internal.Controller.NavigateGuides()
+    </Binding>
+    <Binding name="AWP_CONTROLLER_MENU" category="BINDING_HEADER_AZEROTHWAYPOINT">
+        AzerothWaypointNS.Internal.Controller.OpenMenu()
+    </Binding>
+    <Binding name="CLICK AWPControllerGuideAction:LeftButton" category="BINDING_HEADER_AZEROTHWAYPOINT"/>
+</Bindings>

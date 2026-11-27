@@ -1,3 +1,10 @@
+-- ============================================================
+-- Archaeology dig-site waypoints
+-- ============================================================
+--
+-- Resolves a selected archaeology dig site and adopts it as a manual
+-- destination.
+
 local NS = _G.AzerothWaypointNS
 local state = NS.State
 
@@ -19,7 +26,6 @@ local GetActiveManualDestination = NS.GetActiveManualDestination
 local ClearActiveManualDestination = NS.ClearActiveManualDestination
 local GetGuideVisibilityState = NS.GetGuideVisibilityState
 local ReadWaypointCoords = NS.ReadWaypointCoords
-local Signature = NS.Signature
 
 local DIGSITE_ADOPTION_RETRY_DELAY_SECONDS = 0.05
 local DIGSITE_ADOPTION_RETRY_MAX_ATTEMPTS = 4
@@ -27,7 +33,7 @@ local BLIZZARD_MAP_PIN_KIND_DIG_SITE = "dig_site"
 local DIGSITE_MAP_PIN_TYPE = Enum.SuperTrackingMapPinType and Enum.SuperTrackingMapPinType.DigSite or 3
 
 -- ============================================================
--- Helpers
+-- Dig site identifiers
 -- ============================================================
 
 local function NormalizeDigSiteID(digSiteID)
@@ -36,11 +42,7 @@ local function NormalizeDigSiteID(digSiteID)
     end
 end
 
-local function GetWaypointSignature(mapID, x, y)
-    if type(Signature) ~= "function" then return nil end
-    if type(mapID) ~= "number" or type(x) ~= "number" or type(y) ~= "number" then return nil end
-    return Signature(mapID, x, y)
-end
+local GetWaypointSignature = NS.GetWaypointSignatureForCoords
 
 local function GetCurrentSuperTrackedDigSiteID()
     if type(C_SuperTrack) ~= "table" or type(C_SuperTrack.GetSuperTrackedMapPin) ~= "function" then
@@ -53,7 +55,7 @@ local function GetCurrentSuperTrackedDigSiteID()
 end
 
 -- ============================================================
--- Resolution
+-- Destination resolution
 -- ============================================================
 
 local function BuildDigSiteMapCandidates(preferredMapID)
@@ -105,7 +107,7 @@ local function ResolveDigSiteDestination(digSiteID, preferredMapID)
 end
 
 -- ============================================================
--- MapPinInfo getters
+-- Pin metadata lookup
 -- ============================================================
 
 local function ReadCanonicalDigSiteMapPinInfo(destination)
@@ -151,7 +153,7 @@ local function GetDigSiteIDForMapPinBackedManual(destination)
 end
 
 -- ============================================================
--- Meta builder
+-- Destination metadata
 -- ============================================================
 
 local function BuildBlizzardDigSiteMeta(digSiteID, mapID, x, y, explicit)
@@ -170,11 +172,7 @@ end
 -- Adoption and retry
 -- ============================================================
 
-local CancelDigSiteAdoptionRetry
-local AdoptBlizzardDigSiteAsManual
-local ScheduleDigSiteAdoptionRetry
-
-CancelDigSiteAdoptionRetry = function()
+local function CancelDigSiteAdoptionRetry()
     digSite.adoptionRetrySerial = (digSite.adoptionRetrySerial or 0) + 1
 end
 
@@ -185,7 +183,7 @@ local function GetActiveBlizzardDigSiteManual()
     return destination, mapPinInfo.mapPinID
 end
 
-AdoptBlizzardDigSiteAsManual = function(digSiteID, preferredMapID, explicit)
+local function AdoptBlizzardDigSiteAsManual(digSiteID, preferredMapID, explicit)
     local normalizedID = NormalizeDigSiteID(digSiteID)
     if not normalizedID then return false, "invalid_dig_site" end
     if not (state.init and state.init.playerLoggedIn) then return false, "not_ready" end
@@ -232,7 +230,7 @@ local function ShouldRetryDigSiteAdoption(digSiteID)
     return GetCurrentSuperTrackedDigSiteID() == normalizedID
 end
 
-ScheduleDigSiteAdoptionRetry = function(digSiteID, preferredMapID, explicit, attempt)
+local function ScheduleDigSiteAdoptionRetry(digSiteID, preferredMapID, explicit, attempt)
     local normalizedID = NormalizeDigSiteID(digSiteID)
     local nextAttempt = type(attempt) == "number" and attempt or 1
     local isExplicit = explicit == true
@@ -270,7 +268,7 @@ local function ClearBlizzardDigSiteBackedManual(clearReason)
 end
 
 -- ============================================================
--- Handler
+-- Pin change handler
 -- ============================================================
 
 local function HandleDigSiteMapPinChanged(pinID, preferredMapID, explicit)
@@ -294,7 +292,9 @@ local function HandleDigSiteMapPinChanged(pinID, preferredMapID, explicit)
     end
 
     local adopted, reason = AdoptBlizzardDigSiteAsManual(digSiteID, preferredMapID, explicit)
-    if adopted then CancelDigSiteAdoptionRetry(); return true end
+    if adopted then
+        CancelDigSiteAdoptionRetry(); return true
+    end
     if reason == "unresolved" then
         ScheduleDigSiteAdoptionRetry(digSiteID, preferredMapID, explicit)
     end
@@ -302,7 +302,7 @@ local function HandleDigSiteMapPinChanged(pinID, preferredMapID, explicit)
 end
 
 -- ============================================================
--- NS exports
+-- Public takeover handlers
 -- ============================================================
 
 function NS.GetDigSiteIDForMapPinBackedManual(destination)
@@ -334,7 +334,7 @@ function NS.ClearSuperTrackedDigSiteIfCurrent(digSiteID)
 end
 
 -- ============================================================
--- BlizzardKinds registration
+-- Pin type registration
 -- ============================================================
 
 M.BlizzardKinds["dig_site"] = {
@@ -345,7 +345,9 @@ M.BlizzardKinds["dig_site"] = {
     end,
     commitPending = function(pending)
         local adopted, reason = AdoptBlizzardDigSiteAsManual(pending.digSiteID, pending.preferredMapID, true)
-        if adopted then CancelDigSiteAdoptionRetry(); return true end
+        if adopted then
+            CancelDigSiteAdoptionRetry(); return true
+        end
         if reason == "unresolved" then
             ScheduleDigSiteAdoptionRetry(pending.digSiteID, pending.preferredMapID, true)
         end

@@ -3,8 +3,9 @@
 ## Status
 - Scope: split the guide resolver into fact, scan, snapshot, resolve, and cases modules while keeping `zygor/guide_resolver.lua` as the stable facade.
 - Policy: parity first, with only documented `approved_improvement` cases allowed to change output.
-- Diagnostics: `/awp resolvercases [all|case_id]`.
-- Verification status: fixture coverage is checked in; parse validation is required after every structural change; live `/awp stepdebug` verification is still required in game for representative protected families.
+- `/awp resolvercases` checks every case with coordinate fallback off and on. Both runs must match the expected quest, context and other recorded fields. Where a missing subtitle should fall back to coordinates, the case specifies the exact text and requires the `coordinate_fallback` reason. The diagnostic uses its own inputs independently of the active profile.
+- `/awp resolvercase <case_id>` shows the result for each setting and the subtitle produced with fallback on.
+- Verification status: fixture coverage is checked in, parse validation is required after every structural change, live `/awp stepdebug` verification is still required in game for representative protected families.
 
 ## Protected Families
 - `|or` clusters: visible accept, visible turnin, and hidden questpossible-style clusters stay protected.
@@ -84,10 +85,10 @@
 | `canonical_raw_later_incomplete_not_earliest` | approved_improvement | resolver anchors to raw later incomplete | `Accept 'Quest A'` / `Talk to Spiritwalker Yalna` | none | unchanged | none | `context_header` | Verifies canonical fires even when raw goal is incomplete but not the earliest incomplete in cluster. | fixture |
 | `canonical_all_cluster_goals_complete_no_override` | parity | no snapshot (non-actionable) | unchanged | `no_visible_actionable_goal` | unchanged | none | unchanged | Verifies canonical selector does not fire when entire cluster is complete. Raw passthrough, non-actionable fallback. | fixture |
 | `visible_kill_goal_keeps_quest_semantics` | approved_improvement | visible guide kill destination could fall through with no snapshot and render as generic guide/provider icon | `Kill Witch Lord Morkurk` / none, with `semanticKind=quest` and `semanticQuestID=34980` | `no_visible_actionable_goal` | `visible_quest_goal_semantic_fallback` | none | unchanged | Approved because a visible incomplete quest goal should retain quest semantics even when there is no actionable subtext or guide button presentation. | fixture |
-| `canonical_solo_goal_no_cluster_no_override` | parity | `Accept 'Quest A'` / `Talk to Healer Moswen` | unchanged | none | unchanged | `context_header` | unchanged | Verifies no cluster forms for solo goals; canonical selector passes through; resolver works normally. | fixture |
+| `canonical_solo_goal_no_cluster_no_override` | parity | `Accept 'Quest A'` / `Talk to Healer Moswen` | unchanged | none | unchanged | `context_header` | unchanged | Verifies no cluster forms for solo goals, canonical selector passes through, resolver works normally. | fixture |
 
 ## Notes
 - Legacy debug/subtext reasons are preserved through explicit mapping tables in `zygor/guide_resolver/cases.lua`.
 - The fixture runner reports both normalized reasons and legacy-mapped reasons so diagnostics remain readable during refactor cleanup.
-- Canonical goal selection is intentionally scoped to same-action quest handoff clusters. Mixed `turnin`/`accept` blocks stay on the existing resolver and stale-secondary policy paths; live direct seed correction and quest-log-ready turnin correction are applied later during actionable presentation selection.
-- The current checked-in suite is focused on the protected and recently changed families. Additional cases should be added before broadening behavior outside those families.
+- Canonical goal selection is intentionally scoped to same-action quest handoff clusters. Mixed `turnin`/`accept` blocks stay on the existing resolver and stale-secondary policy paths, live direct seed correction and quest-log-ready turnin correction are applied later during actionable presentation selection.
+- All 74 reference cases now have explicit cross-guide presentation mappings. The normal full suite rejects uncovered mappings. See [native parity coverage and boundaries](../tests/guide_parity/README.md) for the native parser/selector checks, same-coordinate transitions, scenario counters, helper/alternative fields and the 14 source-backed exclusions. Native equivalents do not claim that another guide has Zygor's private pointer-recovery representation.

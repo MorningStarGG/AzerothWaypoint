@@ -1,8 +1,26 @@
+-- ============================================================
+-- Manual queue prompt
+-- ============================================================
+--
+-- Asks how to place a new manual waypoint when the player's queue preference
+-- requires a choice.
+
 local NS = _G.AzerothWaypointNS
 
 local UIStyle = NS.UIStyle or {}
+local FW = NS.Internal.Interface.Framework
 local manualQueuePrompt
 local pendingChoiceCallback
+local CHOICE_BUTTON_STYLE = {
+    height = 28, labelInsetLeft = 8, labelInsetRight = 8,
+    bgColor = { 0.045, 0.033, 0.025, 0.96 },
+    borderColor = { 0.62, 0.42, 0.18, 0.50 },
+    insetColor = { 0.018, 0.014, 0.012, 0.94 },
+    hoverInsetColor = { 0.090, 0.060, 0.030, 0.96 },
+    pressedInsetColor = { 0.010, 0.008, 0.007, 0.98 },
+    textColor = { 1.0, 0.82, 0.0, 1 },
+    hoverTextColor = { 1.0, 0.95, 0.35, 1 },
+}
 
 local function HidePrompt()
     if manualQueuePrompt then
@@ -17,6 +35,14 @@ local function ApplyChoice(choice)
     if type(callback) == "function" then
         callback(choice or "cancel")
     end
+end
+
+local function CreateChoiceButton(parent, text, choice)
+    local button = FW.CreatePanelButton(parent, CHOICE_BUTTON_STYLE)
+    button:SetWidth(116)
+    button:SetDisplayText(text)
+    button:SetScript("OnClick", function() ApplyChoice(choice) end)
+    return button
 end
 
 local function GetOrCreatePrompt()
@@ -118,6 +144,7 @@ local function GetOrCreatePrompt()
     frame.footer:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 1, 1)
     frame.footer:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -1, 1)
     frame.footer:SetHeight(48)
+    if NS.Internal.Appearance then NS.Internal.Appearance.Tag(frame.footer, "windows.queue") end
     frame.footer.bg = frame.footer:CreateTexture(nil, "BACKGROUND")
     frame.footer.bg:SetAllPoints()
     UIStyle.SetColorTexture(frame.footer.bg, { 0.040, 0.030, 0.024, 0.96 })
@@ -127,19 +154,13 @@ local function GetOrCreatePrompt()
     frame.footer.sep:SetHeight(1)
     frame.footer.sep:SetColorTexture(0.52, 0.35, 0.16, 0.55)
 
-    frame.createButton = UIStyle.CreatePanelButton(frame.footer, "New Queue", function()
-        ApplyChoice("create")
-    end)
+    frame.createButton = CreateChoiceButton(frame.footer, "New Queue", "create")
     frame.createButton:SetPoint("LEFT", frame.footer, "LEFT", 18, 0)
 
-    frame.replaceButton = UIStyle.CreatePanelButton(frame.footer, "Replace", function()
-        ApplyChoice("replace")
-    end)
+    frame.replaceButton = CreateChoiceButton(frame.footer, "Replace", "replace")
     frame.replaceButton:SetPoint("CENTER", frame.footer, "CENTER", 0, 0)
 
-    frame.appendButton = UIStyle.CreatePanelButton(frame.footer, "Append", function()
-        ApplyChoice("append")
-    end)
+    frame.appendButton = CreateChoiceButton(frame.footer, "Append", "append")
     frame.appendButton:SetPoint("RIGHT", frame.footer, "RIGHT", -18, 0)
 
     manualQueuePrompt = frame

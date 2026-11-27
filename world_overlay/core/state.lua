@@ -6,6 +6,14 @@ NS.Internal.WorldOverlay = NS.Internal.WorldOverlay or {}
 
 local M = NS.Internal.WorldOverlay
 
+-- A selected user waypoint can coexist with Blizzard's higher-priority corpse.
+-- Only the highest-priority target owns the native navigation frame.
+function M.CorpseOwnsNavigationFrame()
+    local types = Enum and Enum.SuperTrackingType
+    return types and types.Corpse ~= nil and C_SuperTrack and C_SuperTrack.GetHighestPrioritySuperTrackingType
+        and C_SuperTrack.GetHighestPrioritySuperTrackingType() == types.Corpse or false
+end
+
 ---@class AWPWorldOverlayTarget
 ---@field active boolean
 ---@field uid table|nil
@@ -142,7 +150,6 @@ state.WorldOverlay = state.WorldOverlay or {
     contentSnapshot = nil,
     questIconCache = {},
     questTypeDetailsCache = {},
-    questSubtextCache = {},
     -- Host restore / context
     lastHostRestoreAt = 0,
     contextDisplayMode = nil,
@@ -172,7 +179,6 @@ M.derived = M.overlay.derived
 M.transition = M.overlay.transition
 M.questIconCache = M.overlay.questIconCache
 M.questTypeDetailsCache = M.overlay.questTypeDetailsCache
-M.questSubtextCache = M.overlay.questSubtextCache
 M.fontStringTextCache = setmetatable({}, { __mode = "k" })
 M.settingsSnapshot = {}
 
@@ -243,6 +249,7 @@ local function RefreshSettingsSnapshot()
         _settings[key] = getWorldOverlaySetting(key)
     end
 
+    _settings.plaqueAppearance = NS.GetPlaqueAppearance(_settings.worldOverlayPinpointPlaqueType)
     M.settingsDirty = false
 end
 

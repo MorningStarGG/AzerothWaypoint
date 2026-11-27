@@ -1,8 +1,18 @@
+-- ============================================================
+-- Queue window controls
+-- ============================================================
+--
+-- Builds shared queue controls and measures their icons, headers and scroll
+-- content.
+
 local NS = _G.AzerothWaypointNS
 NS.Internal = NS.Internal or {}
 NS.Internal.QueueUI = NS.Internal.QueueUI or {}
 local M = NS.Internal.QueueUI
 local ui = M.ui
+local FW = NS.Internal.Interface and NS.Internal.Interface.Framework
+
+M.BULK_DELETE_RIGHT_INSET = 18
 
 local _iconKeyParts = {}
 
@@ -95,6 +105,10 @@ M.DETAIL_HEADER_ICON_TEXT_GAP = 8
 local DETAIL_HEADER_ICON_TEXT_GAP = M.DETAIL_HEADER_ICON_TEXT_GAP
 local DETAIL_HEADER_ICON_CENTER_X = DETAIL_HEADER_ICON_LEFT + (DETAIL_HEADER_ICON_SIZE * 0.5)
 
+-- ============================================================
+-- Header and scroll measurements
+-- ============================================================
+
 local function GetVisibleFontStringHeight(fontString, fallback)
     if not fontString or (type(fontString.IsShown) == "function" and not fontString:IsShown()) then
         return 0
@@ -145,98 +159,71 @@ function M.GetScrollContentWidth(scrollFrame, minimumWidth)
     return math.max(math.floor(width or 0), minimumWidth or 1)
 end
 
-local function GetLegacyScrollBar(scrollFrame)
-    if type(scrollFrame) ~= "table" then
-        return nil
+function M.CreateQueueBorder(parent)
+    -- Standalone queues can open before the client has built its quest log.
+    local questLogLoaded = rawget(_G, "QuestMapFrame") ~= nil
+    local border = CreateFrame("Frame", nil, parent, questLogLoaded and "QuestLogBorderFrameTemplate" or nil)
+    border:SetAllPoints()
+    if not questLogLoaded then
+        local frame = border:CreateTexture(nil, "BORDER")
+        frame:SetAtlas("questlog-frame")
+        frame:SetAllPoints()
+        local detail = border:CreateTexture(nil, "ARTWORK")
+        detail:SetAtlas("questlog-frame-filigree", true)
+        detail:SetPoint("TOP", 0, 1)
     end
-
-    if type(scrollFrame.ScrollBar) == "table" then
-        return scrollFrame.ScrollBar
-    end
-
-    local name = type(scrollFrame.GetName) == "function" and scrollFrame:GetName() or nil
-    if type(name) == "string" then
-        return _G[name .. "ScrollBar"]
-    end
-
-    return nil
+    return border
 end
 
-local function HideLegacyScrollButton(scrollBar, suffixes)
-    if type(scrollBar) ~= "table" or type(suffixes) ~= "table" then
-        return
-    end
+-- ============================================================
+-- Borders and shared controls
+-- ============================================================
 
-    local name = type(scrollBar.GetName) == "function" and scrollBar:GetName() or nil
-    for index = 1, #suffixes do
-        local suffix = suffixes[index]
-        local button = scrollBar[suffix]
-        if not button and type(name) == "string" then
-            button = _G[name .. suffix]
+function M.CreateInsetBorder(parent)
+    local border = M.CreateQueueBorder(parent)
+    local appearance = NS.Internal.Appearance
+    if appearance then
+        appearance.Shell(parent, "windows.queue", { border }, nil, "inset")
+    end
+    return border
+end
+
+local function UpdateSectionArt(row, isSection)
+    local appearance = NS.Internal.Appearance
+    if not appearance then return end
+    local record = appearance.visuals[row]
+    if record then
+        -- Both views reuse their rows for headers and ordinary entries.
+        local useNativeArt = not isSection
+        if record.useNativeArt ~= useNativeArt then
+            record.useNativeArt = useNativeArt
+            appearance.UpdateVisual(row)
         end
-        if type(button) == "table" and type(button.Hide) == "function" then
-            button:Hide()
-            if type(button.SetAlpha) == "function" then
-                button:SetAlpha(0)
-            end
-        end
+    elseif isSection then
+        appearance.RegisterVisual(row, {
+            kind = "sectionHeader", surface = "windows.queue", useNativeArt = false,
+            regions = { row.bg, row:GetHighlightTexture() },
+        })
     end
 end
 
-function M.StyleLegacyScrollBar(scrollFrame, ownerFrame)
-    local scrollBar = GetLegacyScrollBar(scrollFrame)
-    if not scrollBar or not ownerFrame then
+function M.UpdateSectionAppearance(row, collapsed, onClick)
+    UpdateSectionArt(row, collapsed ~= nil)
+    local button = row.disclosure
+    if collapsed == nil then
+        if button then button:Hide() end
         return
     end
-
-    HideLegacyScrollButton(scrollBar, {
-        "ScrollUpButton",
-        "ScrollDownButton",
-        "UpButton",
-        "DownButton",
-        "DecrementButton",
-        "IncrementButton",
-    })
-
-    local thumb = type(scrollBar.GetThumbTexture) == "function" and scrollBar:GetThumbTexture() or nil
-    if type(scrollBar.SetThumbTexture) == "function" then
-        scrollBar:SetThumbTexture("Interface\\Buttons\\WHITE8X8")
-        thumb = type(scrollBar.GetThumbTexture) == "function" and scrollBar:GetThumbTexture() or thumb
+    if not button then
+        button = FW.CreateDisclosureButton(row, 20)
+        button:SetPoint("RIGHT", row, "RIGHT", -4, 0)
+        button:RegisterForClicks("LeftButtonUp")
+        button:SetScript("OnClick", function(self) onClick(self:GetParent()) end)
+        row.disclosure = button
     end
-    if type(thumb) == "table" and type(thumb.SetTexture) == "function" then
-        thumb:SetTexture("Interface\\Buttons\\WHITE8X8")
-        thumb:SetVertexColor(0.85, 0.85, 0.85, 0.95)
-        if type(thumb.SetWidth) == "function" then
-            thumb:SetWidth(5)
-        end
-    end
-
-    local regions = { scrollBar:GetRegions() }
-    for index = 1, #regions do
-        local region = regions[index]
-        if region ~= thumb and type(region) == "table" and type(region.SetAlpha) == "function" then
-            region:SetAlpha(0)
-        end
-    end
-
-    if not scrollBar.awpTrack then
-        scrollBar.awpTrack = scrollBar:CreateTexture(nil, "BACKGROUND")
-        scrollBar.awpTrack:SetColorTexture(0, 0, 0, 0.45)
-        scrollBar.awpTrack:SetPoint("TOP", scrollBar, "TOP", 0, -4)
-        scrollBar.awpTrack:SetPoint("BOTTOM", scrollBar, "BOTTOM", 0, 4)
-        scrollBar.awpTrack:SetWidth(2)
-    end
-
-    scrollBar:ClearAllPoints()
-    scrollBar:SetPoint("TOPRIGHT", ownerFrame, "TOPRIGHT", -7, -12)
-    scrollBar:SetPoint("BOTTOMRIGHT", ownerFrame, "BOTTOMRIGHT", -7, 12)
-    scrollBar:SetWidth(6)
-    if type(scrollBar.SetHitRectInsets) == "function" then
-        scrollBar:SetHitRectInsets(-6, -6, 0, 0)
-    end
-    if type(scrollBar.SetHideIfUnscrollable) == "function" then
-        scrollBar:SetHideIfUnscrollable(true)
-    end
+    button:SetCollapsed(collapsed)
+    button:Show()
+    return button
 end
 
 
@@ -264,6 +251,21 @@ function M.SetContentPageBounds(page, bottomInset)
     page:SetPoint("BOTTOMRIGHT", ui.content, "BOTTOMRIGHT", -12, bottomInset or 12)
 end
 
+function M.StyleQueueButton(button)
+    local appearance = NS.Internal.Appearance
+    if not appearance then return end
+    local regions = {}
+    -- UIPanelButtonTemplate also draws its three-piece background as texture layers.
+    for _, region in ipairs({ button:GetRegions() }) do
+        if region:GetObjectType() == "Texture" then
+            regions[#regions + 1] = region
+        end
+    end
+    appearance.RegisterVisual(button, {
+        kind = "button", surface = "windows.queue", text = button:GetFontString(), regions = regions,
+    })
+end
+
 function M.ReflowFooterButtons(viewMode, selectedQueue, queueType)
     if not ui.content then
         return 0
@@ -283,8 +285,10 @@ function M.ReflowFooterButtons(viewMode, selectedQueue, queueType)
             addButton(ui.content.useButton, 96)
         end
         addButton(ui.content.clearButton, 60)
+        addButton(ui.content.exportButton, 78)
     else
         addButton(ui.content.importButton, 72)
+        addButton(ui.content.exportButton, 84)
         addButton(ui.content.questsButton, 84)
     end
 
@@ -338,6 +342,10 @@ function M.ReflowFooterButtons(viewMode, selectedQueue, queueType)
     return totalHeight
 end
 
+-- ============================================================
+-- Bulk selection controls
+-- ============================================================
+
 function M.UpdateBulkDeleteButton(selectedQueue, queueType, viewMode)
     local button = ui.content and ui.content.bulkDeleteButton or nil
     if not button then
@@ -373,5 +381,5 @@ function M.UpdateBulkDeleteButton(selectedQueue, queueType, viewMode)
     end
 
     button:ClearAllPoints()
-    button:SetPoint("BOTTOMRIGHT", anchorFrame, "BOTTOMRIGHT", -18, 14)
+    button:SetPoint("BOTTOMRIGHT", anchorFrame, "BOTTOMRIGHT", -M.BULK_DELETE_RIGHT_INSET, 14)
 end

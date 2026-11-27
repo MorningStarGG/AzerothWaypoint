@@ -98,6 +98,9 @@ CFG.RAID_TINT                    = RAID_TINT
 CFG.ICON_SPECS                   = {
     corpse                      = { atlas = "poi-torghast", tint = CORPSE_TINT, recolor = true, iconSize = false },
     taxi                        = { atlas = "Taxi_Frame_Gray", tint = TAXI_TINT, iconSize = 16 },
+    ship                        = { atlas = "ShipMissionIcon-Training-Mission", tint = DEFAULT_TINT, iconSize = 28 },
+    airship                     = { atlas = "Vehicle-Air-Alliance", tint = DEFAULT_TINT, iconSize = 28 },
+    zeppelin                    = { atlas = "Vehicle-Air-Horde", tint = DEFAULT_TINT, iconSize = 28 },
     inn                         = { atlas = "Innkeeper", tint = INN_TINT, iconSize = 24 },
     dungeon                     = { atlas = "Dungeon", tint = DUNGEON_TINT, iconOffsetY = 1, iconSize = 40 },
     raid                        = { atlas = "Raid", tint = RAID_TINT, iconOffsetY = 1, iconSize = 40 },
@@ -121,10 +124,18 @@ CFG.ICON_SPECS                   = {
     silverdragon                = { atlas = "worldquest-questmarker-dragon-silver", tint = SILVERDRAGON_TINT, iconSize = 26 },
     rarescanner                 = { texture = "Interface\\AddOns\\RareScanner\\Media\\Icons\\OriginalSkull.blp", tint = RARESCANNER_TINT, iconSize = 28 },
     handynotes                  = { atlas = "poi-workorders", tint = HANDYNOTES_TINT, recolor = true, iconOffsetX = -1, iconSize = 24 },
+    questie                     = { texture = "Interface\\AddOns\\Questie\\Icons\\questie.png", tint = DEFAULT_TINT, iconSize = 24 },
     portal                      = { atlas = "MagePortalAlliance", tint = { r = 0.812, g = 0.884, b = 0.873, a = 1 }, iconOffsetY = 2, iconSize = 28 },
     travel                      = { atlas = "poi-traveldirections-arrow2", tint = { r = 1, g = 1, b = 1, a = 1 }, iconOffsetY = -1, iconSize = 28 },
     guide                       = { atlas = "LevelUp-Icon-Book", tint = DEFAULT_TINT, iconOffsetY = 1, iconSize = 24 },
+    -- Guide logos: overlay size, tint and placement are configured here.
     zygor_guide                 = { texture = NS.GetZygorAssetPath("Skins\\addon-icon.tga"), tint = { r = 0.996, g = 0.38, b = 0, a = 1 }, iconOffsetY = 1, iconSize = 24 },
+    dugi_guide                  = { texture = "Interface\\AddOns\\DugisGuideViewerZ\\Artwork\\iconbutton.tga", tint = DEFAULT_TINT, iconOffsetX = 0, iconOffsetY = 1, iconSize = 16 },
+    rxp_guide                   = { texture = "Interface\\AddOns\\RXPGuides\\Textures\\rxp_logo-64.blp", tint = DEFAULT_TINT, iconOffsetX = 0, iconOffsetY = 1, iconSize = 24 },
+    polestar_guide              = { texture = "Interface\\AddOns\\Polestar\\Media\\UI\\logo", tint = DEFAULT_TINT, iconOffsetX = 0, iconOffsetY = 1, iconSize = 20 },
+    apr_guide                   = { texture = "Interface\\AddOns\\APR\\APR-Core\\assets\\APR_logo.blp", tint = { r = 0.22, g = 0.75, b = 1, a = 1 }, iconOffsetX = 0, iconOffsetY = 1, iconSize = 16 },
+    wowpro_guide                = { texture = "Interface\\AddOns\\WoWPro\\Textures\\TriRing.tga", tint = { r = 0.8, g = 0.78, b = 0.95, a = 1 }, iconOffsetX = 0, iconOffsetY = 1, iconSize = 16 },
+    questierouter_guide         = { texture = "Interface\\AddOns\\Questie\\Icons\\questie.png", tint = DEFAULT_TINT, iconOffsetX = 0, iconOffsetY = 1, iconSize = 24 },
 
     -- WhoWhere NPC search results
     npc_auctioneer              = { atlas = "Auctioneer", tint = NPC_AUCTIONEER_TINT, iconOffsetY = 0.5 },
@@ -181,11 +192,11 @@ for key, spec in pairs(CFG.ICON_SPECS) do
     end
 end
 
-CFG.AREA_POI_ICON_OVERRIDES      = {
+CFG.AREA_POI_ICON_OVERRIDES = {
     defaultSize = 22,
     -- Override rows accept the same placement/color fields as ICON_SPECS.
-    -- byAtlas is the usual path for Blizzard POI atlases; byID is for known
-    -- map pin IDs; byTextureIndex covers POI texture-sheet entries.
+    -- byAtlas is the usual path for Blizzard POI atlases, byID is for known
+    -- map pin IDs, byTextureIndex covers POI texture-sheet entries.
     byAtlas = {
         ["ui-eventpoi-shippingandhandling"] = { iconSize = 34, iconOffsetY = 0 },
         ["worldquest-Capstone-questmarker-epic-Locked"] = { iconSize = 26, iconOffsetY = 0 },
@@ -209,7 +220,7 @@ CFG.AREA_POI_ICON_OVERRIDES      = {
     },
 }
 
-CFG.VIGNETTE_ICON_OVERRIDES      = {
+CFG.VIGNETTE_ICON_OVERRIDES = {
     defaultSize = 22,
     byAtlas = {
         ["Quartermaster"] = { iconSize = 24, iconOffsetY = 2.5 },
@@ -227,7 +238,7 @@ CFG.VIGNETTE_ICON_OVERRIDES      = {
 -- the takeover derives a gossip_<normalized_name> key automatically and
 -- renders it with the configured fallback presentation until you add a
 -- definition. GOSSIP_ICON_DEFAULTS applies shared presentation overrides to
--- every gossip icon after base icon resolution; each type can then override
+-- every gossip icon after base icon resolution, each type can then override
 -- those same fields again locally.
 CFG.GOSSIP_ICON_FALLBACK_KEY = "gossip_poi"
 
@@ -552,12 +563,12 @@ CFG.GOSSIP_ICON_TYPE_DEFS = {
 -- individual states can override waypoint footer text when the user-selected
 -- waypoint text color mode is Auto. Set waypointTextTint to a color preset key
 -- such as "gray", or provide a color table plus optional waypointTextTintKey.
--- State key values name the quest icon asset/cache identity; unlike
+-- State key values name the quest icon asset/cache identity, unlike
 -- ICON_SPECS table keys, they are intentionally explicit.
 -- Quest families and states can also define iconOffsetX / iconOffsetY to
 -- nudge atlas art that is visually biased within its source region.
 -- iconSize/iconOffsetX/iconOffsetY are container-relative by default here
--- too; set iconSizeMode/iconOffsetMode = "absolute" on a family or state
+-- too, set iconSizeMode/iconOffsetMode = "absolute" on a family or state
 -- only when exact pixels are truly required.
 CFG.QUEST_ICON_TYPE_DEFS = {
     Default = {

@@ -1,3 +1,10 @@
+-- ============================================================
+-- Taxi pin waypoints
+-- ============================================================
+--
+-- Adopts a selected Blizzard taxi pin and resolves its flight node,
+-- destination and display metadata.
+
 local NS = _G.AzerothWaypointNS
 local state = NS.State
 NS.Internal.BlizzardTakeovers = NS.Internal.BlizzardTakeovers or {}
@@ -7,7 +14,6 @@ local GetActiveManualDestination = NS.GetActiveManualDestination
 local ClearActiveManualDestination = NS.ClearActiveManualDestination
 local GetGuideVisibilityState = NS.GetGuideVisibilityState
 local ReadWaypointCoords = NS.ReadWaypointCoords
-local Signature = NS.Signature
 
 state.bridgeTaxiTakeover = state.bridgeTaxiTakeover or {
     adoptionRetrySerial = 0,
@@ -20,7 +26,7 @@ local TAXI_NODE_ADOPTION_RETRY_DELAY_SECONDS = 0.05
 local TAXI_NODE_ADOPTION_RETRY_MAX_ATTEMPTS = 4
 
 -- ============================================================
--- Local helpers
+-- Taxi node identifiers and map candidates
 -- ============================================================
 
 local function NormalizeTaxiNodeID(nodeID)
@@ -49,36 +55,9 @@ local function IsTaxiNodeMapPinType(pinType)
     return pinType == GetTaxiNodeMapPinType()
 end
 
-local function GetWaypointSignature(mapID, x, y)
-    if type(Signature) ~= "function" then
-        return nil
-    end
-    if type(mapID) ~= "number" or type(x) ~= "number" or type(y) ~= "number" then
-        return nil
-    end
-    return Signature(mapID, x, y)
-end
+local GetWaypointSignature = NS.GetWaypointSignatureForCoords
 
-local function ResolveMapTitle(mapID, x, y)
-    local mapInfo = type(C_Map) == "table"
-        and type(C_Map.GetMapInfo) == "function"
-        and C_Map.GetMapInfo(mapID)
-        or nil
-    local mapName = mapInfo and mapInfo.name or nil
-    if type(mapName) == "string" and mapName ~= "" then
-        if type(x) == "number" and type(y) == "number" then
-            return string.format("%s %.0f, %.0f", mapName, x * 100, y * 100)
-        end
-        return mapName
-    end
-    if type(mapID) == "number" then
-        if type(x) == "number" and type(y) == "number" then
-            return string.format("Waypoint %d %.0f, %.0f", mapID, x * 100, y * 100)
-        end
-        return "Waypoint " .. tostring(mapID)
-    end
-    return "Waypoint"
-end
+local ResolveMapTitle = M.ResolveMapTitle
 
 local function BumpChurnCounter(key, amount)
     if type(NS.BumpChurnCounter) == "function" then
@@ -87,7 +66,7 @@ local function BumpChurnCounter(key, amount)
 end
 
 -- ============================================================
--- GetCurrentSuperTrackedTaxiNodeID
+-- Current supertracked taxi node
 -- ============================================================
 
 local function GetCurrentSuperTrackedMapPinID(expectedPinType)
@@ -159,7 +138,7 @@ local function ResolveTaxiNodeDestination(nodeID, preferredMapID)
 end
 
 -- ============================================================
--- MapPinInfo
+-- Pin metadata lookup
 -- ============================================================
 
 local function ReadCanonicalTaxiNodeMapPinInfo(destination)
@@ -233,7 +212,7 @@ local function GetActiveBlizzardTaxiNodeManual()
 end
 
 -- ============================================================
--- Metadata builder
+-- Destination metadata
 -- ============================================================
 
 local function BuildBlizzardTaxiNodeMeta(nodeID, mapID, x, y, explicit)
@@ -332,7 +311,7 @@ local function ScheduleTaxiNodeAdoptionRetry(nodeID, preferredMapID, explicit, a
 end
 
 -- ============================================================
--- Clear
+-- Clearing a taxi route
 -- ============================================================
 
 local function ClearBlizzardTaxiNodeBackedManual(clearReason)
@@ -401,7 +380,7 @@ local function HandleTaxiNodeMapPinChanged(pinID, preferredMapID, explicit)
 end
 
 -- ============================================================
--- NS exports
+-- Public takeover handlers
 -- ============================================================
 
 function NS.GetTaxiNodeIDForMapPinBackedManual(destination)
@@ -417,7 +396,7 @@ function NS.ClearSuperTrackedTaxiNodeIfCurrent(nodeID)
 end
 
 -- ============================================================
--- Kind registration
+-- Pin type registration
 -- ============================================================
 
 M.BlizzardKinds["taxi_node"] = {
@@ -429,7 +408,9 @@ M.BlizzardKinds["taxi_node"] = {
     commitPending = function(pending)
         local adopted, reason = AdoptBlizzardTaxiNodeAsManual(
             pending.nodeID, pending.preferredMapID, true)
-        if adopted then CancelTaxiNodeAdoptionRetry(); return true end
+        if adopted then
+            CancelTaxiNodeAdoptionRetry(); return true
+        end
         if reason == "unresolved" then
             ScheduleTaxiNodeAdoptionRetry(pending.nodeID, pending.preferredMapID, true)
         end

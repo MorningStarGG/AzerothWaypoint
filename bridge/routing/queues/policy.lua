@@ -1,5 +1,10 @@
+-- ============================================================
+-- Manual waypoint queue policy
+-- ============================================================
+--
+-- Applies the player's manual-click policy when a new destination arrives.
+
 local NS = _G.AzerothWaypointNS
-local state = NS.State
 local Queue = NS.RouteQueueInternal
 if type(Queue) ~= "table" then
     Queue = {}
@@ -28,11 +33,19 @@ end
 
 function NS.GetManualClickQueueModeOptions()
     return {
-        { value = "create", label = "Create new queue" },
+        { value = "create",  label = "Create new queue" },
         { value = "replace", label = "Replace active" },
-        { value = "append", label = "Append" },
-        { value = "ask", label = "Ask" },
+        { value = "append",  label = "Append" },
+        { value = "ask",     label = "Ask" },
     }
+end
+
+function NS.IsManualQueuePreservationEnabled()
+    return NS.GetDB().preserveManualQueuesOnReplace ~= false
+end
+
+function NS.SetManualQueuePreservationEnabled(enabled)
+    NS.GetDB().preserveManualQueuesOnReplace = enabled == true
 end
 
 function Queue.ShouldApplyManualClickQueuePolicy(sourceType, opts)
@@ -80,4 +93,3 @@ function NS.HandleManualQueueRoutingPolicy(mapID, x, y, title, meta, opts)
 
     return Queue.HandleManualClickMode(mode, mapID, x, y, title, normalizedMeta, "manual_click")
 end
-

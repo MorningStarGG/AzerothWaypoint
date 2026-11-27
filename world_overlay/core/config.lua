@@ -1,17 +1,17 @@
-local NS                       = _G.AzerothWaypointNS
-local M                        = NS.Internal.WorldOverlay
+local NS        = _G.AzerothWaypointNS
+local M         = NS.Internal.WorldOverlay
 
 -- ============================================================
 -- Internal cross-references (locals only — not exported)
 -- ============================================================
 
-local ROOT_PATH                = "Interface\\AddOns\\AzerothWaypoint\\media\\world-overlay\\"
+local ROOT_PATH = "Interface\\AddOns\\AzerothWaypoint\\media\\world-overlay\\"
 
 -- ============================================================
 -- Config
 -- ============================================================
 
-local CFG                      = {
+local CFG       = {
 
     -- Texture paths
     WAYPOINT_BEACON_TEXTURE                       = ROOT_PATH .. "Beacon",
@@ -54,7 +54,7 @@ local CFG                      = {
     CONTENT_REFRESH_INTERVAL                      = 2.0,
     CLAMP_THRESHOLD                               = 0.125,
     CLAMP_THRESHOLD_EXIT                          = 0.16,
-    BEACON_COLUMN_FADE_DURATION                    = 0.4,
+    BEACON_COLUMN_FADE_DURATION                   = 0.4,
     PINPOINT_TRANSITION_DURATION                  = 1.0,
     WAYPOINT_TRANSITION_INTRO_FADE_DURATION       = 1.0,
     WAYPOINT_TRANSITION_INTRO_BEACON_DELAY        = 0.175,
@@ -149,4 +149,4 @@ local CFG                      = {
 
 }
 
-M.Config                       = CFG
+M.Config        = CFG

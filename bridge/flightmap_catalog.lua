@@ -1,17 +1,21 @@
+-- ============================================================
+-- Flight map destination list
+-- ============================================================
+--
+-- Builds the searchable flight list, fare display and hover marker for the
+-- open taxi window. Rows and hover artwork consume the taxi window snapshot.
+-- Selecting a row still goes through that window's flight-selection checks.
+
 local NS = _G.AzerothWaypointNS
 local C = NS.Constants
 local state = NS.State
-local SafeCall = NS.SafeCall or function(fn, ...)
-    if type(fn) == "function" then
-        return fn(...)
-    end
-    return nil
-end
+local TaxiWindow = NS.Internal.TaxiWindow
+local Appearance = NS.Internal.Appearance
+local APPEARANCE_SURFACE = "windows.taxi"
 
 state.flightMapCatalog = state.flightMapCatalog or {}
 
 local catalog = state.flightMapCatalog
-local PIN_TEMPLATE = "FlightMap_FlightPointPinTemplate"
 local TAXI_YELLOW_ATLAS = "Taxi_Frame_Yellow"
 local TAXI_GRAY_ATLAS = "Taxi_Frame_Gray"
 local TAXI_YELLOW_TEXTURE = "Interface\\TaxiFrame\\UI-Taxi-Icon-Yellow"
@@ -27,12 +31,12 @@ local ROW_HEIGHT = 30
 local HEADER_HEIGHT = 22
 local LAYOUT_CHECK_INTERVAL_SECONDS = 0.10
 local LAYOUT_EPSILON = 0.5
-local RETRY_DELAYS = { 0, 0.08, 0.18, 0.35 }
 local HOVER_MARKER_FALLBACK_SIZE = 24
 local HOVER_MARKER_MIN_SIZE = 12
 local HOVER_MARKER_MAX_SIZE = 40
 local HOVER_MARKER_SIZE_MULTIPLIER = 1.15
 
+-- The panel's search callback refreshes the list, and the first refresh creates the panel.
 local RefreshInternal
 
 local COLORS = {
@@ -78,14 +82,6 @@ local function SetFontStringSize(fontString, fontFile, fontSize, fontFlags)
         return
     end
     fontString:SetFont(fontFile, fontSize, fontFlags)
-end
-
-local function GetUIStyle()
-    return NS.UIStyle or {}
-end
-
-local function GetQueueUI()
-    return NS.Internal and NS.Internal.QueueUI or nil
 end
 
 local function TrimString(value)
@@ -161,6 +157,14 @@ local function FormatFlightTime(node)
     return NS.FormatFlightMapTaxiTime(info)
 end
 
+local function FormatFare(fare, fontSize)
+    if type(fare) == "string" then return fare end
+    if fare == 0 then return rawget(_G, "FREE") or "Free" end
+    if type(fare) == "number" and C_CurrencyInfo and C_CurrencyInfo.GetCoinTextureString then
+        return C_CurrencyInfo.GetCoinTextureString(fare, fontSize)
+    end
+end
+
 local function BuildNodeSubline(node, extraText)
     local parts = {}
     extraText = TrimString(extraText)
@@ -202,27 +206,6 @@ local function SetColor(texture, color)
     end
 end
 
-local function GetOpenFlightMapFrame()
-    local frame = rawget(_G, "FlightMapFrame")
-    if type(frame) ~= "table" then
-        return nil
-    end
-    if type(frame.IsShown) == "function" and not frame:IsShown() then
-        return nil
-    end
-    return frame
-end
-
-local function GetFlightMapCanvas(frame)
-    if frame and type(frame.GetMap) == "function" then
-        local ok, map = pcall(frame.GetMap, frame)
-        if ok and type(map) == "table" then
-            return map
-        end
-    end
-    return frame
-end
-
 local function GetFrameHeight(frame)
     if type(frame) == "table" and type(frame.GetHeight) == "function" then
         local height = tonumber(frame:GetHeight())
@@ -258,7 +241,7 @@ local function GetFlightMapLayoutFrame(frame)
     if IsUsableLayoutFrame(candidate, frameHeight) then
         return candidate
     end
-    candidate = GetFlightMapCanvas(frame)
+    candidate = TaxiWindow.GetCanvas(frame)
     if IsUsableLayoutFrame(candidate, frameHeight) then
         return candidate
     end
@@ -284,86 +267,6 @@ local function GetLayoutYOffset(frame, layoutFrame)
     return ((layoutTop + layoutBottom) / 2) - ((frameTop + frameBottom) / 2)
 end
 
-local function EnumerateActivePins(frame, out)
-    local seen = {}
-    local function addPin(pin)
-        if type(pin) == "table" and not seen[pin] then
-            seen[pin] = true
-            out[#out + 1] = pin
-        end
-    end
-
-    local pools = type(frame.pinPools) == "table" and frame.pinPools or nil
-    local pool = pools and pools[PIN_TEMPLATE] or nil
-    if pool and type(pool.EnumerateActive) == "function" then
-        for pin in pool:EnumerateActive() do
-            addPin(pin)
-        end
-    end
-
-    local map = GetFlightMapCanvas(frame)
-    if map and type(map.EnumeratePinsByTemplate) == "function" then
-        for pin in map:EnumeratePinsByTemplate(PIN_TEMPLATE) do
-            addPin(pin)
-        end
-    end
-end
-
-local function IsPinVisible(pin)
-    if type(pin) ~= "table" then
-        return false
-    end
-    if type(pin.IsShown) == "function" and not pin:IsShown() then
-        return false
-    end
-    if type(pin.IsVisible) == "function" and not pin:IsVisible() then
-        return false
-    end
-    return true
-end
-
-local function ReadPinNodeData(pin)
-    local data = pin and (pin.taxiNodeData or pin.nodeData or pin.data) or nil
-    if type(data) ~= "table" then
-        return nil
-    end
-    return {
-        nodeID = tonumber(data.nodeID or data.taxinodeID or data.taxiNodeID),
-        slotIndex = tonumber(data.slotIndex or data.slot),
-        name = TrimString(data.name),
-        state = data.state,
-        pin = pin,
-    }
-end
-
-local function BuildPinLookup(frame)
-    local pins = {}
-    local byNodeID = {}
-    local bySlot = {}
-    local byName = {}
-
-    EnumerateActivePins(frame, pins)
-    for index = 1, #pins do
-        local pin = pins[index]
-        if IsPinVisible(pin) then
-            local data = ReadPinNodeData(pin)
-            if data then
-                if data.nodeID then
-                    byNodeID[data.nodeID] = data
-                end
-                if data.slotIndex then
-                    bySlot[data.slotIndex] = data
-                end
-                if data.name then
-                    byName[data.name] = data
-                end
-            end
-        end
-    end
-
-    return byNodeID, bySlot, byName
-end
-
 local function ParseTaxiName(fullName)
     fullName = TrimString(fullName) or "Flight Path"
     local place, zone = fullName:match("^(.-),%s*([^,]+)$")
@@ -375,76 +278,37 @@ local function ParseTaxiName(fullName)
     return fullName, "Other"
 end
 
-local function IsReachableTaxiSlot(slotIndex)
-    if type(TaxiNodeGetType) ~= "function" then
-        return false
-    end
-    local ok, nodeType = pcall(TaxiNodeGetType, slotIndex)
-    return ok and nodeType == "REACHABLE"
-end
-
-local function ReadTaxiSlot(slotIndex, byNodeID, bySlot, byName)
-    if type(TaxiNodeName) ~= "function" then
-        return nil
-    end
-    local ok, fullName = pcall(TaxiNodeName, slotIndex)
-    fullName = ok and TrimString(fullName) or nil
-    if not fullName or not IsReachableTaxiSlot(slotIndex) then
-        return nil
-    end
-
-    local pinData = bySlot[slotIndex] or byName[fullName]
-    local nodeID = pinData and pinData.nodeID or nil
-    if not pinData and nodeID then
-        pinData = byNodeID[nodeID]
-    end
-
-    local place, zone = ParseTaxiName(fullName)
-    return {
-        fullName = fullName,
-        place = place,
-        zone = zone,
-        slotIndex = slotIndex,
-        nodeID = nodeID,
-        pin = pinData and pinData.pin or nil,
-    }
-end
+-- ============================================================
+-- Reachable flights in the current taxi window
+-- ============================================================
 
 local function BuildReachableNodes(frame)
-    local nodes = {}
-    local byName = {}
-    local bySlot = {}
-    local byNodeID = {}
-    local pinByNodeID, pinBySlot, pinByName = BuildPinLookup(frame)
-    local count = 0
-    if type(NumTaxiNodes) == "function" then
-        local ok, value = pcall(NumTaxiNodes)
-        count = ok and tonumber(value) or 0
+    local window = TaxiWindow.GetSnapshot(frame)
+    local cached = catalog.reachableNodes
+    if cached and cached.window == window then return cached.nodes, cached.byName, cached.bySlot, cached.byID end
+    local nodes, byName, bySlot, byID = {}, {}, {}, {}
+    for _, taxi in ipairs(window.reachable) do
+        local place, zone = ParseTaxiName(taxi.name)
+        local node = {
+            fullName = taxi.name,
+            place = place,
+            zone = zone,
+            slotIndex = taxi.slotIndex,
+            nodeID = taxi.nodeID,
+            fare = TaxiWindow.GetFare(window, taxi.slotIndex)
+        }
+        HydrateFlightTime(node)
+        nodes[#nodes + 1] = node
+        byName[node.fullName], bySlot[node.slotIndex] = node, node
+        if node.nodeID then byID[node.nodeID] = node end
     end
-
-    for slotIndex = 1, count do
-        local node = ReadTaxiSlot(slotIndex, pinByNodeID, pinBySlot, pinByName)
-        if node then
-            HydrateFlightTime(node)
-            nodes[#nodes + 1] = node
-            byName[node.fullName] = node
-            bySlot[node.slotIndex] = node
-            if node.nodeID then
-                byNodeID[node.nodeID] = node
-            end
-        end
-    end
-
     table.sort(nodes, function(a, b)
-        local az = (a.zone or ""):lower()
-        local bz = (b.zone or ""):lower()
-        if az ~= bz then
-            return az < bz
-        end
-        return (a.place or a.fullName or ""):lower() < (b.place or b.fullName or ""):lower()
+        local az, bz = a.zone:lower(), b.zone:lower()
+        if az ~= bz then return az < bz end
+        return a.place:lower() < b.place:lower()
     end)
-
-    return nodes, byName, bySlot, byNodeID
+    catalog.reachableNodes = { window = window, nodes = nodes, byName = byName, bySlot = bySlot, byID = byID }
+    return nodes, byName, bySlot, byID
 end
 
 local function NormalizeFavorites(favorites)
@@ -530,6 +394,7 @@ local function FindRouteNode(match, byName, bySlot, byNodeID)
         or nil
     if node then
         node.routeConfidence = match.confidence
+        node.routeSource, node.routeProviderLabel = match.source, match.providerLabel
         return node
     end
     if match.slotIndex then
@@ -541,7 +406,10 @@ local function FindRouteNode(match, byName, bySlot, byNodeID)
             zone = zone,
             slotIndex = match.slotIndex,
             nodeID = match.nodeID,
+            fare = TaxiWindow.GetFare(TaxiWindow.GetSnapshot(), match.slotIndex),
             routeConfidence = match.confidence,
+            routeSource = match.source,
+            routeProviderLabel = match.providerLabel,
         }
     end
     return nil
@@ -579,8 +447,11 @@ local function BuildDisplayRows(frame)
     local routeMatch = type(NS.GetFlightMapAssistMatch) == "function" and NS.GetFlightMapAssistMatch() or nil
     local routeNode = FindRouteNode(routeMatch, byName, bySlot, byNodeID)
     if routeNode then
-        addHeader("Route Destination")
-        addNode("route", routeNode, routeNode.routeConfidence == "exact" and "Exact taxi match" or "Strong flight-map match")
+        local guideLabel = routeNode.routeSource == "guide" and
+            ((routeNode.routeProviderLabel or "Guide") .. " Guide Suggestion")
+        addHeader(guideLabel or "Route Destination")
+        addNode("route", routeNode,
+            guideLabel or (routeNode.routeConfidence == "exact" and "Exact taxi match" or "Strong flight-map match"))
     end
 
     local favoriteNodes = {}
@@ -691,7 +562,8 @@ local function ResolvePanelHeight(frame, rows, layoutFrame, settings)
 end
 
 local function ResolvePanelSide(frame, requested)
-    requested = type(NS.NormalizeFlightMapCatalogSide) == "function" and NS.NormalizeFlightMapCatalogSide(requested) or "auto"
+    requested = type(NS.NormalizeFlightMapCatalogSide) == "function" and NS.NormalizeFlightMapCatalogSide(requested) or
+        "auto"
     if requested == "left" or requested == "right" then
         return requested
     end
@@ -762,6 +634,10 @@ local function IsLayoutSnapshotChanged(frame)
         or MetricChanged(catalog.layoutParentRight, ReadFrameMetric(parent, "GetRight"))
 end
 
+-- ============================================================
+-- Hover marker and node interaction
+-- ============================================================
+
 local function EnsureHoverMarker()
     if catalog.hoverMarker then
         return catalog.hoverMarker
@@ -789,90 +665,6 @@ local function EnsureHoverMarker()
     return marker
 end
 
-local function ClampHoverMarkerSize(size)
-    size = tonumber(size) or HOVER_MARKER_FALLBACK_SIZE
-    if size < HOVER_MARKER_MIN_SIZE then
-        return HOVER_MARKER_MIN_SIZE
-    end
-    if size > HOVER_MARKER_MAX_SIZE then
-        return HOVER_MARKER_MAX_SIZE
-    end
-    return size
-end
-
-local function ReadRegionSize(region)
-    if type(region) ~= "table" then
-        return nil, nil
-    end
-    if type(region.GetSize) == "function" then
-        local ok, width, height = pcall(region.GetSize, region)
-        if ok and type(width) == "number" and type(height) == "number" and width > 0 and height > 0 then
-            return width, height
-        end
-    end
-    local width = type(region.GetWidth) == "function" and region:GetWidth() or nil
-    local height = type(region.GetHeight) == "function" and region:GetHeight() or nil
-    if type(width) == "number" and type(height) == "number" and width > 0 and height > 0 then
-        return width, height
-    end
-    return nil, nil
-end
-
-local function ResolvePinMarkerSize(pin)
-    local width, height = ReadRegionSize(pin)
-    local best = width and height and math.max(width, height) or nil
-
-    if type(pin) == "table" and type(pin.GetRegions) == "function" then
-        local regions = { pin:GetRegions() }
-        for index = 1, #regions do
-            local regionWidth, regionHeight = ReadRegionSize(regions[index])
-            if regionWidth and regionHeight then
-                local regionSize = math.max(regionWidth, regionHeight)
-                if regionSize > 0 and (not best or regionSize < best) then
-                    best = regionSize
-                end
-            end
-        end
-    end
-
-    return ClampHoverMarkerSize((best or HOVER_MARKER_FALLBACK_SIZE) * HOVER_MARKER_SIZE_MULTIPLIER)
-end
-
-local function ResolvePinRelativeScale(pin, parent)
-    if type(pin) ~= "table" or type(parent) ~= "table" then
-        return 1
-    end
-    if type(pin.GetEffectiveScale) == "function" and type(parent.GetEffectiveScale) == "function" then
-        local pinScale = pin:GetEffectiveScale()
-        local parentScale = parent:GetEffectiveScale()
-        if type(pinScale) == "number" and type(parentScale) == "number" and parentScale > 0 then
-            return pinScale / parentScale
-        end
-    end
-    if type(pin.GetScale) == "function" then
-        local scale = pin:GetScale()
-        if type(scale) == "number" and scale > 0 then
-            return scale
-        end
-    end
-    return 1
-end
-
-local function FindPin(frame, slotIndex, nodeID)
-    local pins = {}
-    EnumerateActivePins(frame, pins)
-    for index = 1, #pins do
-        local pin = pins[index]
-        if IsPinVisible(pin) then
-            local data = ReadPinNodeData(pin)
-            if data and ((nodeID and data.nodeID == nodeID) or (slotIndex and data.slotIndex == slotIndex)) then
-                return pin
-            end
-        end
-    end
-    return nil
-end
-
 function NS.HideFlightMapCatalogHover()
     if catalog.hoverMarker then
         catalog.hoverMarker:Hide()
@@ -883,12 +675,12 @@ function NS.HideFlightMapCatalogHover()
 end
 
 function NS.ShowFlightMapCatalogHover(slotIndex, nodeID, rowKind)
-    local frame = GetOpenFlightMapFrame()
+    local frame = TaxiWindow.GetOpenFrame()
     if not frame then
         NS.HideFlightMapCatalogHover()
         return false
     end
-    local pin = FindPin(frame, tonumber(slotIndex), tonumber(nodeID))
+    local pin = TaxiWindow.GetAnchor(frame, tonumber(slotIndex), tonumber(nodeID))
     if not pin then
         NS.HideFlightMapCatalogHover()
         return false
@@ -900,8 +692,10 @@ function NS.ShowFlightMapCatalogHover(slotIndex, nodeID, rowKind)
     local color = HOVER_COLORS[rowKind] or HOVER_COLORS.normal
     marker:SetParent(parent or frame)
     marker:SetFrameLevel(level + 25)
-    marker:SetScale(ResolvePinRelativeScale(pin, marker:GetParent()))
-    local markerSize = ResolvePinMarkerSize(pin)
+    marker:SetScale(TaxiWindow.GetPinRelativeScale(pin, marker:GetParent()))
+    local size = TaxiWindow.MeasurePin(pin) or HOVER_MARKER_FALLBACK_SIZE
+    local markerSize = math.max(HOVER_MARKER_MIN_SIZE,
+        math.min(HOVER_MARKER_MAX_SIZE, size * HOVER_MARKER_SIZE_MULTIPLIER))
     marker:SetSize(markerSize, markerSize)
     marker.icon:SetVertexColor(color[1] or 1, color[2] or 1, color[3] or 1, color[4] or 1)
     marker:ClearAllPoints()
@@ -958,15 +752,8 @@ local function ToggleFavorite(fullName)
 end
 
 local function TakeNode(node)
-    if type(node) ~= "table" or not node.slotIndex then
-        return
-    end
-    RecordRecent(node.fullName)
-    if type(IsMounted) == "function" and IsMounted() and type(Dismount) == "function" then
-        SafeCall(Dismount)
-    end
-    if type(TakeTaxiNode) == "function" then
-        SafeCall(TakeTaxiNode, node.slotIndex)
+    if node and TaxiWindow.Take(node.slotIndex, node.nodeID, node.fullName) then
+        RecordRecent(node.fullName)
     end
 end
 
@@ -979,14 +766,35 @@ local function ShowRowTooltip(row)
     if row.node.zone and row.node.place and row.node.zone ~= "Other" then
         GameTooltip:AddLine(row.node.zone, 0.75, 0.70, 0.62, true)
     end
+    local fareText = FormatFare(row.node.fare, 14)
+    if fareText then GameTooltip:AddLine("Fare: " .. fareText, 1, 1, 1, true) end
     local timeText = FormatFlightTime(row.node)
     if timeText then
-        local label = row.node.flightTime and row.node.flightTime.estimated and "Estimated flight time: " or "Flight time: "
+        local label = row.node.flightTime and row.node.flightTime.estimated and "Estimated flight time: " or
+            "Flight time: "
         GameTooltip:AddLine(label .. timeText, 0.58, 0.88, 1.00, true)
     end
     GameTooltip:AddLine("Left-click to take this flight.", 0.55, 0.85, 1, true)
-    GameTooltip:AddLine(row.favorite and "Right-click to remove favorite." or "Right-click to favorite.", 1, 0.82, 0.16, true)
+    GameTooltip:AddLine(row.favorite and "Right-click to remove favorite." or "Right-click to favorite.", 1, 0.82, 0.16,
+        true)
     GameTooltip:Show()
+end
+
+-- ============================================================
+-- Catalog rows and panel layout
+-- ============================================================
+
+local function ClearRowHover()
+    local row = catalog.hoveredRow
+    catalog.hoveredRow = nil
+    NS.HideFlightMapCatalogHover()
+    if row and GameTooltip and GameTooltip:IsOwned(row) then GameTooltip:Hide() end
+end
+
+local function ShowRowHover(row, showTooltip)
+    catalog.hoveredRow = row
+    NS.ShowFlightMapCatalogHover(row.node.slotIndex, row.node.nodeID, row.kind)
+    if showTooltip then ShowRowTooltip(row) end
 end
 
 local function CreateRow(parent)
@@ -1003,17 +811,22 @@ local function CreateRow(parent)
     row.icon:SetSize(18, 18)
 
     row.title = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    row.title:SetPoint("TOPLEFT", row, "TOPLEFT", 30, -4)
-    row.title:SetPoint("RIGHT", row, "RIGHT", -24, 0)
     row.title:SetJustifyH("LEFT")
     row.title:SetWordWrap(false)
     row.titleFontFile, row.titleFontSize, row.titleFontFlags = row.title:GetFont()
+
+    row.fare = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    row.fare:SetPoint("TOPRIGHT", row, "TOPRIGHT", -24, -4)
+    row.fare:SetJustifyH("RIGHT")
+    row.fare:SetWordWrap(false)
+    row.fare:Hide()
 
     row.subline = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     row.subline:SetPoint("TOPLEFT", row.title, "BOTTOMLEFT", 0, -1)
     row.subline:SetPoint("RIGHT", row, "RIGHT", -24, 0)
     row.subline:SetJustifyH("LEFT")
     row.subline:SetWordWrap(false)
+    row.subline:SetTextColor(unpack(COLORS.dim))
     row.sublineFontFile, row.sublineFontSize, row.sublineFontFlags = row.subline:GetFont()
 
     row.favoriteIcon = row:CreateTexture(nil, "ARTWORK")
@@ -1026,18 +839,18 @@ local function CreateRow(parent)
     row.headerText:SetPoint("RIGHT", row, "RIGHT", -6, 0)
     row.headerText:SetJustifyH("LEFT")
     row.headerText:SetTextColor(COLORS.header[1], COLORS.header[2], COLORS.header[3], COLORS.header[4])
+    if Appearance then
+        Appearance.Text(row.headerText, APPEARANCE_SURFACE, "TITLE")
+        Appearance.RegisterVisual(row, { kind = "menuRow", regions = { row:GetHighlightTexture() } })
+    end
 
     row:SetScript("OnEnter", function(self)
         if self.node then
-            NS.ShowFlightMapCatalogHover(self.node.slotIndex, self.node.nodeID, self.kind)
-            ShowRowTooltip(self)
+            ShowRowHover(self, true)
         end
     end)
-    row:SetScript("OnLeave", function()
-        NS.HideFlightMapCatalogHover()
-        if GameTooltip then
-            GameTooltip:Hide()
-        end
+    row:SetScript("OnLeave", function(self)
+        if catalog.hoveredRow == self then ClearRowHover() end
     end)
     row:SetScript("OnClick", function(self, button)
         if not self.node then
@@ -1060,14 +873,26 @@ local function ApplyRowFontSize(row, fontSize)
     end
     row.catalogFontSize = fontSize
     SetFontStringSize(row.title, row.titleFontFile, fontSize, row.titleFontFlags)
+    SetFontStringSize(row.fare, row.titleFontFile, fontSize, row.titleFontFlags)
     SetFontStringSize(row.subline, row.sublineFontFile, GetCatalogSublineFontSize(fontSize), row.sublineFontFlags)
+    if Appearance then
+        Appearance.Text(row.fare, APPEARANCE_SURFACE, "TEXT")
+        Appearance.Text(row.subline, APPEARANCE_SURFACE, "LABEL")
+    end
+    return true
 end
 
-local function ApplyNodeRow(row, data, fontSize)
+local function ApplyRowTitleColor(row, color)
+    row.title:SetTextColor(unpack(color))
+    if Appearance then Appearance.Text(row.title, APPEARANCE_SURFACE, "TEXT") end
+end
+
+local function ApplyNodeRow(row, data, fontSize, width)
     local node = data.node
     local kind = data.kind or "normal"
-    local color = COLORS[kind] or COLORS.text
-    ApplyRowFontSize(row, fontSize)
+    if ApplyRowFontSize(row, fontSize) or row.kind ~= kind then
+        ApplyRowTitleColor(row, COLORS[kind] or COLORS.text)
+    end
     row:SetHeight(GetNodeRowHeight(fontSize))
     row:Enable()
     row.type = data.type
@@ -1077,6 +902,26 @@ local function ApplyNodeRow(row, data, fontSize)
     row.icon:Show()
     row.title:Show()
     row.subline:Show()
+    local fareChanged = row.fareAmount ~= node.fare or row.fareFontSize ~= fontSize
+    if fareChanged then
+        row.fareAmount, row.fareFontSize = node.fare, fontSize
+        row.fareText = FormatFare(node.fare, fontSize)
+        row.fare:SetText(row.fareText or "")
+    end
+    row.title:ClearAllPoints()
+    row.title:SetPoint("TOPLEFT", row, "TOPLEFT", 30, -4)
+    row.fare:SetShown(row.fareText ~= nil)
+    if row.fareText then
+        local file, _, flags = row.fare:GetFont()
+        if fareChanged or row.measuredFareFont ~= file or row.measuredFareFlags ~= flags then
+            row.measuredFareFont, row.measuredFareFlags = file, flags
+            row.fareWidth = math.ceil(row.fare:GetUnboundedStringWidth()) + 1
+        end
+        row.fare:SetWidth(math.min(row.fareWidth, math.floor(width * 0.4)))
+        row.title:SetPoint("TOPRIGHT", row.fare, "TOPLEFT", -8, 0)
+    else
+        row.title:SetPoint("TOPRIGHT", row, "TOPRIGHT", -24, -4)
+    end
     if row.favorite then
         row.favoriteIcon:Show()
     else
@@ -1085,9 +930,7 @@ local function ApplyNodeRow(row, data, fontSize)
     row.headerText:Hide()
     SetTexture(row.icon, TAXI_YELLOW_ATLAS, TAXI_YELLOW_TEXTURE)
     row.title:SetText(node.place or node.fullName or "Flight Path")
-    row.title:SetTextColor(color[1] or 1, color[2] or 1, color[3] or 1, color[4] or 1)
     row.subline:SetText(BuildNodeSubline(node, data.extraText))
-    row.subline:SetTextColor(COLORS.dim[1], COLORS.dim[2], COLORS.dim[3], COLORS.dim[4])
     if kind == "route" then
         SetColor(row.bg, { 0.32, 0.22, 0.04, 0.28 })
     elseif kind == "favorite" then
@@ -1109,6 +952,7 @@ local function ApplyHeaderRow(row, data)
     row.icon:Hide()
     row.title:Hide()
     row.subline:Hide()
+    row.fare:Hide()
     row.favoriteIcon:Hide()
     row.headerText:Show()
     row.headerText:SetText(data.text or "")
@@ -1116,7 +960,9 @@ local function ApplyHeaderRow(row, data)
 end
 
 local function ApplyEmptyRow(row, data, fontSize)
-    ApplyRowFontSize(row, fontSize)
+    if ApplyRowFontSize(row, fontSize) or row.type ~= data.type then
+        ApplyRowTitleColor(row, COLORS.dim)
+    end
     row:SetHeight(GetNodeRowHeight(fontSize))
     row:Disable()
     row.type = data.type
@@ -1129,17 +975,11 @@ local function ApplyEmptyRow(row, data, fontSize)
     row.title:SetPoint("TOPLEFT", row, "TOPLEFT", 8, -8)
     row.title:SetPoint("RIGHT", row, "RIGHT", -8, 0)
     row.title:SetText(data.text or "")
-    row.title:SetTextColor(COLORS.dim[1], COLORS.dim[2], COLORS.dim[3], COLORS.dim[4])
     row.subline:Hide()
+    row.fare:Hide()
     row.favoriteIcon:Hide()
     row.headerText:Hide()
     SetColor(row.bg, { 0, 0, 0, 0 })
-end
-
-local function ResetNodeTitleAnchors(row)
-    row.title:ClearAllPoints()
-    row.title:SetPoint("TOPLEFT", row, "TOPLEFT", 30, -4)
-    row.title:SetPoint("RIGHT", row, "RIGHT", -24, 0)
 end
 
 local function RenderRows(frame, rows)
@@ -1165,13 +1005,12 @@ local function RenderRows(frame, rows)
         row:SetPoint("TOPLEFT", catalog.child, "TOPLEFT", 0, -cursorY)
         row:SetPoint("RIGHT", catalog.child, "RIGHT", 0, 0)
         row:Show()
-        ResetNodeTitleAnchors(row)
         if data.type == "header" then
             ApplyHeaderRow(row, data)
         elseif data.type == "empty" then
             ApplyEmptyRow(row, data, fontSize)
         else
-            ApplyNodeRow(row, data, fontSize)
+            ApplyNodeRow(row, data, fontSize, width)
         end
         cursorY = cursorY + row:GetHeight()
     end
@@ -1180,6 +1019,15 @@ local function RenderRows(frame, rows)
         catalog.rows[index]:Hide()
     end
     catalog.child:SetHeight(math.max(cursorY, catalog.scroll:GetHeight() or 1))
+    -- Pooled rows can change destination under a stationary pointer.
+    local hovered = catalog.hoveredRow
+    if hovered then
+        if hovered:IsVisible() and hovered.node then
+            ShowRowHover(hovered, GameTooltip and GameTooltip:IsOwned(hovered))
+        else
+            ClearRowHover()
+        end
+    end
 end
 
 local function EnsurePanel(frame)
@@ -1192,26 +1040,21 @@ local function EnsurePanel(frame)
     panel:SetFrameStrata("HIGH")
     panel:SetClampedToScreen(true)
     panel:Hide()
+    if Appearance then Appearance.Tag(panel, APPEARANCE_SURFACE) end
 
     panel.bg = panel:CreateTexture(nil, "BACKGROUND")
     panel.bg:SetAllPoints()
     SetColor(panel.bg, COLORS.panel)
-    local style = GetUIStyle()
-    if type(style.AddSimpleBorder) == "function" then
-        style.AddSimpleBorder(panel)
-    end
+    local border = NS.UIStyle and NS.UIStyle.AddSimpleBorder(panel)
 
     panel.title = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     panel.title:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -10)
     panel.title:SetText("AWP Taxi List")
     panel.title:SetTextColor(COLORS.header[1], COLORS.header[2], COLORS.header[3], COLORS.header[4])
 
-    panel.collapse = CreateFrame("Button", nil, panel)
-    panel.collapse:SetSize(22, 22)
+    local panelUI = NS.Internal.Interface.Framework
+    panel.collapse = panelUI.CreateDisclosureButton(panel)
     panel.collapse:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -8, -7)
-    panel.collapse.text = panel.collapse:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    panel.collapse.text:SetPoint("CENTER")
-    panel.collapse.text:SetText("-")
     panel.collapse:SetScript("OnClick", function()
         if type(NS.SetFlightMapCatalogSetting) == "function" then
             NS.SetFlightMapCatalogSetting("collapsed", true)
@@ -1235,7 +1078,7 @@ local function EnsurePanel(frame)
         if catalog.syncingSearchText then
             return
         end
-        local mapFrame = GetOpenFlightMapFrame()
+        local mapFrame = TaxiWindow.GetOpenFrame()
         if mapFrame and catalog.panel and catalog.panel:IsShown() then
             RefreshInternal({ skipSearchSync = true })
         end
@@ -1255,10 +1098,7 @@ local function EnsurePanel(frame)
     panel.child:SetSize(PANEL_WIDTH - 32, 1)
     panel.scroll:SetScrollChild(panel.child)
 
-    local queueUI = GetQueueUI()
-    if queueUI and type(queueUI.StyleLegacyScrollBar) == "function" then
-        queueUI.StyleLegacyScrollBar(panel.scroll, panel)
-    end
+    panelUI.StyleAttachedListScrollBar(panel.scroll, panel)
 
     local tab = CreateFrame("Button", "AWPFlightMapCatalogTab", frame)
     tab:SetSize(22, 70)
@@ -1280,6 +1120,25 @@ local function EnsurePanel(frame)
     catalog.scroll = panel.scroll
     catalog.child = panel.child
     catalog.rows = {}
+    if Appearance then
+        local shellRegions = { panel.bg }
+        for _, region in ipairs(border or {}) do shellRegions[#shellRegions + 1] = region end
+        Appearance.Shell(panel, APPEARANCE_SURFACE, shellRegions, nil, "window")
+        Appearance.Text(panel.title, APPEARANCE_SURFACE, "TITLE")
+        Appearance.Text(tab.text, APPEARANCE_SURFACE, "TEXT", "shell")
+        Appearance.RegisterVisual(tab,
+            { kind = "button", surface = APPEARANCE_SURFACE, text = tab.text, regions = { tab.bg } })
+        Appearance.Text(panel.search, APPEARANCE_SURFACE, "TEXT")
+        Appearance.Text(panel.searchHint, APPEARANCE_SURFACE, "LABEL")
+        local searchArt = {}
+        for _, region in ipairs({ panel.search:GetRegions() }) do
+            if region:GetObjectType() == "Texture" then searchArt[#searchArt + 1] = region end
+        end
+        Appearance.RegisterVisual(panel.search, { kind = "input", regions = searchArt })
+        Appearance.RegisterReflow(panel, function()
+            if catalog.renderedRows then RenderRows(nil, catalog.renderedRows) end
+        end)
+    end
     return panel
 end
 
@@ -1325,36 +1184,42 @@ end
 
 local function RefreshLayoutOnly()
     local settings = type(NS.GetFlightMapCatalogSettings) == "function" and NS.GetFlightMapCatalogSettings() or nil
-    local frame = GetOpenFlightMapFrame()
+    local frame = TaxiWindow.GetOpenFrame()
     if not settings or settings.enabled ~= true or not frame or not catalog.panel or not catalog.tab then
         return false
     end
 
-    LayoutPanel(frame, settings, settings.collapsed and nil or catalog.renderedRows)
+    LayoutPanel(frame, settings, not settings.collapsed and catalog.renderedRows or nil)
     catalog.tab:Show()
     catalog.panel:SetShown(settings.collapsed ~= true)
     if settings.collapsed then
-        NS.HideFlightMapCatalogHover()
+        ClearRowHover()
     end
     return true
 end
 
+-- ============================================================
+-- Window lifecycle and cache invalidation
+-- ============================================================
+
 local function HideCatalog()
-    catalog.pendingRefresh = nil
+    catalog.reachableNodes = nil
+    catalog.renderedRows = nil
     catalog.layoutFrame = nil
     catalog.layoutAnchorFrame = nil
+    if catalog.layoutDriver then catalog.layoutDriver:Hide() end
     if catalog.panel then
         catalog.panel:Hide()
     end
     if catalog.tab then
         catalog.tab:Hide()
     end
-    NS.HideFlightMapCatalogHover()
+    ClearRowHover()
 end
 
 RefreshInternal = function(options)
     local settings = type(NS.GetFlightMapCatalogSettings) == "function" and NS.GetFlightMapCatalogSettings() or nil
-    local frame = GetOpenFlightMapFrame()
+    local frame = TaxiWindow.GetOpenFrame()
     if not settings or settings.enabled ~= true or not frame then
         HideCatalog()
         return false
@@ -1371,13 +1236,14 @@ RefreshInternal = function(options)
         catalog.syncingSearchText = false
     end
 
-    local rows = settings.collapsed and nil or BuildDisplayRows(frame)
+    local rows = not settings.collapsed and BuildDisplayRows(frame) or nil
     catalog.renderedRows = rows
     LayoutPanel(frame, settings, rows)
     catalog.tab:Show()
+    catalog.layoutDriver:Show()
     panel:SetShown(settings.collapsed ~= true)
     if settings.collapsed then
-        NS.HideFlightMapCatalogHover()
+        ClearRowHover()
         return true
     end
 
@@ -1385,71 +1251,10 @@ RefreshInternal = function(options)
     return true
 end
 
-local function ScheduleRefresh(options)
-    if catalog.pendingRefresh and not (options and options.force) then
-        return
-    end
-    catalog.retrySerial = (tonumber(catalog.retrySerial) or 0) + 1
-    local serial = catalog.retrySerial
-    catalog.pendingRefresh = true
-    for index = 1, #RETRY_DELAYS do
-        local delay = RETRY_DELAYS[index]
-        local isLast = index == #RETRY_DELAYS
-        if type(NS.After) == "function" then
-            NS.After(delay, function()
-                if isLast and catalog.retrySerial == serial then
-                    catalog.pendingRefresh = nil
-                end
-                if catalog.retrySerial == serial then
-                    RefreshInternal(options)
-                end
-            end)
-        elseif type(C_Timer) == "table" and type(C_Timer.After) == "function" then
-            C_Timer.After(delay, function()
-                if isLast and catalog.retrySerial == serial then
-                    catalog.pendingRefresh = nil
-                end
-                if catalog.retrySerial == serial then
-                    RefreshInternal(options)
-                end
-            end)
-        else
-            catalog.pendingRefresh = nil
-            RefreshInternal(options)
-            return
-        end
-    end
-end
-
-local function HookFlightMapFrame()
-    if catalog.frameHooked then
-        return
-    end
-    local frame = rawget(_G, "FlightMapFrame")
-    if type(frame) ~= "table" then
-        return
-    end
-    if type(frame.HookScript) == "function" then
-        frame:HookScript("OnShow", function()
-            ScheduleRefresh()
-        end)
-        frame:HookScript("OnHide", function()
-            HideCatalog()
-        end)
-    end
-    if type(hooksecurefunc) == "function" and type(frame.RefreshAllData) == "function" then
-        hooksecurefunc(frame, "RefreshAllData", function()
-            ScheduleRefresh()
-        end)
-    end
-    catalog.frameHooked = true
-end
-
 function NS.RefreshFlightMapCatalog(options)
     if not catalog.initialized then
         return false
     end
-    HookFlightMapFrame()
     return RefreshInternal(options)
 end
 
@@ -1458,7 +1263,8 @@ function NS.GetFlightMapCatalogStatus()
     if not settings then
         return "unavailable"
     end
-    local visible = catalog.panel and catalog.panel:IsShown() and "shown" or settings.collapsed and "collapsed" or "hidden"
+    local visible = catalog.panel and catalog.panel:IsShown() and "shown" or settings.collapsed and "collapsed" or
+        "hidden"
     return string.format("%s, %s, side %s, text %d px",
         settings.enabled and "on" or "off",
         visible,
@@ -1474,36 +1280,24 @@ function NS.InitializeFlightMapCatalog()
     catalog.searchText = catalog.searchText or ""
 
     local frame = CreateFrame("Frame")
-    catalog.eventFrame = frame
-    frame:RegisterEvent("TAXIMAP_OPENED")
-    frame:RegisterEvent("TAXIMAP_CLOSED")
-    frame:SetScript("OnEvent", function(_, event)
-        if event == "TAXIMAP_OPENED" then
-            HookFlightMapFrame()
-            ScheduleRefresh()
-        elseif event == "TAXIMAP_CLOSED" then
-            catalog.retrySerial = (tonumber(catalog.retrySerial) or 0) + 1
-            catalog.pendingRefresh = nil
+    catalog.layoutDriver = frame
+    frame:Hide()
+    TaxiWindow.Subscribe(function(mapFrame)
+        if mapFrame then
+            RefreshInternal()
+        else
             HideCatalog()
         end
     end)
     frame:SetScript("OnUpdate", function(_, elapsed)
-        local mapFrame = GetOpenFlightMapFrame()
-        if not mapFrame then
-            return
-        end
         catalog.layoutElapsed = (catalog.layoutElapsed or 0) + (tonumber(elapsed) or 0)
         if catalog.layoutElapsed < LAYOUT_CHECK_INTERVAL_SECONDS then
             return
         end
         catalog.layoutElapsed = 0
-        if IsLayoutSnapshotChanged(mapFrame) then
+        local mapFrame = TaxiWindow.GetOpenFrame()
+        if mapFrame and IsLayoutSnapshotChanged(mapFrame) then
             RefreshLayoutOnly()
         end
     end)
-
-    HookFlightMapFrame()
-    if GetOpenFlightMapFrame() then
-        ScheduleRefresh()
-    end
 end

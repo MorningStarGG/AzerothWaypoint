@@ -1,3 +1,10 @@
+-- ============================================================
+-- Combat visibility
+-- ============================================================
+--
+-- Applies the saved combat visibility settings to TomTom and exposes the
+-- visibility decision to the world overlay.
+
 local NS = _G.AzerothWaypointNS
 
 local state = NS.State
@@ -47,6 +54,10 @@ local function GetTomTomArrow()
     local tomtom = GetTomTom()
     return tomtom and tomtom.wayframe or nil
 end
+
+-- ============================================================
+-- TomTom visibility and restoration
+-- ============================================================
 
 local function CloakTomTomArrow()
     local arrow = GetTomTomArrow()
@@ -119,6 +130,10 @@ local function SubscribeTomTomCombatCloak()
     end)
 end
 
+-- ============================================================
+-- Combat visibility updates
+-- ============================================================
+
 local function ApplyTomTomGuard()
     SubscribeTomTomCombatCloak()
     local hidden = ShouldHideTomTomNow()
@@ -146,3 +161,6 @@ function NS.ApplyCombatVisibilityGuard()
         NS.RefreshWorldOverlay()
     end
 end
+
+local _, private = ...
+if private and private.finishLoadGroup then private.finishLoadGroup("Core and appearance") end

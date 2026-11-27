@@ -1,8 +1,53 @@
+-- ============================================================
+-- Queue detail view
+-- ============================================================
+--
+-- Renders one queue's destinations, travel legs and summary and updates its
+-- current ride information.
+
 local NS = _G.AzerothWaypointNS
 NS.Internal = NS.Internal or {}
 NS.Internal.QueueUI = NS.Internal.QueueUI or {}
 local M = NS.Internal.QueueUI
 local ui = M.ui
+local FW = NS.Internal.Interface.Framework
+
+local ROUTE_TOP_GAP = 4
+local ROUTE_SUMMARY_GAP = 8
+local ROUTE_MIN_HEIGHT = 48
+local SUMMARY_MIN_HEIGHT = 88
+local SUMMARY_SIDE_PADDING = 14
+local SUMMARY_TOP_PADDING = 12
+local SUMMARY_BOTTOM_PADDING = 10
+local SUMMARY_TEXT_GAP = 4
+
+local function LayoutDetailSummary(content)
+    local page, title, details = content.detailPage, content.detailMetaTitle, content.detailMeta
+    local rightPadding = SUMMARY_SIDE_PADDING
+    local bulkDelete = content.bulkDeleteButton
+    if bulkDelete and bulkDelete:IsShown() then
+        rightPadding = M.BULK_DELETE_RIGHT_INSET + bulkDelete:GetWidth() + SUMMARY_TEXT_GAP
+    end
+    details:SetWidth(math.max(1, page:GetWidth() - SUMMARY_SIDE_PADDING - rightPadding))
+
+    local overhead = SUMMARY_TOP_PADDING + math.ceil(title:GetStringHeight()) + SUMMARY_TEXT_GAP + SUMMARY_BOTTOM_PADDING
+    local availableHeight = page:GetHeight() - content.detailHeader:GetHeight() - ROUTE_TOP_GAP - ROUTE_SUMMARY_GAP - ROUTE_MIN_HEIGHT
+    local maxTextHeight = math.max(1, math.floor(availableHeight - overhead))
+    -- Measure at the available height so a previously short summary can grow.
+    details:SetHeight(maxTextHeight)
+    local textHeight = math.min(maxTextHeight, math.max(SUMMARY_MIN_HEIGHT - overhead, math.ceil(details:GetStringHeight())))
+    details:SetHeight(textHeight)
+    content.summaryPanel:SetHeight(overhead + textHeight)
+end
+
+local function ToggleSection(row)
+    M.SetDetailSectionCollapsed(row.queueKey, row.sectionKey, not row.collapsed)
+    M.Refresh()
+end
+
+-- ============================================================
+-- Detail panel layout
+-- ============================================================
 
 function M.CreateDetailPage(content)
     content.detailPage = CreateFrame("Frame", nil, content)
@@ -25,6 +70,7 @@ function M.CreateDetailPage(content)
     content.detailHeadline:SetJustifyH("LEFT")
     content.detailHeadline:SetJustifyV("TOP")
     content.detailHeadline:SetTextColor(1.0, 0.82, 0.0)
+    if NS.Internal.Appearance then NS.Internal.Appearance.Text(content.detailHeadline, "windows.queue", "TEXT") end
     content.detailHeadline:SetWordWrap(true)
     content.detailHeadline:SetText("")
 
@@ -42,39 +88,41 @@ function M.CreateDetailPage(content)
     content.detailHint:SetJustifyH("LEFT")
     content.detailHint:SetJustifyV("TOP")
     content.detailHint:SetTextColor(0.05, 0.82, 1.0)
+    if NS.Internal.Appearance then NS.Internal.Appearance.Text(content.detailHint, "windows.queue", "TEXT") end
     content.detailHint:SetWordWrap(true)
     content.detailHint:SetText("")
 
     content.routePanel = CreateFrame("Frame", nil, content.detailPage)
-    content.routePanel:SetPoint("TOPLEFT", content.detailHeader, "BOTTOMLEFT", 0, -4)
-    content.routePanel:SetPoint("TOPRIGHT", content.detailHeader, "BOTTOMRIGHT", 0, -4)
+    content.routePanel:SetPoint("TOPLEFT", content.detailHeader, "BOTTOMLEFT", 0, -ROUTE_TOP_GAP)
+    content.routePanel:SetPoint("TOPRIGHT", content.detailHeader, "BOTTOMRIGHT", 0, -ROUTE_TOP_GAP)
 
-    content.detailBorder = CreateFrame("Frame", nil, content.routePanel, "QuestLogBorderFrameTemplate")
-    content.detailBorder:SetAllPoints()
+    content.detailBorder = M.CreateInsetBorder(content.routePanel)
 
     content.summaryPanel = CreateFrame("Frame", nil, content.detailPage)
-    content.summaryPanel:SetPoint("LEFT", content.detailPage, "LEFT", 0, 0)
-    content.summaryPanel:SetPoint("RIGHT", content.detailPage, "RIGHT", 0, 0)
-    content.summaryPanel:SetPoint("BOTTOM", content.detailPage, "BOTTOM", 0, 0)
-    content.summaryPanel:SetHeight(88)
+    content.summaryPanel:SetPoint("BOTTOMLEFT", content.detailPage, "BOTTOMLEFT", 0, 0)
+    content.summaryPanel:SetPoint("BOTTOMRIGHT", content.detailPage, "BOTTOMRIGHT", 0, 0)
+    content.summaryPanel:SetHeight(SUMMARY_MIN_HEIGHT)
 
-    content.routePanel:SetPoint("BOTTOMLEFT", content.summaryPanel, "TOPLEFT", 0, 8)
-    content.routePanel:SetPoint("BOTTOMRIGHT", content.summaryPanel, "TOPRIGHT", 0, 8)
+    content.routePanel:SetPoint("BOTTOMLEFT", content.summaryPanel, "TOPLEFT", 0, ROUTE_SUMMARY_GAP)
+    content.routePanel:SetPoint("BOTTOMRIGHT", content.summaryPanel, "TOPRIGHT", 0, ROUTE_SUMMARY_GAP)
 
-    content.summaryBorder = CreateFrame("Frame", nil, content.summaryPanel, "QuestLogBorderFrameTemplate")
-    content.summaryBorder:SetAllPoints()
+    content.summaryBorder = M.CreateInsetBorder(content.summaryPanel)
 
     content.detailMetaTitle = content.summaryPanel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    content.detailMetaTitle:SetPoint("TOP", content.summaryPanel, "TOP", 0, -18)
+    content.detailMetaTitle:SetPoint("TOPLEFT", content.summaryPanel, "TOPLEFT", SUMMARY_SIDE_PADDING, -SUMMARY_TOP_PADDING)
+    content.detailMetaTitle:SetPoint("TOPRIGHT", content.summaryPanel, "TOPRIGHT", -SUMMARY_SIDE_PADDING, -SUMMARY_TOP_PADDING)
+    content.detailMetaTitle:SetJustifyH("CENTER")
     content.detailMetaTitle:SetText("Queue Info")
 
     content.detailMeta = content.summaryPanel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    content.detailMeta:SetPoint("TOPLEFT", content.summaryPanel, "TOPLEFT", 14, -24)
-    content.detailMeta:SetPoint("BOTTOMRIGHT", content.summaryPanel, "BOTTOMRIGHT", -14, 10)
+    content.detailMeta:SetPoint("TOPLEFT", content.detailMetaTitle, "BOTTOMLEFT", 0, -SUMMARY_TEXT_GAP)
     content.detailMeta:SetJustifyH("LEFT")
     content.detailMeta:SetJustifyV("TOP")
     content.detailMeta:SetWordWrap(true)
     content.detailMeta:SetText("")
+    content.detailPage:SetScript("OnSizeChanged", function(page)
+        if page:IsShown() then LayoutDetailSummary(content) end
+    end)
 
     content.detailScroll = CreateFrame("ScrollFrame", nil, content.routePanel, "UIPanelScrollFrameTemplate")
     content.detailScroll:SetPoint("TOPLEFT", content.routePanel, "TOPLEFT", 8, -8)
@@ -92,7 +140,7 @@ function M.CreateDetailPage(content)
     content.detailEmptyText:SetText("")
     content.detailEmptyText:Hide()
 
-    M.StyleLegacyScrollBar(content.detailScroll, content.routePanel)
+    FW.StyleAttachedListScrollBar(content.detailScroll, content.routePanel)
 
     content.backButton = CreateFrame("Button", nil, content.detailPage, "UIPanelButtonTemplate")
     content.backButton:SetSize(80, 24)
@@ -136,6 +184,37 @@ function M.CreateDetailPage(content)
     end)
 end
 
+-- ============================================================
+-- Ride progress and row rendering
+-- ============================================================
+
+local function UpdateRideSummary(content, elapsed)
+    content.rideElapsed = (content.rideElapsed or 0) + elapsed
+    if elapsed > 0 and content.rideElapsed < 1 then return end
+    content.rideElapsed = 0
+    local title, deadline = M.GetQueueTransportStatus(content.rideQueueID)
+    local text = content.rideQueueSummary
+    local remaining = deadline and math.ceil(deadline - GetTime()) or 0
+    if title then
+        text = text .. "\n" .. title
+        if remaining > 0 then
+            text = text .. string.format(" (about %d:%02d remaining)", math.floor(remaining / 60), remaining % 60)
+        end
+    end
+    if text ~= content.rideSummaryText then
+        content.rideSummaryText = text
+        content.detailMeta:SetText(text)
+        -- Timer updates only change the time on the existing line.
+        if elapsed == 0 or title ~= content.rideTitle or remaining == 0 then LayoutDetailSummary(content) end
+    end
+    content.rideTitle = title
+    return title ~= nil and remaining > 0
+end
+
+local function TickRideSummary(frame, elapsed)
+    if UpdateRideSummary(frame:GetParent(), elapsed) == false then frame:SetScript("OnUpdate", nil) end
+end
+
 function M.RenderDetailPage(selectedQueue, queueType, detailRows)
     if not ui.content then
         return
@@ -157,7 +236,11 @@ function M.RenderDetailPage(selectedQueue, queueType, detailRows)
         ui.content.focusButton:SetShown(hasFinalDestination)
         ui.content.focusButton:SetEnabled(hasFinalDestination)
         ui.content.detailMetaTitle:SetText("Queue Info")
-        ui.content.detailMeta:SetText(M.BuildDetailMetaText(selectedQueue, queueType))
+        ui.content.rideQueueID = selectedQueue.id
+        ui.content.rideQueueSummary = M.BuildDetailMetaText(selectedQueue, queueType)
+        ui.content.rideSummaryText = nil
+        local counting = UpdateRideSummary(ui.content, 0)
+        ui.content.detailPage:SetScript("OnUpdate", counting and TickRideSummary or nil)
         detailRows = detailRows or M.BuildDetailRows(selectedQueue, queueType)
         local detailChildWidth = M.GetScrollContentWidth(ui.content.detailScroll, 160)
         ui.content.detailChild:SetWidth(detailChildWidth)
@@ -206,10 +289,6 @@ function M.RenderDetailPage(selectedQueue, queueType, detailRows)
                 row.icon:SetSize(18, 18)
                 row.icon:SetPoint("LEFT", row, "LEFT", 7, 0)
                 row.icon:Hide()
-                row.toggleText = row:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
-                row.toggleText:SetPoint("RIGHT", row, "RIGHT", -10, 0)
-                row.toggleText:SetJustifyV("MIDDLE")
-                row.toggleText:SetJustifyH("RIGHT")
                 row.deleteButton = CreateFrame("Button", nil, row)
                 row.deleteButton:SetSize(18, 18)
                 row.deleteButton:SetPoint("RIGHT", row, "RIGHT", -4, 0)
@@ -252,8 +331,7 @@ function M.RenderDetailPage(selectedQueue, queueType, detailRows)
                         return
                     end
                     if self.rowType == "section" then
-                        M.SetDetailSectionCollapsed(self.queueKey, self.sectionKey, not self.collapsed)
-                        M.Refresh()
+                        ToggleSection(self)
                     elseif self.selectableDestination then
                         M.ActivateQueueDestination(self.queueKey, self.queueDestinationIndex)
                         M.Refresh()
@@ -280,6 +358,11 @@ function M.RenderDetailPage(selectedQueue, queueType, detailRows)
             row.queueDestinationIndex = rowData.queueDestinationIndex
             row.selectableDestination = rowData.selectableDestination == true
             row.removableDestination = rowData.removableDestination == true
+            local pad = NS.Internal.Controller
+            if pad then
+                local record = pad.RegisterControl(row, {id="queue-detail:" .. tostring(rowData.queueKey) .. ":" .. tostring(rowData.sectionKey or rowData.queueDestinationIndex or index)})
+                if record then record.more = row.selectableDestination and function() row:GetScript("OnClick")(row, "RightButton") end or nil end
+            end
             row.rowTitle = rowData.title
 
             row.title:ClearAllPoints()
@@ -290,12 +373,14 @@ function M.RenderDetailPage(selectedQueue, queueType, detailRows)
                 row.deleteButton:Hide()
                 row.icon:Hide()
                 row.bg:SetColorTexture(0.05, 0.05, 0.05, 0.82)
-                row.toggleText:SetShown(true)
-                row.toggleText:SetText(rowData.collapsed and "+" or "-")
+                local disclosure = M.UpdateSectionAppearance(row, rowData.collapsed == true, ToggleSection)
                 row.title:SetFontObject("GameFontNormal")
                 row.title:SetTextColor(0.86, 0.86, 0.86)
+                if NS.Internal.Appearance then NS.Internal.Appearance.Text(row.title, "windows.queue", "TEXT") end
                 row.title:SetPoint("LEFT", row, "LEFT", 10, 0)
-                row.title:SetPoint("RIGHT", row.toggleText, "LEFT", -8, 0)
+                row.title:SetPoint("RIGHT", disclosure, "LEFT", -6, 0)
+                row.title:SetWidth(0)
+                row.title:SetWordWrap(false)
                 row.title:SetJustifyV("MIDDLE")
                 row.title:SetText(string.format("%s (%d)", tostring(rowData.label), tonumber(rowData.count) or 0))
                 row.detail:SetText("")
@@ -309,13 +394,14 @@ function M.RenderDetailPage(selectedQueue, queueType, detailRows)
                 row.check:SetEnabled(bulkSelectable)
                 row.check:SetChecked(bulkSelectable and M.IsQueueItemSelected(rowData.queueKey, rowData.queueDestinationIndex) or false)
                 row.bg:SetColorTexture(0.18, 0.22, 0.3, rowData.active and 0.24 or 0.08)
-                row.toggleText:SetShown(false)
+                M.UpdateSectionAppearance(row)
                 row.deleteButton:SetShown(rowData.removableDestination == true)
                 row.deleteButton:SetEnabled(rowData.removableDestination == true)
                 row.title:SetFontObject(rowData.active and "GameFontNormal" or "GameFontHighlight")
                 row.title:SetTextColor(rowData.active and 1 or 0.92, rowData.active and 0.82 or 0.92,
                     rowData.active and 0 or 0.92)
                 row.detail:SetTextColor(0.76, 0.76, 0.76)
+                if NS.Internal.Appearance then NS.Internal.Appearance.Text(row.detail, "windows.queue", "TEXT") end
                 local rightInset = rowData.removableDestination == true and 28 or 8
                 local leftBase = bulkSelectable and 28 or 0
                 row.icon:ClearAllPoints()
@@ -323,6 +409,7 @@ function M.RenderDetailPage(selectedQueue, queueType, detailRows)
                 local leftInset = M.ApplyQueueIcon(row.icon, rowData.icon, 18) and (leftBase + 32) or (leftBase + 16)
                 row.title:SetPoint("TOPLEFT", row, "TOPLEFT", leftInset, -4)
                 row.title:SetPoint("RIGHT", row, "RIGHT", -rightInset, 0)
+                row.title:SetWordWrap(true)
                 row.detail:SetPoint("TOPLEFT", row.title, "BOTTOMLEFT", 0, -2)
                 row.detail:SetPoint("RIGHT", row, "RIGHT", -rightInset, 0)
                 row.title:SetWidth(detailWidth - leftInset - rightInset)
@@ -358,6 +445,7 @@ function M.RenderDetailPage(selectedQueue, queueType, detailRows)
         ui.content.detailHint:Hide()
         ui.content.focusButton:Hide()
         ui.content.detailMetaTitle:SetText("")
+        ui.content.detailPage:SetScript("OnUpdate", nil)
         ui.content.detailMeta:SetText("")
         if ui.content.detailEmptyText then
             ui.content.detailEmptyText:Hide()

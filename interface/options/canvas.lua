@@ -1,3 +1,11 @@
+-- ============================================================
+-- Settings canvas
+-- ============================================================
+--
+-- Owns settings navigation, previews and scroll restoration. Search owns one
+-- scroll child and reuses result rows. A section switch saves the previous
+-- scroll position before building the next view.
+
 local NS                     = _G.AzerothWaypointNS
 local C                      = NS.Constants
 NS.Internal.Interface        = NS.Internal.Interface or {}
@@ -46,46 +54,45 @@ local COLOR_GOLD             = { 1.00, 0.82, 0.00, 1.00 }
 local COLOR_TEXT_DIM         = { 0.72, 0.66, 0.58, 1.00 }
 
 local Data                   = M.Data or {}
-local SECTION_DEFS           = Data.SECTION_DEFS or {}
-local ZYGOR_SECTION          = Data.ZYGOR_SECTION or {}
 local OPTION_PREVIEWS        = Data.OPTION_PREVIEWS or {}
 local OPTION_VALUE_PREVIEWS  = Data.OPTION_VALUE_PREVIEWS or {}
 local COLOR_VALUE_PREVIEWS   = Data.COLOR_OPTION_VALUE_PREVIEWS or {}
 local PREVIEW_IMAGE_SIZES    = Data.PREVIEW_IMAGE_SIZES or {}
-local OPTIONS                = Data.OPTIONS or {}
 local SEARCH_FILTERS         = Data.SEARCH_FILTERS or {}
 
 -- ============================================================
--- Runtime state  (rebuilt each time a section is rendered)
+-- Canvas state and reusable search controls
 -- ============================================================
 
 local activeKey              = "about"
 local activeTab              = "modules"
 local lastModuleKey          = "about"
-local navButtons             = {}
+local sidebar                = { buttons = {}, expanded = {} }
 local tabButtons             = {}
 local scrollChild            = nil
 local scrollFrame            = nil
 local previewImage           = nil
+local previewPlaque          = nil
 local previewAnchor          = nil
 local previewBorder          = nil
-local previewBg              = nil
-local previewLine            = nil
+local previewColumn          = nil
 local previewDesc            = nil
-local previewLogo            = nil
 local searchBox              = nil
 local searchFilterButton     = nil
 local searchQuery            = ""
 local searchScope            = "all"
-local SelectSection          = nil
 local cursorY                = 0
-local sections               = nil -- filled in Create()
+local sections, sectionsByKey, searchEntries
+local selectedSurfaces       = {}
+local searchButtons          = {}
+local searchPage = { visible = 0 }
+local soughtSetting, settingOffset
 local lastPreviewImage       = nil
 local lastPreviewDesc        = nil
 local lastPreviewMeta        = nil
 
 -- ============================================================
--- Helpers
+-- Setting values and preview images
 -- ============================================================
 
 local function GetOpts() return NS.Internal.Interface.options end
@@ -144,9 +151,17 @@ local function GetPreviewNativeSize(imagePath, meta)
     return PREVIEW_MAX_W, PREVIEW_MAX_H
 end
 
-local function ApplyPreviewTexture(imagePath, nativeW, nativeH)
-    if not previewImage or not previewAnchor or not previewBorder or not imagePath then return end
+local function AnchorPreviewDescription(frame)
+    previewDesc:ClearAllPoints()
+    previewDesc:SetPoint("TOPLEFT", frame, "BOTTOMLEFT", 0, -8)
+    previewDesc:SetPoint("TOPRIGHT", frame, "BOTTOMRIGHT", 0, -8)
+end
 
+local function ApplyPreviewTexture(imagePath, nativeW, nativeH)
+    if not previewImage or not imagePath then return end
+
+    if previewPlaque then previewPlaque:Hide() end
+    previewBorder:Show()
     previewImage:SetTexture(imagePath)
 
     nativeW = tonumber(nativeW) or PREVIEW_MAX_W
@@ -163,13 +178,8 @@ local function ApplyPreviewTexture(imagePath, nativeW, nativeH)
     local displayH = math.max(1, math.floor(nativeH * scale + 0.5))
 
     -- Border follows the actual displayed image size.
-    previewBorder:ClearAllPoints()
     previewBorder:SetSize(displayW + 2, displayH + 2)
-    previewBorder:SetPoint("CENTER", previewAnchor, "CENTER", 0, 0)
-
-    previewImage:ClearAllPoints()
-    previewImage:SetSize(displayW, displayH)
-    previewImage:SetPoint("CENTER", previewBorder, "CENTER", 0, 0)
+    AnchorPreviewDescription(previewBorder)
 end
 
 local function SetPreview(imagePath, desc, meta)
@@ -219,7 +229,11 @@ local function ApplyPreview(preview)
         return false
     end
 
-    if preview.image then
+    if preview.plaqueType then
+        previewBorder:Hide()
+        previewPlaque = NS.Internal.WorldOverlay.Plaques.ShowSample(previewAnchor, previewPlaque, preview.plaqueType)
+        AnchorPreviewDescription(previewPlaque)
+    elseif preview.image then
         local nativeW, nativeH = GetPreviewNativeSize(preview.image, preview)
         ApplyPreviewTexture(preview.image, nativeW, nativeH)
     end
@@ -265,6 +279,10 @@ end
 
 local ColorTexture = FW.ColorTexture
 
+-- ============================================================
+-- Search terms and setting metadata
+-- ============================================================
+
 local function NormalizeSearchText(text)
     text = tostring(text or "")
     text = text:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
@@ -272,12 +290,11 @@ local function NormalizeSearchText(text)
     return text:lower()
 end
 
-local function EntryMatchesSearch(entry, query)
-    if query == "" then return false end
-    return NormalizeSearchText(entry.label):find(query, 1, true)
-        or NormalizeSearchText(entry.desc):find(query, 1, true)
-        or NormalizeSearchText(entry.sectionLabel):find(query, 1, true)
-        or (entry.tags ~= nil and NormalizeSearchText(entry.tags):find(query, 1, true))
+local function EntryMatchesSearch(entry, terms)
+    for _, term in ipairs(terms) do
+        if not entry.searchText:find(term, 1, true) then return false end
+    end
+    return true
 end
 
 local function ShortVersion(version)
@@ -287,15 +304,6 @@ local function ShortVersion(version)
         return major .. "." .. minor
     end
     return version
-end
-
-local function GetSettingMarker(label)
-    for _, entry in ipairs(OPTIONS) do
-        if entry.label == label and (entry.added or entry.updated or entry.note) then
-            return entry
-        end
-    end
-    return nil
 end
 
 local function IsCurrentVersion(version)
@@ -315,8 +323,10 @@ local function IsVersionNewer(left, right)
     return left > right
 end
 
-local function GetSettingMarkerStatus(label)
-    local marker = GetSettingMarker(label)
+local function GetSettingMarkerStatus(label, page)
+    local _, settingMarkers = Data.GetOptions()
+    local rows = settingMarkers[page or activeKey]
+    local marker = rows and rows[label]
     if not marker then return nil, nil, nil end
 
     local added = marker.added
@@ -330,8 +340,8 @@ local function GetSettingMarkerStatus(label)
     return nil, marker, updated or added
 end
 
-local function GetSettingMarkerSummary(label)
-    local status, marker, markerVersion = GetSettingMarkerStatus(label)
+local function GetSettingMarkerSummary(label, page)
+    local status, marker, markerVersion = GetSettingMarkerStatus(label, page)
     if not marker then return nil end
 
     local version = ShortVersion(markerVersion or marker.added or "")
@@ -350,22 +360,64 @@ local function GetSettingMarkerSummary(label)
     return summary
 end
 
-local function GetSectionLabel(key)
+local function GetSectionLabel(key, surface)
     if key == "release" then return "Release Notes" end
     if key == "integrations" then return "Integrations" end
-    for _, sec in ipairs(sections or SECTION_DEFS) do
-        if sec.key == key then return sec.label end
+    local section = sectionsByKey[key]
+    if not section then return key end
+    local label = section.label
+    if section.parent then label = sectionsByKey[section.parent].label .. " / " .. label end
+    if surface and section.surfaces and section.surfaces[surface] then
+        label = label .. " / " .. section.surfaces[surface]
     end
-    if key == ZYGOR_SECTION.key then return ZYGOR_SECTION.label end
-    return tostring(key or "")
+    return label
 end
 
-local function IsSectionAvailable(key)
-    if key == "release" or key == "integrations" or key == "about" then return true end
-    for _, sec in ipairs(sections or SECTION_DEFS) do
-        if sec.key == key then return true end
+function M.GetSection(key) return sectionsByKey and sectionsByKey[key] end
+
+local function IsOptionsPage(key)
+    return M.GetSection(key) or key == "release" or key == "integrations" or key == "search"
+end
+
+-- ============================================================
+-- Search index and filters
+-- ============================================================
+
+local function GetSearchEntries()
+    if searchEntries then return searchEntries end
+    searchEntries = {}
+    local function Add(key, page, surface, label, desc, tags, setting, requiresKaliel)
+        local sectionLabel = GetSectionLabel(page, surface)
+        searchEntries[#searchEntries + 1] = {
+            key = key, page = page, surface = surface, label = label, desc = desc, tags = tags,
+            setting = setting or label, sectionLabel = sectionLabel, requiresKaliel = requiresKaliel,
+            searchText = NormalizeSearchText(table.concat({ label, desc or "", sectionLabel, tags or "" }, " ")),
+        }
     end
-    return false
+    local options = Data.GetOptions()
+    for _, entry in ipairs(options) do
+        local page = entry.page and entry.key .. "." .. entry.page or entry.key
+        if sectionsByKey[page] or page == "release" or page == "integrations" then
+            Add(entry.key, page, nil, entry.label, entry.desc, entry.tags, nil, entry.requiresKaliel)
+        end
+    end
+    for _, section in ipairs(sections) do
+        if section.choices then
+            for _, choice in ipairs(section.choices) do
+                local seen = {}
+                for _, group in ipairs(section.provider.GetOptionGroups(choice.value)) do
+                    for _, item in ipairs(group.items) do
+                        local setting = item._awpSetting or item.label
+                        if not seen[setting] then
+                            seen[setting] = true
+                            Add(section.parent, section.key, choice.value, item.label, item.desc, "appearance skin theme " .. group.label, setting)
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return searchEntries
 end
 
 local function TextHas(text, ...)
@@ -389,10 +441,10 @@ local function SearchScopeAllows(entry)
     local haystack = label .. " " .. desc
 
     if searchScope == "new" then
-        local status = GetSettingMarkerStatus(label)
+        local status = GetSettingMarkerStatus(label, entry.page)
         return status == "new"
     elseif searchScope == "updated" then
-        local status = GetSettingMarkerStatus(label)
+        local status = GetSettingMarkerStatus(label, entry.page)
         return status == "updated"
     elseif searchScope == "navigation" then
         return TextHas(haystack,
@@ -406,12 +458,12 @@ local function SearchScopeAllows(entry)
             "size", "scale", "opacity", "transparency", "transparent", "alpha", "distance", "offset", "height",
             "show pinpoint at", "hide pinpoint at")
     elseif searchScope == "styles" then
-        return TextHas(label,
+        return entry.surface ~= nil or TextHas(label,
                 "skin", "style", "color", "context display", "diamond", "icons",
                 "footer text", "text", "plaque", "animated parts", "chevrons", "navigator arrow")
             or TextHas(entry.tags or "", "color")
     elseif searchScope == "integrations" then
-        return key == "integrations" or key == "tomtom" or key == "zygor"
+        return key == "integrations" or key == "tomtom" or Data.GUIDE_SECTIONS[key] ~= nil or M.GetSection(key) and M.GetSection(key).provider ~= nil
             or TextHas(haystack, "tomtom", "zygor", "backend", "farstrider", "mapzeroth", "special travel",
                 "handynotes", "silverdragon", "rarescanner", "worldquesttab", "inflight", "kaliel")
     end
@@ -436,14 +488,6 @@ local function GetScrollContentWidth()
     return math.max(1, math.floor(width - SCROLL_GUTTER))
 end
 
-local function SetPreviewColumnShown(shown)
-    for _, widget in ipairs({ previewBg, previewLine, previewAnchor, previewBorder, previewImage, previewDesc, previewLogo }) do
-        if widget and type(widget.SetShown) == "function" then
-            widget:SetShown(shown)
-        end
-    end
-end
-
 local function UpdateContentLayoutForSection(key)
     if not scrollFrame then
         return
@@ -455,7 +499,7 @@ local function UpdateContentLayoutForSection(key)
     end
 
     local documentLayout = key == "release" or key == "integrations"
-    SetPreviewColumnShown(not documentLayout)
+    previewColumn:SetShown(not documentLayout)
 
     scrollFrame:ClearAllPoints()
     scrollFrame:SetPoint("TOPLEFT", bodyFrame, "TOPLEFT", NAV_W, 0)
@@ -467,7 +511,7 @@ local function UpdateContentLayoutForSection(key)
 end
 
 local function CreateDropdownButton(parent)
-    local btn = FW.CreatePanelButton(parent)
+    local btn = FW.CreatePanelButton(parent, { skipShell = true })
     btn.label:ClearAllPoints()
     btn.label:SetPoint("LEFT", btn, "LEFT", 9, 0)
     btn.label:SetPoint("RIGHT", btn, "RIGHT", -28, 0)
@@ -478,8 +522,17 @@ local function CreateDropdownButton(parent)
     btn.arrow:SetText("v")
     btn.arrow:SetTextColor(0.95, 0.75, 0.35, 1)
 
+    if NS.Internal.Appearance then NS.Internal.Appearance.StyleOptionsDropdown(btn) end
+
     return btn
 end
+
+-- ============================================================
+-- Search field and filter controls
+-- ============================================================
+
+-- Search and widget callbacks select sections after the renderer registry is ready.
+local SelectSection
 
 local function CreateSearchBox(parent)
     local box = CreateFrame("EditBox", nil, parent)
@@ -525,6 +578,9 @@ local function CreateSearchBox(parent)
     box.clear.text:SetText("x")
     box.clear:Hide()
 
+    if NS.Internal.Appearance then
+        NS.Internal.Appearance.Text(box.clear.text,nil,"TEXT","shell")
+    end
     local function updateVisual(self)
         local hasText = self:GetText() ~= ""
         self.placeholder:SetShown(not hasText and not self:HasFocus())
@@ -547,6 +603,7 @@ local function CreateSearchBox(parent)
     box:SetScript("OnTextChanged", function(self)
         searchQuery = NormalizeSearchText(self:GetText())
         updateVisual(self)
+        if self._awpOpeningResult then return end
         if searchQuery ~= "" or searchScope ~= "all" then
             SelectSection("search")
         elseif activeKey == "search" then
@@ -592,13 +649,20 @@ local function CreateSearchFilterButton(parent)
     btn.iconStem:SetSize(3, 7)
     btn.iconStem:SetPoint("TOP", btn.iconMid, "BOTTOM", 0, -1)
 
+    -- Keep the artwork neutral so UI Styles can replace its tint.
+    for _, icon in ipairs({btn.iconTop, btn.iconMid, btn.iconStem}) do icon:SetColorTexture(1, 1, 1, 1) end
+
     local function SetFilterIconColor(self, alpha)
-        local color = { 1.0, 0.72, 0.28, alpha or 1 }
-        ColorTexture(self.iconTop, color)
-        ColorTexture(self.iconMid, color)
-        ColorTexture(self.iconStem, color)
+        for _, icon in ipairs({self.iconTop, self.iconMid, self.iconStem}) do
+            icon:SetVertexColor(1.0, 0.72, 0.28, alpha or 1)
+        end
+        if NS.Internal.Appearance then NS.Internal.Appearance.UpdateVisual(self) end
     end
     SetFilterIconColor(btn, 0.92)
+    if NS.Internal.Appearance then
+        NS.Internal.Appearance.RegisterVisual(btn,{kind="button",tints={
+            {region=btn.iconTop,shade=1},{region=btn.iconMid,shade=1},{region=btn.iconStem,shade=1}}})
+    end
 
     btn:SetScript("OnEnter", function(self)
         ColorTexture(self.inset, { 0.090, 0.060, 0.030, 0.95 })
@@ -630,11 +694,15 @@ local function CreateSearchFilterButton(parent)
     return btn
 end
 
-local function AddSettingMarkerTag(parent, label)
-    local status, marker, markerVersion = GetSettingMarkerStatus(label)
-    if not status or not marker then return nil end
+local function AddSettingMarkerTag(parent, label, tag, page)
+    local status, marker, markerVersion = GetSettingMarkerStatus(label, page)
+    if not status or not marker then
+        if tag then tag:Hide() end
+        return nil
+    end
 
-    local tag = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    tag = tag or parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    tag:Show()
     local version = ShortVersion(markerVersion or marker.added or "")
     if status == "updated" then
         tag:SetText(version ~= "" and ("UPDATED " .. version) or "UPDATED")
@@ -644,6 +712,12 @@ local function AddSettingMarkerTag(parent, label)
         tag:SetTextColor(1.00, 0.58, 0.18, 1)
     end
     return tag
+end
+
+function M.RecordSettingAnchor(setting)
+    if soughtSetting and setting == soughtSetting and not settingOffset then
+        settingOffset = cursorY - PAD
+    end
 end
 
 -- ============================================================
@@ -665,9 +739,10 @@ M.Widgets = M.CreateWidgets({
     ShowDropdownOptionPreview = ShowDropdownOptionPreview,
     RestoreSectionPreview = RestoreSectionPreview,
     AddSettingMarkerTag = AddSettingMarkerTag,
+    RecordSettingAnchor = M.RecordSettingAnchor,
     RefreshActiveSection = function()
         if SelectSection then
-            SelectSection(activeKey)
+            SelectSection(activeKey, true)
         end
     end,
     GetScrollChild = function() return scrollChild end,
@@ -688,12 +763,12 @@ M.Renderers = M.Renderers or {}
 local SectionHeader = M.Widgets.SectionHeader
 local AddText = M.Widgets.AddText
 
-local function AddSearchResult(entry)
-    local y = cursorY
+-- ============================================================
+-- Pooled search results
+-- ============================================================
+
+local function CreateSearchResultButton()
     local btn = CreateFrame("Button", nil, scrollChild)
-    btn:SetHeight(54)
-    btn:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", PAD, -y)
-    btn:SetPoint("TOPRIGHT", scrollChild, "TOPRIGHT", -PAD, -y)
 
     btn.bg = btn:CreateTexture(nil, "BACKGROUND")
     btn.bg:SetAllPoints()
@@ -707,25 +782,21 @@ local function AddSearchResult(entry)
 
     btn.title = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     btn.title:SetPoint("TOPLEFT", btn, "TOPLEFT", 10, -7)
-    btn.title:SetPoint("RIGHT", btn, "RIGHT", -96, 0)
     btn.title:SetJustifyH("LEFT")
-    btn.title:SetText(entry.label)
+    btn.title:SetWordWrap(true)
 
     btn.section = btn:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    btn.section:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -10, -8)
-    btn.section:SetJustifyH("RIGHT")
-    btn.section:SetText(entry.sectionLabel)
-
-    local tag = AddSettingMarkerTag(btn, entry.label)
-    if tag then tag:SetPoint("RIGHT", btn.section, "LEFT", -6, 0) end
+    btn.section:SetPoint("TOPLEFT", btn.title, "BOTTOMLEFT", 0, -3)
+    btn.section:SetPoint("RIGHT", btn, "RIGHT", -10, 0)
+    btn.section:SetJustifyH("LEFT")
+    btn.section:SetWordWrap(true)
 
     btn.desc = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    btn.desc:SetPoint("TOPLEFT", btn.title, "BOTTOMLEFT", 0, -4)
+    btn.desc:SetPoint("TOPLEFT", btn.section, "BOTTOMLEFT", 0, -4)
     btn.desc:SetPoint("RIGHT", btn, "RIGHT", -10, 0)
     btn.desc:SetJustifyH("LEFT")
+    btn.desc:SetWordWrap(true)
     btn.desc:SetTextColor(COLOR_TEXT_DIM[1], COLOR_TEXT_DIM[2], COLOR_TEXT_DIM[3], 0.9)
-    local markerSummary = GetSettingMarkerSummary(entry.label)
-    btn.desc:SetText(markerSummary and ((entry.desc or "") .. " " .. markerSummary) or (entry.desc or ""))
 
     btn:SetScript("OnEnter", function(self)
         self.bg:SetColorTexture(0.090, 0.060, 0.032, 0.76)
@@ -733,46 +804,106 @@ local function AddSearchResult(entry)
     btn:SetScript("OnLeave", function(self)
         self.bg:SetColorTexture(0.030, 0.024, 0.020, 0.64)
     end)
-    btn:SetScript("OnClick", function()
+    btn:SetScript("OnClick", function(self)
+        local entry = self.entry
+        if not entry then return end
         if searchBox then
+            searchBox._awpOpeningResult = true
             searchBox:SetText("")
+            searchBox._awpOpeningResult = nil
             searchBox:ClearFocus()
         end
-        SelectSection(entry.key)
+        SelectSection(entry.page, false, entry.surface, entry.setting)
     end)
 
-    cursorY = y + 58
+    if NS.Internal.Appearance then
+        NS.Internal.Appearance.Text(btn.title, "windows.search", "TITLE")
+        NS.Internal.Appearance.Text(btn.section, "windows.search", "LABEL")
+        NS.Internal.Appearance.Text(btn.desc, "windows.search", "TEXT")
+    end
+    return btn
+end
+
+local function AddSearchResult(entry, index)
+    local y = cursorY
+    local btn = searchButtons[index]
+    if not btn then
+        btn = CreateSearchResultButton()
+        searchButtons[index] = btn
+    end
+    btn.entry = entry
+    btn:Show()
+    btn:ClearAllPoints()
+    btn:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", PAD, -y)
+    btn:SetPoint("TOPRIGHT", scrollChild, "TOPRIGHT", -PAD, -y)
+    btn.bg:SetColorTexture(0.030, 0.024, 0.020, 0.64)
+    btn.title:SetText(entry.label)
+    btn.section:SetText(entry.sectionLabel)
+    local tag = AddSettingMarkerTag(btn, entry.label, btn.markerTag, entry.page)
+    if tag and not btn.markerTag then
+        tag:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -10, -8)
+        btn.markerTag = tag
+    end
+    btn.title:ClearAllPoints()
+    btn.title:SetPoint("TOPLEFT", btn, "TOPLEFT", 10, -7)
+    btn.title:SetPoint("RIGHT", btn, "RIGHT", tag and -102 or -10, 0)
+    local markerSummary = GetSettingMarkerSummary(entry.label, entry.page)
+    btn.desc:SetText(markerSummary and ((entry.desc or "") .. " " .. markerSummary) or (entry.desc or ""))
+    local height = 22 + btn.title:GetStringHeight() + btn.section:GetStringHeight() + btn.desc:GetStringHeight()
+    btn:SetHeight(height)
+    cursorY = y + height + 4
+end
+
+local function ReleaseSearchRows(keep)
+    for index = keep + 1, searchPage.visible do
+        local row = searchButtons[index]
+        row.entry = nil
+        row:Hide()
+    end
+    searchPage.visible = keep
 end
 
 local function RenderSearchResults()
     local hasFilter = searchScope ~= "all"
     local header = hasFilter and GetSearchFilterText() or "Search Results"
-    SectionHeader(header)
+    if NS.Internal.Appearance then NS.Internal.Appearance.Tag(scrollChild, "windows.search") end
+    if searchPage.heading then
+        searchPage.heading:SetText(header:upper())
+        cursorY = cursorY + SECTION_H
+    else
+        searchPage.heading = SectionHeader(header)
+    end
 
     local query = searchQuery or ""
+    local description = hasFilter and GetSearchFilterDescription()
     if query == "" and not hasFilter then
-        AddText("Showing all searchable settings. Type in the search box or choose a focused filter.",
-            "GameFontHighlightSmall", COLOR_TEXT_DIM, 0, 8)
+        description = "Showing all searchable settings. Type in the search box or choose a focused filter."
+    end
+    if description then
+        searchPage.description = AddText(description, "GameFontHighlightSmall", COLOR_TEXT_DIM, 0, 8,
+            searchPage.description)
+    elseif searchPage.description then
+        searchPage.description:Hide()
     end
 
-    local filterDesc = hasFilter and GetSearchFilterDescription() or nil
-    if filterDesc then
-        AddText(filterDesc, "GameFontHighlightSmall", COLOR_TEXT_DIM, 0, 8)
-    end
-
-    local count = 0
-    for _, entry in ipairs(OPTIONS) do
-        if IsSectionAvailable(entry.key) and SearchScopeAllows(entry) then
-            entry.sectionLabel = GetSectionLabel(entry.key)
-            if query == "" or EntryMatchesSearch(entry, query) then
-                AddSearchResult(entry)
+    local count, terms = 0, {}
+    for term in query:gmatch("%S+") do terms[#terms + 1] = term end
+    local hasKaliel = Data.HasKalielHeaderSettings()
+    for _, entry in ipairs(GetSearchEntries()) do
+        if (not entry.requiresKaliel or hasKaliel) and SearchScopeAllows(entry) then
+            if EntryMatchesSearch(entry, terms) then
                 count = count + 1
+                AddSearchResult(entry, count)
             end
         end
     end
 
+    ReleaseSearchRows(count)
     if count == 0 then
-        AddText("No matching settings found.", "GameFontHighlight", COLOR_TEXT_DIM, 0, 8)
+        searchPage.empty = AddText("No matching settings found.", "GameFontHighlight", COLOR_TEXT_DIM, 0, 8,
+            searchPage.empty)
+    elseif searchPage.empty then
+        searchPage.empty:Hide()
     end
 end
 
@@ -792,67 +923,213 @@ local function UpdateTabButtons()
             ColorTexture(btn.inset, { 0.020, 0.016, 0.014, 0.92 })
             btn.label:SetTextColor(0.82, 0.75, 0.66, 1)
         end
+        if NS.Internal.Appearance then
+            NS.Internal.Appearance.Text(btn.label,nil,btn.tabKey==activeTab and "TITLE" or "TEXT","shell")
+            NS.Internal.Appearance.RegisterVisual(btn,{kind="button",selected=btn.tabKey==activeTab})
+        end
     end
 end
 
-function SelectSection(key)
+local function LayoutSidebar()
+    local y = 4
+    for _, section in ipairs(sections) do
+        local button = sidebar.buttons[section.key]
+        local visible = not section.parent or sidebar.expanded[section.parent] == true
+        button:SetShown(visible)
+        if visible then
+            local indent = section.parent and 20 or 8
+            button:ClearAllPoints()
+            button:SetPoint("TOPLEFT", sidebar.content, "TOPLEFT", indent, -y)
+            button:SetPoint("TOPRIGHT", sidebar.content, "TOPRIGHT", button.disclosure and -27 or -4, -y)
+            button.offset = y
+            y = y + NAV_BTN_H + 2
+        end
+        if button.disclosure then
+            button.disclosure:SetCollapsed(not sidebar.expanded[section.key])
+        end
+    end
+    local scroll = sidebar.scroll
+    local offset = scroll:GetVerticalScroll()
+    sidebar.content:SetHeight(y + 2)
+    scroll:UpdateScrollChildRect()
+    scroll:SetVerticalScroll(math.min(offset, scroll:GetVerticalScrollRange()))
+end
+
+local function SelectSidebarButton(key, reveal)
+    local current = M.GetSection(key)
+    local parent = current and current.parent
+    local group = parent or current and current.hasChildren and key
+    if group and (reveal or parent) and not sidebar.expanded[group] then
+        sidebar.expanded[group] = true
+        LayoutSidebar()
+    end
+    for sectionKey, button in pairs(sidebar.buttons) do
+        local selected = sectionKey == key
+        if button.selected ~= selected then
+            button.selected = selected
+            if selected then button:LockHighlight() else button:UnlockHighlight() end
+            button:SetNormalFontObject(selected and _G.GameFontNormal or _G.GameFontHighlightSmall)
+            button.selectedTex:SetShown(selected)
+            if NS.Internal.Appearance then
+                NS.Internal.Appearance.RegisterVisual(button, { kind = "menuRow", navigation = true,
+                    text = button:GetFontString(), regions = button.regions, selected = selected })
+            end
+        end
+    end
+    local button = reveal and sidebar.buttons[key]
+    if button and button.offset then
+        local scroll = sidebar.scroll
+        local offset, height = scroll:GetVerticalScroll(), scroll:GetHeight()
+        if button.offset < offset then
+            offset = button.offset
+        elseif button.offset + NAV_BTN_H > offset + height then
+            offset = button.offset + NAV_BTN_H - height
+        end
+        scroll:SetVerticalScroll(math.max(0, math.min(offset, scroll:GetVerticalScrollRange())))
+    end
+end
+
+function SelectSection(key, preserveScroll, surface, setting)
+    local section = M.GetSection(key)
+    if not IsOptionsPage(key) then return end
+    if section and section.choices then
+        surface = surface or selectedSurfaces[key]
+        if not surface or not section.surfaces[surface] then surface = section.defaultSurface end
+    end
+    -- Capture before replacing the child: the native scroll frame may reset
+    -- its range/offset while the new content is attached and laid out.
+    local keepScroll = preserveScroll and key == activeKey and surface == selectedSurfaces[key]
+    local offset = keepScroll and scrollFrame:GetVerticalScroll() or 0
+    selectedSurfaces[key] = surface
     if M.Dropdown and M.Dropdown.Close then
         M.Dropdown.Close()
     end
 
+    local editingSearch = key == "search" and key == activeKey and not preserveScroll
     activeTab = (key == "release" or key == "integrations") and key or "modules"
     activeKey = key
     if key ~= "release" and key ~= "integrations" and key ~= "search" then
         lastModuleKey = key
     end
-    UpdateTabButtons()
-    UpdateContentLayoutForSection(key)
+    if not editingSearch then
+        UpdateTabButtons()
+        UpdateContentLayoutForSection(key)
+        SelectSidebarButton(key, not keepScroll)
+    end
 
-    for _, btn in ipairs(navButtons) do
-        if btn.sectionKey == key then
-            btn:LockHighlight()
-            btn:SetNormalFontObject(_G.GameFontNormal)
-            if btn.selectedTex then btn.selectedTex:Show() end
-        else
-            btn:UnlockHighlight()
-            btn:SetNormalFontObject(_G.GameFontHighlightSmall)
-            if btn.selectedTex then btn.selectedTex:Hide() end
+    -- Search owns one body and its row pool for the lifetime of the canvas.
+    local newChild = key == "search" and searchPage.body or nil
+    if not newChild or newChild ~= scrollChild then
+        if scrollChild then
+            scrollChild:Hide()
+            if scrollChild == searchPage.body then ReleaseSearchRows(0) end
+            scrollChild:SetParent(nil)
         end
+        if newChild then
+            newChild:SetParent(scrollFrame)
+            newChild:Show()
+        else
+            newChild = CreateFrame("Frame", nil, scrollFrame)
+            if key == "search" then searchPage.body = newChild end
+        end
+        scrollFrame:SetScrollChild(newChild)
+        scrollChild = newChild
     end
-
-    -- Detach old scroll child
-    if scrollChild then
-        scrollChild:Hide()
-        scrollChild:SetParent(nil)
-    end
-
-    local newChild = CreateFrame("Frame", nil, scrollFrame)
     newChild:SetWidth(GetScrollContentWidth())
-    scrollFrame:SetScrollChild(newChild)
-    scrollChild = newChild
     cursorY = PAD
-    if type(scrollFrame.SetVerticalScroll) == "function" then
-        scrollFrame:SetVerticalScroll(0)
-    end
 
+    if NS.Internal.Appearance then NS.Internal.Appearance.Tag(newChild, "windows.options") end
+    soughtSetting, settingOffset = setting, nil
     local renderFn = RENDER_FN[key]
-    if renderFn then renderFn() end
+    if section and section.provider then
+        M.RenderAppearanceSection(section, surface)
+    elseif renderFn then
+        renderFn()
+    end
+    offset = settingOffset or offset
+    soughtSetting, settingOffset = nil, nil
 
     newChild:SetHeight(math.max(cursorY + PAD, scrollFrame:GetHeight()))
+    scrollFrame:UpdateScrollChildRect()
+    scrollFrame:SetVerticalScroll(math.max(0, math.min(offset, scrollFrame:GetVerticalScrollRange())))
+    if NS.Internal.Controller then NS.Internal.Controller.Request(NS.Internal.Controller.Root(scrollFrame)) end
 
     -- Update preview image/text
-    for _, sec in ipairs(sections or SECTION_DEFS) do
-        if sec.key == key then
-            SetPreview(sec.image, sec.desc, sec)
-            return
-        end
-    end
-    if key == ZYGOR_SECTION.key then
-        SetPreview(ZYGOR_SECTION.image, ZYGOR_SECTION.desc, ZYGOR_SECTION)
-    elseif key == "search" then
+    if section then
+        SetPreview(section.image, section.desc, section)
+    elseif key == "search" and not editingSearch then
         SetPreview(MEDIA_HELP .. "AWPOptions.tga", "Search results open the matching options section.",
-            { imageW = 1376, imageH = 768 })
+            { imageW = 668, imageH = 412 })
     end
+end
+
+function M.SelectOptionsPage(key, surface) SelectSection(key, false, surface) end
+
+local function CreateSidebarButton(section)
+    local key, content = section.key, sidebar.content
+    local button = CreateFrame("Button", nil, content)
+    button:SetHeight(NAV_BTN_H)
+    button:SetNormalFontObject(_G.GameFontHighlightSmall)
+    button:SetHighlightFontObject(_G.GameFontNormal)
+    button:SetText(section.label)
+    local text = button:GetFontString()
+    if text then
+        text:SetJustifyH("LEFT")
+        text:SetPoint("LEFT", button, "LEFT", 4, 0)
+    end
+    local highlight = button:CreateTexture(nil, "BACKGROUND")
+    highlight:SetAllPoints()
+    highlight:SetColorTexture(1, 1, 1, 0.08)
+    button:SetHighlightTexture(highlight)
+    local selected = button:CreateTexture(nil, "BACKGROUND", nil, -1)
+    selected:SetAllPoints()
+    selected:SetColorTexture(1, 0.82, 0, 0.13)
+    selected:Hide()
+    button.selectedTex, button.regions = selected, { highlight, selected }
+    button:SetScript("OnClick", function() SelectSection(key) end)
+    button._awpSidebarSection = key
+
+    if section.hasChildren then
+        sidebar.expanded[key] = section.defaultExpanded
+        local disclosure = FW.CreateDisclosureButton(button)
+        disclosure._awpSidebarDisclosure = button
+        disclosure:SetPoint("LEFT", button, "RIGHT", 2, 0)
+        disclosure:SetScript("OnClick", function()
+            if sidebar.expanded[key] then
+                local current = M.GetSection(activeKey)
+                if current and current.parent == key then SelectSection(key) end
+                sidebar.expanded[key] = nil
+            else
+                sidebar.expanded[key] = true
+            end
+            LayoutSidebar()
+        end)
+        button.disclosure = disclosure
+    end
+    sidebar.buttons[key] = button
+end
+
+local function RefreshSectionCatalog()
+    local availableSections, availableByKey = Data.BuildSections()
+    if sections and #sections == #availableSections then
+        local same = true
+        for index, section in ipairs(availableSections) do
+            if section.key ~= sections[index].key or section.defaultSurface ~= sections[index].defaultSurface then
+                same = false
+                break
+            end
+        end
+        if same then return end
+    end
+    sections, sectionsByKey, searchEntries = availableSections, availableByKey, nil
+    for key, button in pairs(sidebar.buttons) do
+        if not sectionsByKey[key] then button:Hide() end
+    end
+    for _, section in ipairs(sections) do
+        if not sidebar.buttons[section.key] then CreateSidebarButton(section) end
+    end
+    if not sectionsByKey[lastModuleKey] then lastModuleKey = "about" end
+    LayoutSidebar()
 end
 
 -- ============================================================
@@ -860,13 +1137,6 @@ end
 -- ============================================================
 
 function M.Create()
-    -- Build section list (add Zygor if loaded)
-    sections = {}
-    for _, s in ipairs(SECTION_DEFS) do sections[#sections + 1] = s end
-    if type(NS.IsZygorLoaded) == "function" and NS.IsZygorLoaded() then
-        sections[#sections + 1] = ZYGOR_SECTION
-    end
-
     local settingsCanvas = CreateFrame("Frame", "AWPOptionsCanvas", UIParent)
     settingsCanvas:SetSize(PANEL_W, PANEL_H)
     settingsCanvas:SetMovable(true)
@@ -879,6 +1149,7 @@ function M.Create()
     local versionStr = type(NS.GetAddonMetadataValue) == "function"
         and NS.GetAddonMetadataValue("Version", "") or ""
     local shell = FW.CreatePanelShell(settingsCanvas, {
+        surface = "windows.options",
         title = NS.ADDON_NAME,
         titleHeight = HEADER_H,
         footerHeight = FOOTER_H,
@@ -894,14 +1165,23 @@ function M.Create()
         closeBorderColor = { 0.52, 0.35, 0.16, 0 },
         onClose = function() settingsCanvas:Hide() end,
     })
+    if NS.Internal.Appearance then
+        NS.Internal.Appearance.RegisterReflow(settingsCanvas, function() SelectSection(activeKey or "about", true) end)
+    end
     local footerFrame = shell.footerFrame
     local bodyFrame = shell.bodyFrame
+    if type(M.SavePosition) == "function" then
+        shell.titleFrame:HookScript("OnDragStop", function() M.SavePosition(settingsCanvas) end)
+    end
 
     local bodyWash = bodyFrame:CreateTexture(nil, "BACKGROUND", nil, -3)
     bodyWash:SetTexture(MEDIA_HELP .. "MainShot.tga")
     bodyWash:SetAlpha(0.08)
     bodyWash:SetPoint("TOPLEFT", bodyFrame, "TOPLEFT", NAV_W, 0)
     bodyWash:SetPoint("BOTTOMRIGHT", bodyFrame, "BOTTOMRIGHT", -PREVIEW_W, 0)
+    if NS.Internal.Appearance then
+        NS.Internal.Appearance.RegisterVisual(bodyFrame,{kind="artwork",regions={bodyWash}})
+    end
 
     -- Left navigation sidebar
     local navBg = bodyFrame:CreateTexture(nil, "BACKGROUND")
@@ -915,6 +1195,10 @@ function M.Create()
     navLine:SetWidth(1)
     navLine:SetPoint("TOPRIGHT", navBg, "TOPRIGHT", 0, 0)
     navLine:SetPoint("BOTTOMRIGHT", navBg, "BOTTOMRIGHT", 0, 0)
+    if NS.Internal.Appearance then
+        NS.Internal.Appearance.Decoration(navLine)
+        NS.Internal.Appearance.RegisterVisual(bodyFrame,{kind="artwork",regions={navBg}})
+    end
 
     local navFrame = CreateFrame("Frame", nil, bodyFrame)
     navFrame:SetPoint("TOPLEFT", bodyFrame, "TOPLEFT", 0, 0)
@@ -925,6 +1209,12 @@ function M.Create()
     searchFilterButton:SetPoint("TOPRIGHT", navFrame, "TOPRIGHT", -12, -10)
 
     searchBox = CreateSearchBox(navFrame)
+    if NS.Internal.Appearance then
+        NS.Internal.Appearance.Tag(searchBox, "windows.search")
+        NS.Internal.Appearance.Text(searchBox, "windows.search", "TEXT", "shell")
+        NS.Internal.Appearance.Text(searchBox.placeholder, "windows.search", "LABEL", "shell")
+        NS.Internal.Appearance.RegisterVisual(searchBox, {kind="input",surface="windows.search",regions={searchBox.bg,searchBox.border,searchBox.inset}})
+    end
     searchBox:SetSize(NAV_W - 62, 26)
     searchBox:SetPoint("TOPLEFT", navFrame, "TOPLEFT", 12, -10)
     searchBox:SetPoint("RIGHT", searchFilterButton, "LEFT", -8, 0)
@@ -934,61 +1224,49 @@ function M.Create()
     navSearchLine:SetHeight(1)
     navSearchLine:SetPoint("TOPLEFT", navFrame, "TOPLEFT", 12, -46)
     navSearchLine:SetPoint("TOPRIGHT", navFrame, "TOPRIGHT", -12, -46)
-
-    navButtons = {}
-    local navY = 56
-    for _, sec in ipairs(sections) do
-        local btn = CreateFrame("Button", nil, navFrame)
-        btn:SetHeight(NAV_BTN_H)
-        local indent = sec.indent and 20 or 8
-        btn:SetPoint("TOPLEFT", navFrame, "TOPLEFT", indent, -navY)
-        btn:SetPoint("TOPRIGHT", navFrame, "TOPRIGHT", -4, -navY)
-        btn:SetNormalFontObject(_G.GameFontHighlightSmall)
-        btn:SetHighlightFontObject(_G.GameFontNormal)
-        btn:SetText(sec.label)
-        local fs = btn:GetFontString()
-        if fs then
-            fs:SetJustifyH("LEFT")
-            fs:SetPoint("LEFT", btn, "LEFT", 4, 0)
-        end
-
-        local hlTex = btn:CreateTexture(nil, "BACKGROUND")
-        hlTex:SetAllPoints()
-        hlTex:SetColorTexture(1, 1, 1, 0.08)
-        btn:SetHighlightTexture(hlTex)
-
-        local selectedTex = btn:CreateTexture(nil, "BACKGROUND", nil, -1)
-        selectedTex:SetAllPoints()
-        selectedTex:SetColorTexture(1, 0.82, 0, 0.13)
-        selectedTex:Hide()
-        btn.selectedTex = selectedTex
-
-        btn.sectionKey = sec.key
-        btn:SetScript("OnClick", function() SelectSection(sec.key) end)
-        navButtons[#navButtons + 1] = btn
-        navY = navY + NAV_BTN_H + 2
+    if NS.Internal.Appearance then
+        NS.Internal.Appearance.RegisterVisual(navFrame,{kind="decoration",target=navSearchLine,regions={navSearchLine}})
     end
 
-    -- Right preview panel
-    previewBg = bodyFrame:CreateTexture(nil, "BACKGROUND")
-    ColorTexture(previewBg, COLOR_PANEL)
-    previewBg:SetPoint("TOPRIGHT", bodyFrame, "TOPRIGHT", 0, 0)
-    previewBg:SetPoint("BOTTOMRIGHT", bodyFrame, "BOTTOMRIGHT", 0, 0)
-    previewBg:SetWidth(PREVIEW_W)
+    local sidebarScroll = CreateFrame("ScrollFrame", nil, navFrame, "UIPanelScrollFrameTemplate")
+    sidebarScroll:SetPoint("TOPLEFT", navFrame, "TOPLEFT", 0, -52)
+    sidebarScroll:SetPoint("BOTTOMRIGHT", navFrame, "BOTTOMRIGHT", 0, -4)
+    local sidebarContent = CreateFrame("Frame", nil, sidebarScroll)
+    sidebarContent:SetWidth(NAV_W - 14)
+    sidebarScroll:SetScrollChild(sidebarContent)
+    sidebarScroll:EnableMouseWheel(true)
+    FW.StyleScrollBar(sidebarScroll, { anchorTo = sidebarScroll, offsetX = -4, width = 6 })
+    sidebar.scroll, sidebar.content = sidebarScroll, sidebarContent
+    local pad = NS.Internal.Controller
+    if pad then
+        pad.SetSettingsNavigation(pad.Root(navFrame), sidebar, function() return scrollFrame end,
+            function() return sections end, function() return activeKey end)
+    end
+    RefreshSectionCatalog()
 
-    previewLine = canvas:CreateTexture(nil, "ARTWORK")
+    -- Right preview panel
+    previewColumn = CreateFrame("Frame", nil, bodyFrame)
+    previewColumn:SetPoint("TOPRIGHT", bodyFrame, "TOPRIGHT", 0, 0)
+    previewColumn:SetPoint("BOTTOMRIGHT", bodyFrame, "BOTTOMRIGHT", 0, 0)
+    previewColumn:SetWidth(PREVIEW_W)
+
+    local previewBg = previewColumn:CreateTexture(nil, "BACKGROUND")
+    ColorTexture(previewBg, COLOR_PANEL)
+    previewBg:SetAllPoints()
+
+    local previewLine = previewColumn:CreateTexture(nil, "ARTWORK")
     ColorTexture(previewLine, COLOR_LINE)
     previewLine:SetWidth(1)
-    previewLine:SetPoint("TOPLEFT", previewBg, "TOPLEFT", 0, 0)
-    previewLine:SetPoint("BOTTOMLEFT", previewBg, "BOTTOMLEFT", 0, 0)
+    previewLine:SetPoint("TOPLEFT", previewColumn, "TOPLEFT", 0, 0)
+    previewLine:SetPoint("BOTTOMLEFT", previewColumn, "BOTTOMLEFT", 0, 0)
 
-    -- Invisible fixed preview slot. Images are centered inside this.
-    previewAnchor = CreateFrame("Frame", nil, bodyFrame)
+    -- The screenshot frame and the live plaque share this preview slot.
+    previewAnchor = CreateFrame("Frame", nil, previewColumn)
     previewAnchor:SetSize(PREVIEW_MAX_W, PREVIEW_MAX_H)
-    previewAnchor:SetPoint("TOP", bodyFrame, "TOPRIGHT", -(PREVIEW_W / 2), -12)
+    previewAnchor:SetPoint("TOP", previewColumn, "TOP", 0, -12)
 
     -- Border frame follows the actual displayed image size.
-    previewBorder = CreateFrame("Frame", nil, bodyFrame)
+    previewBorder = CreateFrame("Frame", nil, previewAnchor)
     previewBorder:SetSize(PREVIEW_MAX_W + 2, PREVIEW_MAX_H + 2)
     previewBorder:SetPoint("CENTER", previewAnchor, "CENTER", 0, 0)
 
@@ -1015,22 +1293,26 @@ function M.Create()
     previewRight:SetPoint("BOTTOMRIGHT", previewBorder, "BOTTOMRIGHT", 0, 0)
     previewRight:SetWidth(1)
     ColorTexture(previewRight, { 0.55, 0.36, 0.18, 0.52 })
+    if NS.Internal.Appearance then
+        NS.Internal.Appearance.RegisterVisual(previewColumn,{kind="artwork",regions={previewBg}})
+        NS.Internal.Appearance.Decoration(previewLine)
+        NS.Internal.Appearance.RegisterVisual(previewBorder,{kind="border",regions={previewTop,previewBottom,previewLeft,previewRight}})
+    end
 
-    previewImage = bodyFrame:CreateTexture(nil, "ARTWORK")
-    previewImage:SetSize(PREVIEW_MAX_W, PREVIEW_MAX_H)
-    previewImage:SetPoint("CENTER", previewBorder, "CENTER", 0, 0)
+    previewImage = previewBorder:CreateTexture(nil, "ARTWORK")
+    previewImage:SetPoint("TOPLEFT", previewBorder, "TOPLEFT", 1, -1)
+    previewImage:SetPoint("BOTTOMRIGHT", previewBorder, "BOTTOMRIGHT", -1, 1)
 
-    previewDesc = bodyFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
-    previewDesc:SetPoint("TOPLEFT", previewBorder, "BOTTOMLEFT", 0, -8)
-    previewDesc:SetPoint("TOPRIGHT", previewBorder, "BOTTOMRIGHT", 0, -8)
+    previewDesc = previewColumn:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
+    AnchorPreviewDescription(previewBorder)
     previewDesc:SetJustifyH("CENTER")
     previewDesc:SetJustifyV("TOP")
     previewDesc:SetWordWrap(true)
 
-    previewLogo = bodyFrame:CreateTexture(nil, "OVERLAY")
+    local previewLogo = previewColumn:CreateTexture(nil, "OVERLAY")
     previewLogo:SetTexture(ICON_PATH)
     previewLogo:SetSize(228, 228)
-    previewLogo:SetPoint("BOTTOM", bodyFrame, "BOTTOMRIGHT", -(PREVIEW_W / 2), 14)
+    previewLogo:SetPoint("BOTTOM", previewColumn, "BOTTOM", 0, 14)
     previewLogo:SetAlpha(0.65)
 
     -- Center scroll frame
@@ -1081,8 +1363,17 @@ function M.Create()
     integrationsTab:HookScript("OnLeave", UpdateTabButtons)
     tabButtons[#tabButtons + 1] = integrationsTab
 
+    local helpButton = FW.CreatePanelButton(footerFrame)
+    helpButton:SetSize(88, 30)
+    helpButton:SetPoint("LEFT", integrationsTab, "RIGHT", 8, 0)
+    helpButton:SetDisplayText("Help")
+    helpButton:SetScript("OnClick", function()
+        NS.ShowHelp("overview")
+    end)
+
     settingsCanvas:SetScript("OnShow", function()
-        SelectSection(activeKey)
+        RefreshSectionCatalog()
+        SelectSection(IsOptionsPage(activeKey) and activeKey or lastModuleKey, true)
     end)
     settingsCanvas:SetScript("OnHide", function()
         HideTip()

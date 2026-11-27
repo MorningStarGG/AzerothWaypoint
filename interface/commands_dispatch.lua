@@ -1,3 +1,10 @@
+-- ============================================================
+-- Slash command dispatch
+-- ============================================================
+--
+-- Dispatches slash commands to settings, routing, diagnostics and queue
+-- handlers.
+
 local NS = _G.AzerothWaypointNS
 local state = NS.State
 local M = NS.Internal.Interface.commands
@@ -15,9 +22,6 @@ local handleTrackRoute = M.handleTrackRoute
 local handleUntrackClear = M.handleUntrackClear
 local handleQuestClear = M.handleQuestClear
 local handleAddonTakeover = M.handleAddonTakeover
-local handleCompact = M.handleCompact
-local handleTrackerViewer = M.handleTrackerViewer
-local handleZygorViewer = M.handleZygorViewer
 local handleZygorGuide = M.handleZygorGuide
 local handleMinimap = M.handleMinimap
 local handleFlightAssist = M.handleFlightAssist
@@ -96,6 +100,8 @@ local function handleCommand(msg)
         NS.Msg("Debug:", enabled and "ON" or "OFF")
     elseif cmd == "diag" then
         handleDiag()
+    elseif cmd == "controllerdiag" then
+        if NS.Internal.Controller then NS.Internal.Controller.Diagnostics() end
     elseif cmd == "stepdebug" then
         handleStepDebug()
     elseif cmd == "resolvercases" or cmd == "resolvercase" then
@@ -120,7 +126,7 @@ local function handleCommand(msg)
         handleSkin(rest:lower())
     elseif cmd == "scale" then
         handleScale(rest)
-    elseif cmd == "options" or cmd == "config" then
+    elseif cmd == "options" or cmd == "config" or cmd == "settings" then
         NS.OpenOptionsPanel()
     elseif cmd == "routing" then
         handleRouting(rest:lower())
@@ -138,14 +144,10 @@ local function handleCommand(msg)
         handleQuestClear(rest:lower())
     elseif cmd == "addontakeover" or cmd == "unknownaddons" or cmd == "addonwaypoints" then
         handleAddonTakeover(rest)
-    elseif cmd == "compact" or cmd == "guidechrome" or cmd == "guidehover" then
-        handleCompact(rest:lower())
-    elseif cmd == "trackerviewer" or cmd == "zygortracker" or cmd == "ztv" then
-        handleTrackerViewer(rest:lower())
-    elseif cmd == "zygorviewer" or cmd == "zygorframe" or cmd == "nativeviewer" then
-        handleZygorViewer(rest:lower())
     elseif cmd == "zygor" or cmd == "zguide" then
         handleZygorGuide(rest)
+    elseif NS.Constants.GUIDE_PROVIDER_BY_KEY[cmd] then
+        M.handleGuideCommand(cmd, rest)
     elseif cmd == "minimap" or cmd == "minimapbutton" or cmd == "button" then
         handleMinimap(rest:lower())
     elseif cmd == "flightassist" or cmd == "flightmap" or cmd == "flight" then

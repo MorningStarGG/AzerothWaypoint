@@ -1,3 +1,10 @@
+-- ============================================================
+-- Settings window
+-- ============================================================
+--
+-- Hosts the standalone settings canvas, remembers its position and opens it
+-- from Blizzard's options.
+
 local NS = _G.AzerothWaypointNS
 local C = NS.Constants
 local M = NS.Internal.Interface.options
@@ -20,6 +27,7 @@ local function SavePosition(frame)
         db.awpPanelPos = { point = point, relPoint = relPoint or "CENTER", x = x or 0, y = y or 0 }
     end
 end
+M.SavePosition = SavePosition
 
 local function ApplyOrCenterPosition(frame)
     local db = type(NS.GetDB) == "function" and NS.GetDB()

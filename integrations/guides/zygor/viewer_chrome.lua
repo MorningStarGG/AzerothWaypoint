@@ -1,3 +1,9 @@
+-- ============================================================
+-- Zygor native viewer styling
+-- ============================================================
+--
+-- Manages Zygor's native viewer chrome, step backgrounds and hover visibility.
+
 local NS = _G.AzerothWaypointNS
 if not NS.IsZygorLoaded() then return end
 
@@ -20,7 +26,7 @@ state.viewerChrome = state.viewerChrome or {
 local viewer = state.viewerChrome
 
 -- ============================================================
--- Internal helpers
+-- Native frames and step backgrounds
 -- ============================================================
 
 local function BuildFrameList(...)
@@ -74,7 +80,8 @@ local function CaptureBackdrop(border)
     end
 
     border._awpDesiredBgR, border._awpDesiredBgG, border._awpDesiredBgB, border._awpDesiredBgA = border:GetBackdropColor()
-    border._awpDesiredBorderR, border._awpDesiredBorderG, border._awpDesiredBorderB, border._awpDesiredBorderA = border:GetBackdropBorderColor()
+    border._awpDesiredBorderR, border._awpDesiredBorderG, border._awpDesiredBorderB, border._awpDesiredBorderA = border
+    :GetBackdropBorderColor()
 end
 
 local function ResolveBackdropCompactState(parent, border, compact)
@@ -207,7 +214,40 @@ end
 -- Managed frame hooks
 -- ============================================================
 
-local SyncManagedFrame
+local function SyncManagedFrame(managed, compact)
+    if not managed or not managed._awpCompactHooked then
+        return
+    end
+
+    managed._awpApplyingCompact = true
+
+    if compact then
+        if type(managed.SetAlpha) == "function" and managed._awpDesiredAlpha ~= nil then
+            managed:SetAlpha(0)
+        end
+        if type(managed.Hide) == "function" then
+            managed:Hide()
+        end
+        managed._awpApplyingCompact = false
+        return
+    end
+
+    if managed._awpDesiredShown == false then
+        if type(managed.Hide) == "function" then
+            managed:Hide()
+        end
+    else
+        if type(managed.Show) == "function" then
+            managed:Show()
+        end
+    end
+
+    if type(managed.SetAlpha) == "function" and managed._awpDesiredAlpha ~= nil then
+        managed:SetAlpha(managed._awpDesiredAlpha)
+    end
+
+    managed._awpApplyingCompact = false
+end
 
 local function GuardManagedFrame(parent, managed)
     if not managed or managed._awpCompactHooked then
@@ -265,41 +305,6 @@ local function GuardManagedFrame(parent, managed)
     end
 
     managed._awpCompactHooked = true
-end
-
-SyncManagedFrame = function(managed, compact)
-    if not managed or not managed._awpCompactHooked then
-        return
-    end
-
-    managed._awpApplyingCompact = true
-
-    if compact then
-        if type(managed.SetAlpha) == "function" and managed._awpDesiredAlpha ~= nil then
-            managed:SetAlpha(0)
-        end
-        if type(managed.Hide) == "function" then
-            managed:Hide()
-        end
-        managed._awpApplyingCompact = false
-        return
-    end
-
-    if managed._awpDesiredShown == false then
-        if type(managed.Hide) == "function" then
-            managed:Hide()
-        end
-    else
-        if type(managed.Show) == "function" then
-            managed:Show()
-        end
-    end
-
-    if type(managed.SetAlpha) == "function" and managed._awpDesiredAlpha ~= nil then
-        managed:SetAlpha(managed._awpDesiredAlpha)
-    end
-
-    managed._awpApplyingCompact = false
 end
 
 -- ============================================================

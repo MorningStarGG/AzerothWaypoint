@@ -1,3 +1,10 @@
+-- ============================================================
+-- Shared settings controls and values
+-- ============================================================
+--
+-- Provides settings defaults, option lists and prompts used by the canvas and
+-- addon commands.
+
 local NS = _G.AzerothWaypointNS
 local C = NS.Constants
 
@@ -14,8 +21,8 @@ local NATIVE_TRACKER_WARNING_POPUP = "AWP_NATIVE_TRACKER_WARNING"
 local ZYGOR_CONFLICT_POPUP = "AWP_ZYGOR_CONFLICT"
 local ZYGOR_WAYPOINT_ADDON_NAME = "ZygorWaypoint"
 local ZYGOR_ARROW_RECOMMEND_POPUP = "AWP_RECOMMEND_ZYGOR_ARROW"
-local STARTUP_POPUP_RETRY_DELAY_SECONDS = 2
-local STARTUP_POPUP_MAX_ATTEMPTS = 8
+local DUGI_ARROW_RECOMMEND_POPUP = "AWP_RECOMMEND_DUGI_ARROW"
+local Notices = NS.Internal.StartupNotices
 
 local GetTomTom = NS.GetTomTom
 
@@ -25,64 +32,41 @@ for key, value in pairs(DB_DEFAULTS) do
     DEFAULTS[key] = value
 end
 DEFAULTS.useCustomSkin = true
-DEFAULTS.customSkin = C.SKIN_STARLIGHT
+DEFAULTS.customSkin = C.SKIN_AWP_MODERN
 
 M.DEFAULTS = DEFAULTS
 M.rememberedCustomSkin = M.rememberedCustomSkin or DEFAULTS.customSkin
 
-local function GetStaticPopupPreferredIndex()
-    return _G["STATICPOPUP_NUMDIALOGS"] or 4
+-- Return a fresh value so resetting a color never exposes the schema table.
+function M.GetSettingDefault(key)
+    local definition = NS.Internal.OverlaySettingDefs[key]
+    local value = definition and definition.default
+    if not definition then value = DEFAULTS[key] end
+    if type(value) ~= "table" then return value end
+    local copy = {}
+    for field, component in pairs(value) do copy[field] = component end
+    return copy
 end
 
-local STARTUP_NOTICE_POPUPS = {
-    WAYPOINT_UI_RECOMMEND_POPUP,
-    NATIVE_TRACKER_WARNING_POPUP,
-    ZYGOR_CONFLICT_POPUP,
-    ZYGOR_ARROW_RECOMMEND_POPUP,
-}
-
-local function IsStartupHelpVisible()
-    local frame = _G["AWPHelpFrame"]
-    return frame and type(frame.IsShown) == "function" and frame:IsShown() or false
+function M.SettingDefault(key)
+    return function() return M.GetSettingDefault(key) end
 end
 
-local function IsStartupPopupVisible(ignorePopupName)
-    for _, popupName in ipairs(STARTUP_NOTICE_POPUPS) do
-        if popupName ~= ignorePopupName and StaticPopup_Visible(popupName) then
-            return true
+function M.ViewerDefault(providerKey, suffix)
+    for _, provider in ipairs(C.GUIDE_PROVIDERS) do
+        if provider.key == providerKey then
+            return M.SettingDefault("guideTrackerViewer" .. provider.suffix .. suffix)
         end
     end
-    return false
 end
 
-local function ShouldDeferStartupPopup(popupName)
-    return IsStartupHelpVisible() or IsStartupPopupVisible(popupName)
+function M.ActionDefault(key)
+    return function() return NS.Internal.GuideActionDefaults[key] end
 end
 
-local function RetryStartupPopup(fn, attempt)
-    attempt = tonumber(attempt) or 1
-    if attempt >= STARTUP_POPUP_MAX_ATTEMPTS then
-        return false
-    end
-    if type(fn) ~= "function" then
-        return false
-    end
-
-    local nextAttempt = attempt + 1
-    if type(NS.After) == "function" then
-        NS.After(STARTUP_POPUP_RETRY_DELAY_SECONDS, function()
-            fn(nextAttempt)
-        end)
-        return true
-    end
-    if type(C_Timer) == "table" and type(C_Timer.After) == "function" then
-        C_Timer.After(STARTUP_POPUP_RETRY_DELAY_SECONDS, function()
-            fn(nextAttempt)
-        end)
-        return true
-    end
-    return false
-end
+local GetStaticPopupPreferredIndex = Notices.PreferredIndex
+local ShouldDeferStartupPopup = Notices.ShouldDefer
+local RetryStartupPopup = Notices.Retry
 
 local function CreateControlTextContainer()
     if Settings and type(Settings.CreateControlTextContainer) == "function" then
@@ -156,8 +140,12 @@ local function ShowCopyLinkPopup(url)
         }
     end
 
-    StaticPopup_Show(TWITCH_COPY_POPUP, nil, nil, url)
+    NS.Internal.Dialogs.Show(TWITCH_COPY_POPUP, nil, nil, url)
 end
+
+-- ============================================================
+-- Reload and integration prompts
+-- ============================================================
 
 local function ShowReloadRecommendedPopup(settingName)
     if not StaticPopupDialogs[RELOAD_RECOMMENDED_POPUP] then
@@ -175,11 +163,11 @@ local function ShowReloadRecommendedPopup(settingName)
         }
     end
 
-    if StaticPopup_Visible(RELOAD_RECOMMENDED_POPUP) then
+    if NS.Internal.Dialogs.Visible(RELOAD_RECOMMENDED_POPUP) then
         return
     end
 
-    StaticPopup_Show(RELOAD_RECOMMENDED_POPUP, settingName or "this setting")
+    NS.Internal.Dialogs.Show(RELOAD_RECOMMENDED_POPUP, settingName or "this setting")
 end
 
 local function IsWaypointUIRecommendationRelevant()
@@ -233,7 +221,7 @@ function NS.MaybeShowWaypointUIRecommendationPopup(attempt)
     if type(NS.GetWaypointUIPromptVersion) == "function" and NS.GetWaypointUIPromptVersion() == NS.VERSION then
         return
     end
-    if StaticPopup_Visible(WAYPOINT_UI_RECOMMEND_POPUP) then
+    if NS.Internal.Dialogs.Visible(WAYPOINT_UI_RECOMMEND_POPUP) then
         return
     end
     if ShouldDeferStartupPopup(WAYPOINT_UI_RECOMMEND_POPUP) then
@@ -242,7 +230,7 @@ function NS.MaybeShowWaypointUIRecommendationPopup(attempt)
     end
 
     EnsureWaypointUIRecommendPopup()
-    local dialog = StaticPopup_Show(WAYPOINT_UI_RECOMMEND_POPUP)
+    local dialog = NS.Internal.Dialogs.Show(WAYPOINT_UI_RECOMMEND_POPUP)
     if dialog and type(NS.MarkWaypointUIPromptShown) == "function" then
         NS.MarkWaypointUIPromptShown()
     end
@@ -304,12 +292,27 @@ local function DisableZygorArrow()
     return profile.arrowshow == false
 end
 
-local function EnsureZygorArrowRecommendPopup()
-    if StaticPopupDialogs[ZYGOR_ARROW_RECOMMEND_POPUP] then
+
+
+function NS.MaybeAnnounceZygorArrowRecommendation(attempt)
+    if IsZygorArrowProfilePending() then
+        RetryStartupPopup(NS.MaybeAnnounceZygorArrowRecommendation, attempt)
+        return
+    end
+    if not IsZygorArrowRecommendationRelevant() then
         return
     end
 
-    StaticPopupDialogs[ZYGOR_ARROW_RECOMMEND_POPUP] = {
+    NS.Msg("Zygor's Waypoint Arrow is enabled. To avoid duplicate arrows, open /zygor options > Waypoint Arrow and turn off Enable Waypoint Arrow.")
+end
+
+NS.MaybeShowZygorArrowRecommendationPopup = Notices.RegisterArrow(ZYGOR_ARROW_RECOMMEND_POPUP, {
+    check = function()
+        if IsZygorArrowProfilePending() then return false, true end
+        return IsZygorArrowRecommendationRelevant()
+            and not (type(NS.HasSeenZygorArrowPrompt) == "function" and NS.HasSeenZygorArrowPrompt())
+    end,
+    dialog = {
         text = table.concat({
             "Zygor's Waypoint Arrow is enabled.",
             "",
@@ -331,46 +334,76 @@ local function EnsureZygorArrowRecommendPopup()
                 NS.Msg("Unable to disable Zygor Waypoint Arrow:", tostring(reason or "unknown error"))
             end
         end,
-    }
+    },
+    onShown = function() if type(NS.MarkZygorArrowPromptShown) == "function" then NS.MarkZygorArrowPromptShown() end end,
+})
+
+-- ============================================================
+-- Dugi arrow and Zygor conflict checks
+-- ============================================================
+
+local function GetDugiArrowSetting()
+    local dugi = rawget(_G, "DugisGuideViewer")
+    local key = rawget(_G, "DGV_DUGIARROW") or 7
+    if type(dugi) ~= "table" or type(dugi.UserSetting) ~= "function" then return dugi, key, nil end
+    local ok, enabled = pcall(dugi.UserSetting, dugi, key)
+    if not ok then return dugi, key, nil end
+    local tomTomKey = rawget(_G, "DGV_TOMTOMARROW") or 11
+    local carboniteKey = rawget(_G, "DGV_CARBONITEARROW") or 10
+    local _, useTomTom = pcall(dugi.UserSetting, dugi, tomTomKey)
+    local _, useCarbonite = pcall(dugi.UserSetting, dugi, carboniteKey)
+    return dugi, key, enabled and not useTomTom and not useCarbonite or false
 end
 
-function NS.MaybeAnnounceZygorArrowRecommendation(attempt)
-    if IsZygorArrowProfilePending() then
-        RetryStartupPopup(NS.MaybeAnnounceZygorArrowRecommendation, attempt)
-        return
+local function DisableDugiArrow()
+    local dugi, key = GetDugiArrowSetting()
+    if type(dugi) ~= "table" then return false, "Dugi is not ready." end
+    if type(InCombatLockdown) == "function" and InCombatLockdown() then
+        return false, "Cannot change Dugi's arrow while in combat."
     end
-    if not IsZygorArrowRecommendationRelevant() then
-        return
+    local checkbox = rawget(_G, "DGV.ChkBox" .. tostring(key))
+    if checkbox and type(checkbox.SetChecked) == "function" and type(dugi.SettingFrameChkOnClick) == "function" then
+        checkbox:SetChecked(false)
+        pcall(dugi.SettingFrameChkOnClick, dugi, checkbox)
+    elseif type(dugi.SetDB) == "function" then
+        pcall(dugi.SetDB, dugi, false, key)
     end
-
-    NS.Msg("Zygor's Waypoint Arrow is enabled. To avoid duplicate arrows, open /zygor options > Waypoint Arrow and turn off Enable Waypoint Arrow.")
+    local frame = rawget(_G, "DugisArrowFrame")
+    if frame and type(frame.Hide) == "function" then frame:Hide() end
+    local _, _, enabled = GetDugiArrowSetting()
+    if enabled == false then return true end
+    return false, "Dugi did not accept the setting change."
 end
 
-function NS.MaybeShowZygorArrowRecommendationPopup(attempt)
-    if IsZygorArrowProfilePending() then
-        RetryStartupPopup(NS.MaybeShowZygorArrowRecommendationPopup, attempt)
-        return
-    end
-    if not IsZygorArrowRecommendationRelevant() then
-        return
-    end
-    if type(NS.HasSeenZygorArrowPrompt) == "function" and NS.HasSeenZygorArrowPrompt() then
-        return
-    end
-    if StaticPopup_Visible(ZYGOR_ARROW_RECOMMEND_POPUP) then
-        return
-    end
-    if ShouldDeferStartupPopup(ZYGOR_ARROW_RECOMMEND_POPUP) then
-        RetryStartupPopup(NS.MaybeShowZygorArrowRecommendationPopup, attempt)
-        return
-    end
 
-    EnsureZygorArrowRecommendPopup()
-    local dialog = StaticPopup_Show(ZYGOR_ARROW_RECOMMEND_POPUP)
-    if dialog and type(NS.MarkZygorArrowPromptShown) == "function" then
-        NS.MarkZygorArrowPromptShown()
-    end
-end
+
+NS.MaybeShowDugiArrowRecommendationPopup = Notices.RegisterArrow(DUGI_ARROW_RECOMMEND_POPUP, {
+    check = function()
+        if not NS.IsDugiLoaded() or not NS.IsRoutingEnabled() then return false end
+        local _, _, enabled = GetDugiArrowSetting()
+        if enabled == nil then return false, true end
+        return enabled and not (type(NS.HasSeenDugiArrowPrompt) == "function" and NS.HasSeenDugiArrowPrompt())
+    end,
+    dialog = {
+        text = table.concat({
+            "Dugi's Waypoint Arrow is enabled.", "",
+            "AzerothWaypoint provides the active route arrow and 3D overlay. Running both arrows can be confusing.", "",
+            "AWP will change Dugi's setting only if you choose the disable option below.",
+        }, "\n"),
+        button1 = "Turn Off Dugi Arrow",
+        button2 = "Keep Enabled",
+        timeout = 0,
+        whileDead = 1,
+        hideOnEscape = 1,
+        preferredIndex = GetStaticPopupPreferredIndex(),
+        OnAccept = function()
+            local ok, reason = DisableDugiArrow()
+            if ok then NS.Msg("Dugi Waypoint Arrow disabled.")
+            else NS.Msg("Unable to disable Dugi Waypoint Arrow:", tostring(reason or "unknown error")) end
+        end,
+    },
+    onShown = function() if type(NS.MarkDugiArrowPromptShown) == "function" then NS.MarkDugiArrowPromptShown() end end,
+})
 
 local function IsZygorWaypointConflictActive()
     return type(rawget(_G, "ZygorWaypointNS")) == "table"
@@ -415,12 +448,12 @@ function NS.MaybeShowZygorWaypointConflictPopup()
     if not IsZygorWaypointConflictActive() then
         return
     end
-    if StaticPopup_Visible(ZYGOR_CONFLICT_POPUP) then
+    if NS.Internal.Dialogs.Visible(ZYGOR_CONFLICT_POPUP) then
         return
     end
 
     EnsureZygorConflictPopup()
-    StaticPopup_Show(ZYGOR_CONFLICT_POPUP)
+    NS.Internal.Dialogs.Show(ZYGOR_CONFLICT_POPUP)
 end
 
 function NS.StartZygorWaypointConflictReminders()
@@ -482,6 +515,10 @@ local function CreateSkinOptions()
     return container:GetData()
 end
 
+-- ============================================================
+-- Guide viewer controls and tracker notices
+-- ============================================================
+
 local function CreateGuideStepBackgroundHoverOptions()
     local container = CreateControlTextContainer()
     container:Add(C.GUIDE_STEP_BACKGROUND_MODE_BG, "Hide Step Backgrounds")
@@ -493,27 +530,31 @@ end
 local nativeTrackerWarningHandledThisSession = false
 
 local function GetTrackerViewerHostObjects()
-    local shared = NS.Internal and NS.Internal.ZygorTrackerViewer
-    return shared and shared.TrackerHost, shared and shared.TrackerModule
+    local shared = NS.Internal and NS.Internal.GuideTrackerViewer
+    return shared and shared.Host
 end
 
 local function IsNativeTrackerWarningRelevant()
     if nativeTrackerWarningHandledThisSession then return false end
 
-    local settings = type(NS.GetZygorTrackerViewerSettings) == "function"
-        and NS.GetZygorTrackerViewerSettings()
+    local settings = type(NS.GetGuideTrackerViewerSettings) == "function"
+        and NS.GetGuideTrackerViewerSettings()
         or nil
-    if not settings or settings.enabled ~= true or settings.nativeDockWarningPopup == false then
+    if not settings or settings.nativeDockWarningPopup == false then
         return false
     end
 
-    local host, trackerModule = GetTrackerViewerHostObjects()
-    if not host or type(host.IsKTLoaded) ~= "function" or host.IsKTLoaded() then
+    local host = GetTrackerViewerHostObjects()
+    if not host or type(host.IsBlizzardHost) ~= "function" or not host.IsBlizzardHost() then
         return false
     end
-    return trackerModule
-        and type(trackerModule.IsAttached) == "function"
-        and trackerModule.IsAttached() == true
+    local providers = type(NS.GetGuideTrackerViewerProviders) == "function" and NS.GetGuideTrackerViewerProviders() or {}
+    for index = 1, #providers do
+        local provider = type(NS.GetGuideTrackerViewerProvider) == "function"
+            and NS.GetGuideTrackerViewerProvider(providers[index]) or nil
+        if provider and type(provider.isAttached) == "function" and provider.isAttached() then return true end
+    end
+    return false
 end
 
 local function EnsureNativeTrackerWarningPopup()
@@ -527,7 +568,7 @@ local function EnsureNativeTrackerWarningPopup()
             "",
             "This path is experimental because the modern Blizzard shared Objective Tracker can carry addon taint into the World Map. It may produce protected-action or secret-value errors, may stop working after a future WoW patch, and may eventually be removed from AWP.",
             "",
-            "The combat quest-click proxy prevents one direct error path, but it does not make native docking taint-free. When it is available for the current client, Kaliel's Tracker is recommended and avoids this specific Blizzard boundary.",
+            "Use any supported custom tracker to avoid this docking path. See Tracker Viewer in AWP Help for the list.",
         }, "\n"),
         button1 = "Okay, remind me later",
         button2 = "Don't remind me again",
@@ -538,8 +579,8 @@ local function EnsureNativeTrackerWarningPopup()
         preferredIndex = GetStaticPopupPreferredIndex(),
         OnCancel = function(_, _, reason)
             if reason ~= "clicked" then return end
-            if type(NS.SetZygorTrackerViewerSetting) == "function" then
-                NS.SetZygorTrackerViewerSetting("nativeDockWarningPopup", false)
+            if type(NS.SetGuideTrackerViewerSetting) == "function" then
+                NS.SetGuideTrackerViewerSetting("nativeDockWarningPopup", false)
             end
             if type(NS.Msg) == "function" then
                 NS.Msg("Blizzard native Tracker Viewer popup disabled. It can be restored in Zygor > Tracker Viewer settings.")
@@ -550,7 +591,7 @@ end
 
 function NS.MaybeShowNativeTrackerWarningPopup(attempt)
     if not IsNativeTrackerWarningRelevant() then return false end
-    if StaticPopup_Visible(NATIVE_TRACKER_WARNING_POPUP) then
+    if NS.Internal.Dialogs.Visible(NATIVE_TRACKER_WARNING_POPUP) then
         nativeTrackerWarningHandledThisSession = true
         return true
     end
@@ -559,7 +600,7 @@ function NS.MaybeShowNativeTrackerWarningPopup(attempt)
     end
 
     EnsureNativeTrackerWarningPopup()
-    local dialog = StaticPopup_Show(NATIVE_TRACKER_WARNING_POPUP)
+    local dialog = NS.Internal.Dialogs.Show(NATIVE_TRACKER_WARNING_POPUP)
     if dialog then
         nativeTrackerWarningHandledThisSession = true
         return true
@@ -567,7 +608,7 @@ function NS.MaybeShowNativeTrackerWarningPopup(attempt)
     return RetryStartupPopup(NS.MaybeShowNativeTrackerWarningPopup, attempt)
 end
 
-local function CreateZygorTrackerViewerProgressStyleOptions()
+local function CreateGuideTrackerViewerProgressStyleOptions()
     local container = CreateControlTextContainer()
     container:Add("square", "Square")
     container:Add("rounded", "Rounded")
@@ -575,7 +616,7 @@ local function CreateZygorTrackerViewerProgressStyleOptions()
     return container:GetData()
 end
 
-local function CreateZygorStepChatStickySummaryOptions()
+local function CreateGuideStepChatStickySummaryOptions()
     local container = CreateControlTextContainer()
     container:Add(C.ZYGOR_STEP_CHAT_STICKY_NONE, "Disabled")
     container:Add(C.ZYGOR_STEP_CHAT_STICKY_COUNT, "Count Only")
@@ -583,10 +624,11 @@ local function CreateZygorStepChatStickySummaryOptions()
     return container:GetData()
 end
 
+-- ============================================================
+-- Routing and display choices
+-- ============================================================
+
 local function CreateRoutingBackendOptions()
-    local zygorAddonName = type(NS.GetZygorAddonName) == "function"
-        and NS.GetZygorAddonName()
-        or "ZygorGuidesViewer"
     local function getAddOnInfo(name)
         if type(name) ~= "string" or name == "" then
             return nil
@@ -732,37 +774,15 @@ local function CreateRoutingBackendOptions()
         }
     end
 
-    return {
-        makeBackendOption("direct", "TomTom Direct"),
-        makeBackendOption("zygor", "Zygor", "RoutingBackend_Zygor", { zygorAddonName }, {
-            not_installed = "Install Zygor Guides Viewer to use Zygor's LibRover routing.",
-            disabled = "Enable Zygor Guides Viewer for this character to use Zygor's LibRover routing.",
-            not_loaded = "Load Zygor Guides Viewer to use Zygor's LibRover routing.",
-            unavailable = "Zygor Guides Viewer is installed but LibRover is not available right now.",
-        }),
-        makeBackendOption("farstrider", "FarstriderLib", "RoutingBackend_Farstrider",
-            { "FarstriderLib", "FarstriderLibData" }, {
-                not_installed = "Install FarstriderLib and FarstriderLibData to use Farstrider routing.",
-                partly_installed = function(names)
-                    return "Install missing Farstrider dependency: " .. table.concat(names, ", ") .. "."
-                end,
-                disabled = "Enable FarstriderLib and FarstriderLibData for this character to use Farstrider routing.",
-                partly_disabled = function(names)
-                    return "Enable Farstrider dependency for this character: " .. table.concat(names, ", ") .. "."
-                end,
-                not_loaded = "Load FarstriderLib and FarstriderLibData to use Farstrider routing.",
-                partly_loaded = function(names)
-                    return "Load Farstrider dependency: " .. table.concat(names, ", ") .. "."
-                end,
-                unavailable = "FarstriderLib and FarstriderLibData are loaded, but Farstrider's routing API is not available right now.",
-            }),
-        makeBackendOption("mapzeroth", "Mapzeroth", "RoutingBackend_Mapzeroth", { "Mapzeroth" }, {
-            not_installed = "Install Mapzeroth to use Mapzeroth routing.",
-            disabled = "Enable Mapzeroth for this character to use Mapzeroth routing.",
-            not_loaded = "Load Mapzeroth to use Mapzeroth routing.",
-            unavailable = "Mapzeroth is loaded but its routing API is not available right now.",
-        }),
-    }
+    local catalog = NS.Internal.RoutingBackends
+    local options = { makeBackendOption("direct", catalog.Label("direct")) }
+    for _, entry in ipairs(catalog.entries) do
+        if entry.id ~= "direct" and catalog.SupportsClient(entry) then
+            options[#options + 1] = makeBackendOption(entry.id, entry.label, entry.objectKey,
+                catalog.GetAddons(entry), entry.reasons)
+        end
+    end
+    return options
 end
 
 local function CreateCombatHideModeOptions()
@@ -873,11 +893,17 @@ end
 
 local function CreateWorldOverlayPlaqueTypeOptions()
     local container = CreateControlTextContainer()
-    container:Add(C.WORLD_OVERLAY_PLAQUE_DEFAULT, "Default")
+    container:Add(C.WORLD_OVERLAY_PLAQUE_FANTASY, "Fantasy")
+    container:Add(C.WORLD_OVERLAY_PLAQUE_MINIMAL, "Minimal")
+    container:Add(C.WORLD_OVERLAY_PLAQUE_FOREVER, "Forever")
+    container:Add(C.WORLD_OVERLAY_PLAQUE_BLIZZARD, "Blizzard")
+    container:Add(C.WORLD_OVERLAY_PLAQUE_CLASSIC, "Classic")
+    container:Add(C.WORLD_OVERLAY_PLAQUE_CLEAN, "Clean")
+    container:Add(C.WORLD_OVERLAY_PLAQUE_MODERN, "Modern")
     container:Add(C.WORLD_OVERLAY_PLAQUE_GLOWING_GEMS, "Glowing Gems")
     container:Add(C.WORLD_OVERLAY_PLAQUE_HORDE, "Horde")
     container:Add(C.WORLD_OVERLAY_PLAQUE_ALLIANCE, "Alliance")
-    container:Add(C.WORLD_OVERLAY_PLAQUE_MODERN, "Modern")
+    container:Add(C.WORLD_OVERLAY_PLAQUE_FUTURE, "Future")
     container:Add(C.WORLD_OVERLAY_PLAQUE_STEAMPUNK, "Steampunk")
     return container:GetData()
 end
@@ -923,8 +949,8 @@ M.ApplySkinAndScale = ApplySkinAndScale
 M.RefreshViewerChromeMode = RefreshViewerChromeMode
 M.CreateSkinOptions = CreateSkinOptions
 M.CreateGuideStepBackgroundHoverOptions = CreateGuideStepBackgroundHoverOptions
-M.CreateZygorTrackerViewerProgressStyleOptions = CreateZygorTrackerViewerProgressStyleOptions
-M.CreateZygorStepChatStickySummaryOptions = CreateZygorStepChatStickySummaryOptions
+M.CreateGuideTrackerViewerProgressStyleOptions = CreateGuideTrackerViewerProgressStyleOptions
+M.CreateGuideStepChatStickySummaryOptions = CreateGuideStepChatStickySummaryOptions
 M.CreateRoutingBackendOptions = CreateRoutingBackendOptions
 M.CreateCombatHideModeOptions = CreateCombatHideModeOptions
 M.CreateStartupHelpModeOptions = CreateStartupHelpModeOptions
@@ -933,6 +959,11 @@ M.CreateFlightMapAutoTakeModeOptions = CreateFlightMapAutoTakeModeOptions
 M.CreateFlightMapCatalogSideOptions = CreateFlightMapCatalogSideOptions
 M.CreateWorldOverlayInfoOptions = CreateWorldOverlayInfoOptions
 M.CreateWorldOverlayColorModeOptions = CreateWorldOverlayColorModeOptions
+function M.CreateGuideTrackerViewerColorModeOptions()
+    local options = CreateWorldOverlayColorModeOptions()
+    table.insert(options, 2, {value="theme", text="UI colors"})
+    return options
+end
 M.CreateWorldOverlayContextDisplayOptions = CreateWorldOverlayContextDisplayOptions
 M.CreateWorldOverlayBeaconStyleOptions = CreateWorldOverlayBeaconStyleOptions
 M.CreateWorldOverlayPlaqueTypeOptions = CreateWorldOverlayPlaqueTypeOptions

@@ -1,53 +1,28 @@
+-- ============================================================
+-- Flight time sources
+-- ============================================================
+--
+-- Looks up recorded or estimated taxi times for destinations in the current
+-- flight window. Reuse both recorded times and misses while the taxi-window
+-- snapshot is current. A new snapshot clears those lookups.
+
 local NS = _G.AzerothWaypointNS
 local state = NS.State
+local TaxiWindow = NS.Internal.TaxiWindow
 
 state.flightMapTimes = state.flightMapTimes or {}
 
 local times = state.flightMapTimes
+local isForever = NS.IsWoWForever()
+local ELLESMERE_BASE_SPEED = 30.4
+local ADVENTURE_LEGACY_TREE_ID = 1188
+local FREQUENT_FLIER_NODE_ID = 110300
 
-local function GetOpenFlightMapFrame()
-    local frame = rawget(_G, "FlightMapFrame")
-    if type(frame) ~= "table" then
-        return nil
+local function PositiveNumber(value)
+    if type(value) == "number" and not (issecretvalue and issecretvalue(value))
+        and value > 0 and value < math.huge then
+        return value
     end
-    if type(frame.IsShown) == "function" and not frame:IsShown() then
-        return nil
-    end
-    return frame
-end
-
-local function GetFlightMapCanvas(frame)
-    if frame and type(frame.GetMap) == "function" then
-        local ok, map = pcall(frame.GetMap, frame)
-        if ok and type(map) == "table" then
-            return map
-        end
-    end
-    return frame
-end
-
-local function GetDisplayedTaxiMapID(frame)
-    frame = frame or GetOpenFlightMapFrame()
-    if frame and type(frame.GetMapID) == "function" then
-        local ok, mapID = pcall(frame.GetMapID, frame)
-        if ok and type(mapID) == "number" then
-            return mapID
-        end
-    end
-    local map = GetFlightMapCanvas(frame)
-    if map ~= frame and map and type(map.GetMapID) == "function" then
-        local ok, mapID = pcall(map.GetMapID, map)
-        if ok and type(mapID) == "number" then
-            return mapID
-        end
-    end
-    if type(GetTaxiMapID) == "function" then
-        local ok, mapID = pcall(GetTaxiMapID)
-        if ok and type(mapID) == "number" then
-            return mapID
-        end
-    end
-    return nil
 end
 
 local function GetInFlight()
@@ -101,153 +76,30 @@ local function GetDestinationTable(addon, sourceNodeID)
 end
 
 local function ApplyInFlightFactor(addon, seconds, destinationNodeID)
-    seconds = tonumber(seconds)
-    if not seconds or seconds <= 0 then
-        return nil
-    end
-    local speedFactor = type(addon) == "table" and addon.SpeedFactor or nil
-    if type(speedFactor) ~= "function" then return nil end
-    local ok, factor = pcall(speedFactor, addon, destinationNodeID)
-    if not ok or type(factor) ~= "number" or factor <= 0 then return nil end
-    return seconds * factor
+    seconds = PositiveNumber(tonumber(seconds))
+    if not seconds or type(addon.SpeedFactor) ~= "function" then return nil end
+    local ok, value = pcall(addon.SpeedFactor, addon, destinationNodeID)
+    local factor = ok and PositiveNumber(value)
+    return factor and PositiveNumber(seconds * factor) or nil
 end
 
-local function LookupInFlightDirect(sourceNodeID, destinationNodeID)
-    local addon = GetInFlight()
-    if not addon then
-        return nil
-    end
-
-    sourceNodeID = tonumber(sourceNodeID)
-    destinationNodeID = tonumber(destinationNodeID)
-    if not sourceNodeID or not destinationNodeID then
-        return nil
-    end
-
+local function LookupInFlightDirect(addon, sourceNodeID, destinationNodeID)
     local destinationTable = GetDestinationTable(addon, sourceNodeID)
     local seconds = ReadIndexed(destinationTable, destinationNodeID)
     return ApplyInFlightFactor(addon, seconds, destinationNodeID)
 end
 
-local function BuildTaxiSlotNodeLookup()
-    local mapID = GetDisplayedTaxiMapID()
-    if type(mapID) ~= "number" or type(C_TaxiMap) ~= "table" or type(C_TaxiMap.GetAllTaxiNodes) ~= "function" then
-        return {}
-    end
-    if times.slotNodeLookupMapID == mapID and type(times.slotNodeLookup) == "table" then
-        return times.slotNodeLookup
-    end
+-- ============================================================
+-- Taxi node and slot timing
+-- ============================================================
 
-    local ok, nodes = pcall(C_TaxiMap.GetAllTaxiNodes, mapID)
-    if not ok or type(nodes) ~= "table" then
-        return {}
-    end
-
-    local bySlot = {}
-    for index = 1, #nodes do
-        local node = nodes[index]
-        local slotIndex = type(node) == "table" and tonumber(node.slotIndex) or nil
-        local nodeID = type(node) == "table" and tonumber(node.nodeID) or nil
-        if slotIndex and nodeID then
-            bySlot[slotIndex] = nodeID
-        end
-    end
-    times.slotNodeLookupMapID = mapID
-    times.slotNodeLookup = bySlot
-    return bySlot
+local function GetNodeIDForSlot(window, slotIndex)
+    local node = window.bySlot[tonumber(slotIndex)]
+    return node and node.nodeID
 end
 
-local function GetNodeIDForSlot(slotIndex)
-    slotIndex = tonumber(slotIndex)
-    if not slotIndex then
-        return nil
-    end
-    local lookup = BuildTaxiSlotNodeLookup()
-    return lookup[slotIndex]
-end
-
-local function IsCurrentTaxiState(value)
-    if value == nil then
-        return false
-    end
-    if type(Enum) == "table" and type(Enum.FlightPathState) == "table" then
-        local current = Enum.FlightPathState.Current
-        if current ~= nil and value == current then
-            return true
-        end
-    end
-    return type(value) == "string" and value:lower() == "current"
-end
-
-local function FindSourceNodeID()
-    local mapID = GetDisplayedTaxiMapID()
-    if times.sourceNodeMapID == mapID and times.sourceNodeID ~= nil then
-        return times.sourceNodeID ~= false and times.sourceNodeID or nil
-    end
-
-    local function remember(nodeID)
-        times.sourceNodeMapID = mapID
-        times.sourceNodeID = nodeID or false
-        return nodeID
-    end
-
-    if type(NumTaxiNodes) == "function" and type(TaxiNodeGetType) == "function" then
-        local ok, count = pcall(NumTaxiNodes)
-        count = ok and tonumber(count) or 0
-        for slotIndex = 1, count do
-            local typeOk, nodeType = pcall(TaxiNodeGetType, slotIndex)
-            if typeOk and nodeType == "CURRENT" then
-                local nodeID = GetNodeIDForSlot(slotIndex)
-                if nodeID then
-                    return remember(nodeID)
-                end
-            end
-        end
-    end
-
-    if type(mapID) ~= "number" or type(C_TaxiMap) ~= "table" or type(C_TaxiMap.GetAllTaxiNodes) ~= "function" then
-        return remember(nil)
-    end
-    local ok, nodes = pcall(C_TaxiMap.GetAllTaxiNodes, mapID)
-    if not ok or type(nodes) ~= "table" then
-        return remember(nil)
-    end
-    for index = 1, #nodes do
-        local node = nodes[index]
-        if type(node) == "table" and IsCurrentTaxiState(node.state) then
-            return remember(tonumber(node.nodeID))
-        end
-    end
-    return remember(nil)
-end
-
-local function BuildRouteNodePath(slotIndex, sourceNodeID, destinationNodeID)
-    if type(GetNumRoutes) ~= "function" or type(TaxiGetNodeSlot) ~= "function" then
-        return nil
-    end
-
-    local ok, numRoutes = pcall(GetNumRoutes, slotIndex)
-    numRoutes = ok and tonumber(numRoutes) or 0
-    if numRoutes < 2 then
-        return nil
-    end
-
-    local path = { sourceNodeID }
-    for hop = 2, numRoutes do
-        local hopOk, hopSlot = pcall(TaxiGetNodeSlot, slotIndex, hop, true)
-        local hopNodeID = hopOk and GetNodeIDForSlot(hopSlot) or nil
-        if not hopNodeID then
-            return nil
-        end
-        path[#path + 1] = hopNodeID
-    end
-    path[#path + 1] = destinationNodeID
-    return path
-end
-
-local function EstimateInFlightTime(slotIndex, sourceNodeID, destinationNodeID)
-    local path = BuildRouteNodePath(slotIndex, sourceNodeID, destinationNodeID)
-    if type(path) ~= "table" or #path < 3 then
+local function EstimateInFlightTime(addon, path)
+    if not path or #path < 3 then
         return nil
     end
 
@@ -256,10 +108,10 @@ local function EstimateInFlightTime(slotIndex, sourceNodeID, destinationNodeID)
         local base = best[sourceIndex]
         if base then
             for destinationIndex = sourceIndex + 1, #path do
-                local segment = LookupInFlightDirect(path[sourceIndex], path[destinationIndex])
+                local segment = LookupInFlightDirect(addon, path[sourceIndex], path[destinationIndex])
                 if segment then
-                    local total = base + segment
-                    if not best[destinationIndex] or total < best[destinationIndex] then
+                    local total = PositiveNumber(base + segment)
+                    if total and (not best[destinationIndex] or total < best[destinationIndex]) then
                         best[destinationIndex] = total
                     end
                 end
@@ -270,75 +122,153 @@ local function EstimateInFlightTime(slotIndex, sourceNodeID, destinationNodeID)
     return best[#path]
 end
 
-local function ClearCache()
-    times.cache = {}
-    times.slotNodeLookupMapID = nil
-    times.slotNodeLookup = nil
-    times.sourceNodeMapID = nil
-    times.sourceNodeID = nil
+local function GetDaylightRecordedTime(addon, sourceNodeID, destinationNodeID)
+    if type(addon) ~= "table" then return nil end
+    local db = rawget(_G, "DaylightUIDB")
+    local recorded = type(db) == "table" and db.flightTimes
+    if type(recorded) == "table" then
+        return PositiveNumber(recorded[sourceNodeID .. ">" .. destinationNodeID])
+    end
 end
 
-local function BuildCacheKey(sourceNodeID, destinationNodeID, slotIndex)
-    return table.concat({
-        tostring(GetDisplayedTaxiMapID() or "-"),
-        tostring(sourceNodeID or "-"),
-        tostring(destinationNodeID or "-"),
-        tostring(slotIndex or "-"),
-    }, ":")
+local function GetDaylightGuess(addon)
+    if type(addon) ~= "table" or type(addon.GetModule) ~= "function" then return nil end
+    local ok, module = pcall(addon.GetModule, addon, "QoL")
+    local namespace = ok and type(module) == "table" and module.ns
+    local flight = type(namespace) == "table" and namespace.Flight
+    return type(flight) == "table" and type(flight.Guess) == "function" and flight.Guess or nil
+end
+
+local function EstimateDaylightTime(guess, path)
+    local hops = {}
+    for index = 1, #path - 1 do
+        hops[index] = { path[index], path[index + 1] }
+    end
+    -- Supplying hops uses Daylight's bundled data without reading its live map state.
+    local ok, seconds = pcall(guess, nil, nil, hops)
+    return ok and PositiveNumber(seconds) or nil
+end
+
+local function GetEllesmereFlightData()
+    local addon = rawget(_G, "EllesmereUI")
+    if type(addon) ~= "table" then return nil end
+    local timer, routes = addon._FlightTimer, addon._FlightTimerRoutes
+    if type(timer) == "table" and type(timer.Get) == "function" and type(routes) == "table" then
+        return routes, timer.Get
+    end
+end
+
+local function GetFrequentFlierMultiplier()
+    if not C_Traits or not C_Traits.GetConfigIDByTreeID or not C_Traits.GetNodeInfo then return 1 end
+    local configID = PositiveNumber(C_Traits.GetConfigIDByTreeID(ADVENTURE_LEGACY_TREE_ID))
+    local node = configID and C_Traits.GetNodeInfo(configID, FREQUENT_FLIER_NODE_ID)
+    return node and PositiveNumber(node.activeRank) and 1.2 or 1
+end
+
+local function ReadEllesmereSpeed(getSetting)
+    local ok, value = pcall(getSetting, "speed")
+    if not ok then return nil end
+    local baseSpeed = PositiveNumber(value == nil and ELLESMERE_BASE_SPEED or value)
+    return baseSpeed and PositiveNumber(baseSpeed * GetFrequentFlierMultiplier()) or nil
+end
+
+-- ============================================================
+-- Travel time estimates
+-- ============================================================
+
+local function EstimateEllesmereTime(routes, getSetting, path)
+    local yards = 0
+    for index = 1, #path - 1 do
+        local length = PositiveNumber(routes[path[index] * 10000 + path[index + 1]])
+        if not length then return nil end
+        yards = yards + length
+    end
+    local speed = times.ellesmereSpeed
+    if speed == nil then
+        speed = ReadEllesmereSpeed(getSetting) or false
+        times.ellesmereSpeed = speed
+    end
+    return speed and PositiveNumber(yards / speed) or nil
+end
+
+local function ResolveTaxiTime(window, slotIndex, sourceNodeID, destinationNodeID)
+    local inFlight = GetInFlight()
+    local path, seconds
+    if inFlight then
+        seconds = LookupInFlightDirect(inFlight, sourceNodeID, destinationNodeID)
+        if seconds then return seconds, "InFlight", false end
+
+        path = slotIndex and TaxiWindow.GetRouteNodePath(window, slotIndex, destinationNodeID)
+        seconds = EstimateInFlightTime(inFlight, path)
+        if seconds then return seconds, "InFlight", true end
+    end
+    if not isForever then return nil end
+
+    local daylight = rawget(_G, "DaylightUI")
+    seconds = GetDaylightRecordedTime(daylight, sourceNodeID, destinationNodeID)
+    if seconds then return seconds, "DaylightUI", false end
+    if not slotIndex then return nil end
+
+    local daylightGuess = GetDaylightGuess(daylight)
+    local farstrider = NS.RoutingBackend_Farstrider
+    local hasFarstriderTimes = farstrider and farstrider.HasTaxiTimes and farstrider.HasTaxiTimes()
+    local routes, getSetting = GetEllesmereFlightData()
+    if not (daylightGuess or hasFarstriderTimes or routes) then return nil end
+    if not inFlight then path = TaxiWindow.GetRouteNodePath(window, slotIndex, destinationNodeID) end
+    if not path then return nil end
+
+    if daylightGuess then
+        seconds = EstimateDaylightTime(daylightGuess, path)
+        if seconds then return seconds, "DaylightUI", true end
+    end
+    if hasFarstriderTimes and farstrider then
+        seconds = farstrider.GetTaxiTime(path)
+        if seconds then return seconds, "FarstriderLib", true end
+    end
+    if routes and getSetting then
+        seconds = EstimateEllesmereTime(routes, getSetting, path)
+        if seconds then return seconds, "EllesmereUI", true end
+    end
 end
 
 function NS.GetFlightMapTaxiTime(slotIndex, destinationNodeID)
-    if not GetInFlight() then
-        return nil
-    end
+    local window = TaxiWindow.GetSnapshot()
+    if not window then return nil end
+    if times.window ~= window then times.window, times.cache, times.ellesmereSpeed = window, {}, nil end
 
     slotIndex = tonumber(slotIndex)
-    destinationNodeID = tonumber(destinationNodeID) or GetNodeIDForSlot(slotIndex)
-    if not destinationNodeID then
+    local slotNodeID = slotIndex and GetNodeIDForSlot(window, slotIndex)
+    destinationNodeID = tonumber(destinationNodeID) or slotNodeID
+    if not destinationNodeID or (slotNodeID and slotNodeID ~= destinationNodeID) then
         return nil
     end
 
-    local sourceNodeID = FindSourceNodeID()
+    local sourceNodeID = window.sourceNodeID
     if not sourceNodeID or sourceNodeID == destinationNodeID then
         return nil
     end
 
-    times.cache = times.cache or {}
-    local cacheKey = BuildCacheKey(sourceNodeID, destinationNodeID, slotIndex)
+    local cacheKey = tostring(destinationNodeID) .. ":" .. tostring(slotIndex)
     local cached = times.cache[cacheKey]
     if cached ~= nil then
         return cached ~= false and cached or nil
     end
 
-    local direct = LookupInFlightDirect(sourceNodeID, destinationNodeID)
-    if direct then
-        local result = {
-            seconds = math.floor(direct + 0.5),
-            estimated = false,
-            provider = "InFlight",
-            sourceNodeID = sourceNodeID,
-            destinationNodeID = destinationNodeID,
-        }
-        times.cache[cacheKey] = result
-        return result
-    end
-
-    local estimate = slotIndex and EstimateInFlightTime(slotIndex, sourceNodeID, destinationNodeID) or nil
-    if estimate then
-        local result = {
-            seconds = math.floor(estimate + 0.5),
-            estimated = true,
-            provider = "InFlight",
-            sourceNodeID = sourceNodeID,
-            destinationNodeID = destinationNodeID,
-        }
-        times.cache[cacheKey] = result
-        return result
-    end
-
-    times.cache[cacheKey] = false
-    return nil
+    local seconds, provider, estimated = ResolveTaxiTime(window, slotIndex, sourceNodeID, destinationNodeID)
+    local result = seconds and {
+        seconds = math.max(1, math.floor(seconds + 0.5)),
+        estimated = estimated,
+        provider = provider,
+        sourceNodeID = sourceNodeID,
+        destinationNodeID = destinationNodeID,
+    }
+    times.cache[cacheKey] = result or false
+    return result
 end
+
+-- ============================================================
+-- Formatting and window lifetime
+-- ============================================================
 
 function NS.FormatFlightMapTaxiTime(info)
     if type(info) ~= "table" then
@@ -363,49 +293,10 @@ function NS.FormatFlightMapTaxiTime(info)
     return string.format("%s%ds", prefix, seconds)
 end
 
-local function HookFlightMapFrame()
-    if times.frameHooked then
-        return
-    end
-    local frame = rawget(_G, "FlightMapFrame")
-    if type(frame) ~= "table" then
-        return
-    end
-    if type(frame.HookScript) == "function" then
-        frame:HookScript("OnShow", function()
-            ClearCache()
-        end)
-        frame:HookScript("OnHide", function()
-            ClearCache()
-        end)
-    end
-    if type(hooksecurefunc) == "function" and type(frame.RefreshAllData) == "function" then
-        hooksecurefunc(frame, "RefreshAllData", function()
-            ClearCache()
-        end)
-    end
-    times.frameHooked = true
-end
-
 function NS.InitializeFlightMapTimes()
-    if times.initialized then
-        return
-    end
+    if times.initialized then return end
     times.initialized = true
-    ClearCache()
-
-    local frame = CreateFrame("Frame")
-    times.eventFrame = frame
-    frame:RegisterEvent("TAXIMAP_OPENED")
-    frame:RegisterEvent("TAXIMAP_CLOSED")
-    frame:SetScript("OnEvent", function(_, event)
-        if event == "TAXIMAP_OPENED" then
-            ClearCache()
-            HookFlightMapFrame()
-        elseif event == "TAXIMAP_CLOSED" then
-            ClearCache()
-        end
+    TaxiWindow.Subscribe(function(frame)
+        if not frame then times.window, times.cache, times.ellesmereSpeed = nil, nil, nil end
     end)
-
-    HookFlightMapFrame()
 end

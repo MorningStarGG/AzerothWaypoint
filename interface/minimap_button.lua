@@ -1,3 +1,10 @@
+-- ============================================================
+-- Minimap button and menu
+-- ============================================================
+--
+-- Builds the minimap menu and manages the button's tooltip, position and addon
+-- compartment entry points.
+
 local NS = _G.AzerothWaypointNS
 local state = NS.State
 
@@ -7,39 +14,6 @@ local minimapState = state.minimapButton
 local ICON = "Interface\\AddOns\\AzerothWaypoint\\media\\icon_small.png"
 local BUTTON_SIZE = 32
 local SNAP_RADIUS_ADJ = -5
-local TRANSPARENT_ALPHA = 0.05
-
-local function GetSharedZygor()
-    local internal = NS.Internal and NS.Internal.ZygorTrackerViewer
-    if type(internal) == "table" then return internal end
-    return nil
-end
-
-local function GetZygorSettings()
-    return type(NS.GetZygorTrackerViewerSettings) == "function"
-        and NS.GetZygorTrackerViewerSettings()
-        or nil
-end
-
-local function ApplyZygorTrackerSettings()
-    if type(NS.ApplyZygorTrackerViewerSettings) == "function" then
-        NS.ApplyZygorTrackerViewerSettings()
-    end
-end
-
-local function ToggleTrackerViewer()
-    local settings = GetZygorSettings()
-    if not settings or type(NS.SetZygorTrackerViewerSetting) ~= "function" then return end
-    NS.SetZygorTrackerViewerSetting("enabled", not settings.enabled)
-    ApplyZygorTrackerSettings()
-end
-
-local function ToggleHideNativeViewer()
-    local settings = GetZygorSettings()
-    if not settings or type(NS.SetZygorTrackerViewerSetting) ~= "function" then return end
-    NS.SetZygorTrackerViewerSetting("hideZygorFrame", not settings.hideZygorFrame)
-    ApplyZygorTrackerSettings()
-end
 
 local function GetMinimapSettings()
     return type(NS.GetMinimapButtonSettings) == "function"
@@ -65,108 +39,124 @@ local function OpenQueue()
     end
 end
 
-local function IsZygorAvailable()
-    local shared = GetSharedZygor()
-    return shared and type(shared.GetZygor) == "function" and shared.GetZygor() ~= nil
-end
-
 local function CreateButton(root, text, callback, enabled)
     local item = root:CreateButton(text, callback)
-    if enabled == false and item and type(item.SetEnabled) == "function" then
-        item:SetEnabled(false)
-    end
+    if item and item.SetEnabled then item:SetEnabled(enabled ~= false) end
     return item
 end
 
 local function AddDivider(root)
-    if type(root.CreateDivider) == "function" then
-        root:CreateDivider()
-    end
+    if root.CreateDivider then root:CreateDivider() end
 end
 
-local function AddZygorGuideMenu(root, anchorFrame)
-    local shared = GetSharedZygor()
-    local zygorAvailable = IsZygorAvailable()
-    local submenu = root:CreateButton("Zygor Guide")
-    if not submenu or type(submenu.CreateButton) ~= "function" then
-        if zygorAvailable and shared and type(shared.OpenZygorViewerMenu) == "function" then
-            root:CreateButton("Zygor Guide", function() shared.OpenZygorViewerMenu(anchorFrame) end)
-        end
-        return
+local guideCommands = {
+    {"Make Active", "active"}, {"Route This Step", "route"},
+    {"Next Step", "next"}, {"Previous Step", "prev"}, {"Skip Step", "skip"},
+    {"Mark Step Complete", "complete"}, {"Choose Task", "tasks"},
+    {"Return to Automatic Order", "automatic"}, {"Recheck Progress", "reload"},
+    {"Current Guide Steps", "steps"}, {"Native Guide Menu", "menu"}, {"Native Settings", "settings"},
+}
+
+local function GuideAvailable(key)
+    local provider = NS.GetGuideTrackerViewerProvider and NS.GetGuideTrackerViewerProvider(key)
+    if not provider or not provider.controls then return end
+    local available = provider.isAvailable
+    if available then
+        local ok, loaded = pcall(available)
+        if not ok or not loaded then return end
     end
+    return provider
+end
 
-    if not zygorAvailable or not shared then
-        if type(submenu.CreateTitle) == "function" then
-            submenu:CreateTitle("Zygor is not loaded")
-        else
-            local item = submenu:CreateButton("Zygor is not loaded")
-            if item and type(item.SetEnabled) == "function" then item:SetEnabled(false) end
-        end
-        return
+-- ============================================================
+-- Guide and service menus
+-- ============================================================
+
+local function AddGuideMenu(root, key, provider, anchor)
+    local common = NS.Internal.GuideTrackerViewer
+    local actions, controls = common.Actions, provider.controls
+    local function Command(label, action)
+        if type(controls[action]) ~= "function" then return end
+        local enabled = actions.GetActionState(key, action)
+        CreateButton(root, controls.menuLabels and controls.menuLabels[action] or label, function()
+            local ok, reason = actions.Run(key, action, anchor)
+            if not ok and reason then NS.Msg(reason) end
+        end, enabled)
     end
-
-    CreateButton(submenu, "Next Step", function() shared.NextZygorStep() end, type(shared.NextZygorStep) == "function")
-    CreateButton(submenu, "Previous Step", function() shared.PreviousZygorStep() end, type(shared.PreviousZygorStep) == "function")
-    CreateButton(submenu, "Skip / Force Next Step", function() shared.SkipZygorStep() end, type(shared.SkipZygorStep) == "function")
-    AddDivider(submenu)
-
-    CreateButton(submenu, "Open New Guide", function() shared.OpenZygorNewGuide() end, type(shared.OpenZygorNewGuide) == "function")
-    local openGuides = submenu:CreateButton("Currently Open Guides")
-    if openGuides and type(openGuides.CreateButton) == "function" and type(shared.AddOpenGuidesSubmenu) == "function" then
-        shared.AddOpenGuidesSubmenu(openGuides)
-    elseif type(shared.ShowGuideDropdown) == "function" then
-        submenu:CreateButton("Open Guides...", function() shared.ShowGuideDropdown(anchorFrame) end)
+    for _, entry in ipairs(guideCommands) do Command(entry[1], entry[2]) end
+    if common.Tabs.Supports(key) then common.Tabs.AddMenu(key, root, anchor)
+    else Command("Open New Guide...", "picker") end
+    AddDivider(root)
+    for _, option in ipairs({{"enabled", "Show AWP Tracker Viewer"}, {"hideNative", "Hide Native Guide Frame"}}) do
+        local field, label = option[1], option[2]
+        root:CreateCheckbox(label, function()
+            return NS.GetGuideTrackerViewerProviderSettings(key)[field] == true
+        end, function()
+            if not GuideAvailable(key) then return end
+            local settings = NS.GetGuideTrackerViewerProviderSettings(key)
+            NS.SetGuideTrackerViewerProviderSetting(key, field, not settings[field])
+            NS.ApplyGuideTrackerViewerSettings(key)
+        end)
     end
-
-    local activeTab = type(shared.GetActiveZygorGuideTab) == "function" and shared.GetActiveZygorGuideTab() or nil
-    if activeTab and type(shared.CloseZygorTab) == "function" then
-        submenu:CreateButton("Close Current Guide", function() shared.CloseZygorTab(activeTab) end)
-    end
-    AddDivider(submenu)
-
-    CreateButton(submenu, "Zygor Viewer Menu", function() shared.OpenZygorViewerMenu(anchorFrame) end, type(shared.OpenZygorViewerMenu) == "function")
-    CreateButton(submenu, "Zygor Settings", function() shared.OpenZygorSettings() end, type(shared.OpenZygorSettings) == "function")
 end
 
 function NS.ShowMinimapButtonMenu(anchorFrame)
-    local MenuUtil = rawget(_G, "MenuUtil")
-    if type(MenuUtil) ~= "table" or type(MenuUtil.CreateContextMenu) ~= "function" then
-        OpenOptions()
-        return
-    end
-
-    MenuUtil.CreateContextMenu(anchorFrame or _G.UIParent, function(_, root)
+    local util = rawget(_G, "MenuUtil")
+    if not util or not util.CreateContextMenu then OpenOptions(); return end
+    local anchor = anchorFrame or UIParent
+    local function Generate(_, root)
         root:SetTag("MENU_AWP_MINIMAP")
+        NS.Internal.MinimapMenus.HoldDrawer(root, anchor)
         root:CreateTitle("AzerothWaypoint")
-
-        local settings = GetZygorSettings() or {}
-        CreateButton(root,
-            settings.enabled and "Disable Tracker Viewer" or "Enable Tracker Viewer",
-            ToggleTrackerViewer,
-            type(NS.SetZygorTrackerViewerSetting) == "function")
-        CreateButton(root,
-            settings.hideZygorFrame and "Show Zygor's Native Frame" or "Hide Zygor's Native Frame",
-            ToggleHideNativeViewer,
-            type(NS.SetZygorTrackerViewerSetting) == "function")
-
-        AddZygorGuideMenu(root, anchorFrame)
+        local active = NS.GetActiveGuideProvider and NS.GetActiveGuideProvider()
+        local activeProvider = active and GuideAvailable(active)
+        if activeProvider then
+            local submenu = root:CreateButton("Active Guide: " .. activeProvider.displayName)
+            AddGuideMenu(submenu, active, activeProvider, anchor)
+        end
+        -- Other loaded guides follow Viewer order, including hidden Viewers.
+        for _, key in ipairs(NS.GetGuideTrackerViewerOrder and NS.GetGuideTrackerViewerOrder() or {}) do
+            if key ~= active then
+                local provider = GuideAvailable(key)
+                if provider then AddGuideMenu(root:CreateButton(provider.displayName), key, provider, anchor) end
+            end
+        end
+        local search = NS.Internal.ServiceSearch
+        local services = search and search.GetCatalog()
+        if services and #services > 0 then
+            local function AddSearchEntries(parent, entries)
+                for _, entry in ipairs(entries) do
+                    if entry.children then AddSearchEntries(parent:CreateButton(entry.label), entry.children)
+                    else
+                        local query = entry.query
+                        parent:CreateButton(entry.label, function() search.Request(query) end)
+                    end
+                end
+            end
+            AddSearchEntries(root:CreateButton("Search Nearby"), services)
+        end
         AddDivider(root)
-
+        local pad = NS.Internal.Controller
+        if pad and pad.Enabled() then
+            root:CreateButton("Navigate AWP Guides", function() pad.NavigateGuides() end)
+            root:CreateButton("Navigate Guide Action Panels", function() pad.NavigateGuides(true) end)
+        end
         root:CreateButton("Open AWP Settings", OpenOptions)
         root:CreateButton("Open Help", OpenHelp)
         root:CreateButton("Open Queue", OpenQueue)
-        root:CreateButton("Reset Minimap Button Position", function()
-            if type(NS.ResetMinimapButtonPosition) == "function" then
-                NS.ResetMinimapButtonPosition()
-            end
-        end)
-        root:CreateButton("Hide Minimap Button", function()
-            if type(NS.SetMinimapButtonEnabled) == "function" then
-                NS.SetMinimapButtonEnabled(false)
-            end
-        end)
-    end)
+        root:CreateButton("Reset Minimap Button Position", function() NS.ResetMinimapButtonPosition() end)
+        root:CreateButton("Hide Minimap Button", function() NS.SetMinimapButtonEnabled(false) end)
+    end
+    -- Keep the mouse menu beside its button when opened from a minimap drawer.
+    local menus = NS.Internal.Menus
+    local position = not menus.UsesController() and type(CreateAnchor) == "function"
+        and CreateAnchor("TOPLEFT", anchor, "TOPRIGHT") or nil
+    menus.CreateContextMenu(anchor, Generate, position)
 end
+
+-- ============================================================
+-- Tooltip and button position
+-- ============================================================
 
 local function ShowTooltip(owner)
     if not _G.GameTooltip then return end
@@ -219,8 +209,7 @@ local function SaveButtonPosition(button)
     })
 end
 
-local function OnUpdate(button)
-    if not button:IsDragging() then return end
+local function UpdateDragPosition(button)
     local minimap = _G.Minimap
     if not minimap or type(minimap.GetCenter) ~= "function" then return end
 
@@ -261,6 +250,24 @@ local function OnUpdate(button)
         button:SetPoint("CENTER", minimap, "CENTER", dx, dy)
     end
 end
+
+local function FinishDrag(button)
+    if button:GetScript("OnUpdate") ~= UpdateDragPosition then return end
+    button:SetScript("OnUpdate", nil)
+    button:StopMovingOrSizing()
+    SaveButtonPosition(button)
+    if C_Timer and type(C_Timer.After) == "function" then
+        C_Timer.After(0, function()
+            if button:GetScript("OnUpdate") ~= UpdateDragPosition then button._awpSuppressClick = false end
+        end)
+    else
+        button._awpSuppressClick = false
+    end
+end
+
+-- ============================================================
+-- Minimap button and compartment callbacks
+-- ============================================================
 
 local function CreateMinimapButton()
     if minimapState.button then return minimapState.button end
@@ -304,17 +311,10 @@ local function CreateMinimapButton()
     button:SetScript("OnDragStart", function(self)
         self._awpSuppressClick = true
         self:StartMoving()
+        self:SetScript("OnUpdate", UpdateDragPosition)
     end)
-    button:SetScript("OnDragStop", function(self)
-        self:StopMovingOrSizing()
-        SaveButtonPosition(self)
-        if C_Timer and type(C_Timer.After) == "function" then
-            C_Timer.After(0, function() self._awpSuppressClick = false end)
-        else
-            self._awpSuppressClick = false
-        end
-    end)
-    button:SetScript("OnUpdate", OnUpdate)
+    button:SetScript("OnDragStop", FinishDrag)
+    button:SetScript("OnHide", FinishDrag)
     button:SetScript("OnEnter", ShowTooltip)
     button:SetScript("OnLeave", HideTooltip)
 
@@ -325,7 +325,7 @@ end
 
 function NS.RefreshMinimapButton()
     local button = CreateMinimapButton()
-    ApplySavedPosition(button)
+    if button:GetScript("OnUpdate") ~= UpdateDragPosition then ApplySavedPosition(button) end
     if GetMinimapSettings().enabled then
         button:Show()
     else
@@ -336,78 +336,6 @@ end
 function NS.GetMinimapButtonStatus()
     local settings = GetMinimapSettings()
     return settings.enabled and "shown" or "hidden"
-end
-
-local function GetTrackerFrame()
-    local kt = rawget(_G, "KT_ObjectiveTrackerFrame")
-    if kt then
-        return kt, "Kaliel's Tracker"
-    end
-    return rawget(_G, "ObjectiveTrackerFrame"), "Blizzard Objective Tracker"
-end
-
-function NS.GetObjectiveTrackerVisibilityStatus()
-    local frame, host = GetTrackerFrame()
-    local status = {
-        host = host,
-        support = host == "Kaliel's Tracker"
-            and "recommended"
-            or "experimental, known taint risk",
-        frame = frame,
-        exists = frame ~= nil,
-        shown = false,
-        visible = false,
-        hardHidden = false,
-        alpha = nil,
-        transparent = false,
-    }
-
-    if not frame then
-        status.visibility = "missing"
-        status.opacity = "unknown"
-        return status
-    end
-
-    local okShown, shown = pcall(frame.IsShown, frame)
-    local okVisible, visible = pcall(frame.IsVisible, frame)
-    status.shown = okShown and shown == true
-    status.visible = okVisible and visible == true
-    status.hardHidden = not status.shown or not status.visible
-    status.visibility = status.hardHidden and "hidden" or "visible"
-
-    local alpha
-    if type(frame.GetEffectiveAlpha) == "function" then
-        local ok, value = pcall(frame.GetEffectiveAlpha, frame)
-        if ok and type(value) == "number" then alpha = value end
-    end
-    if alpha == nil and type(frame.GetAlpha) == "function" then
-        local ok, value = pcall(frame.GetAlpha, frame)
-        if ok and type(value) == "number" then alpha = value end
-    end
-
-    status.alpha = alpha
-    status.transparent = alpha ~= nil and alpha <= TRANSPARENT_ALPHA
-    status.opacity = status.transparent and "transparent" or "normal"
-    return status
-end
-
-function NS.IsObjectiveTrackerHardHidden()
-    local status = NS.GetObjectiveTrackerVisibilityStatus()
-    return status and status.hardHidden == true
-end
-
-function NS.MaybeWarnObjectiveTrackerVisibility()
-    local settings = GetZygorSettings()
-    if not settings or not settings.enabled then return end
-
-    local status = NS.GetObjectiveTrackerVisibilityStatus()
-    if not status or not status.exists then return end
-
-    if status.hardHidden then
-        NS.Msg("|cffffcc00AzerothWaypoint:|r Tracker Viewer is enabled, but the objective tracker is hidden. Guide steps cannot display until it is shown.")
-    elseif status.transparent then
-        NS.Msg("|cffffcc00AzerothWaypoint:|r Tracker Viewer is enabled, but the objective tracker appears transparent. Guide steps may be present but invisible.")
-    end
 end
 
 function AzerothWaypoint_OnAddonCompartmentEnter(_, buttonFrame)

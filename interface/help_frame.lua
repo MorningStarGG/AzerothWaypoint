@@ -1,3 +1,10 @@
+-- ============================================================
+-- In-game help window
+-- ============================================================
+--
+-- Builds the help window, resolves links to pages and sections and reuses
+-- widgets while laying out each page.
+
 local NS                                                             = _G.AzerothWaypointNS
 local FW                                                             = NS.Internal.Interface.Framework
 
@@ -141,7 +148,7 @@ local function GetHelpPages()
     return pages
 end
 
-local function GetPageIndex(pageRef)
+local function GetPageIndex(pageRef, exact)
     local pages = GetHelpPages()
     if #pages == 0 then
         return nil
@@ -151,7 +158,6 @@ local function GetPageIndex(pageRef)
         if pageRef >= 1 and pageRef <= #pages then
             return pageRef
         end
-        return 1
     end
 
     if type(pageRef) == "string" and pageRef ~= "" then
@@ -163,7 +169,53 @@ local function GetPageIndex(pageRef)
         end
     end
 
-    return 1
+    if not exact then return 1 end
+end
+
+-- ============================================================
+-- Page links and navigation
+-- ============================================================
+
+local function ResolveHelpLink(target)
+    local pageID, sectionID = target:match("^([%w_]+)#([%w_]+)$")
+    local pageIndex = GetPageIndex(pageID or target, true)
+    if not pageIndex then return end
+    if sectionID then
+        for _, block in ipairs(GetHelpPages()[pageIndex].blocks or {}) do
+            if block.type == "heading" and block.id == sectionID then
+                return { pageIndex = pageIndex, sectionID = sectionID }
+            end
+        end
+        return
+    end
+    return { pageIndex = pageIndex }
+end
+
+local function RenderHelpText(text)
+    if type(text) ~= "string" or not text:find("[[help:", 1, true) then
+        return EscapeHelpText(text)
+    end
+
+    local parts, links = {}, {}
+    local offset, cursor = 0, 1
+    while true do
+        local first, last, target, label = text:find("%[%[help:([%w_#]+)|([^%]\r\n]+)%]%]", cursor)
+        if not first then break end
+        local before = EscapeHelpText(text:sub(cursor, first - 1))
+        label = EscapeHelpText(label)
+        parts[#parts + 1] = before
+        parts[#parts + 1] = label
+        offset = offset + #before
+        local link = ResolveHelpLink(target)
+        if link then
+            -- The client takes a one-based byte range with an exclusive end.
+            link.startByte, link.endByte = offset + 1, offset + #label + 1
+            links[#links + 1] = link
+        end
+        offset, cursor = offset + #label, last + 1
+    end
+    parts[#parts + 1] = EscapeHelpText(text:sub(cursor))
+    return table.concat(parts), links
 end
 
 local function FormatPageSelectorText(pageIndex)
@@ -205,12 +257,75 @@ local function FormatRecentChangelogText(limit)
     return "No changelog data available."
 end
 
+-- ============================================================
+-- Pooled text and link controls
+-- ============================================================
+
 local function ResetPool(pool)
     for _, widget in ipairs(pool) do
         widget:Hide()
         if widget.awpSelect then widget.awpSelect:Hide() end
     end
     pool.nextIndex = 1
+end
+
+local function ScrollHelp(frameRef, delta)
+    local scroll = frameRef.scroll
+    local target = Clamp((scroll:GetVerticalScroll() or 0) - delta * SCROLL_STEP, 0, scroll:GetVerticalScrollRange() or 0)
+    scroll:SetVerticalScroll(target)
+end
+
+local function AcquireHelpLinkButton(frameRef, owner, primary)
+    local pool = primary and frameRef.linkPool or frameRef.linkFragmentPool
+    local index = pool.nextIndex
+    local button = pool[index]
+    if not button then
+        button = CreateFrame("Button", nil, frameRef.content)
+        button._awpControllerVisualOnly = not primary
+        button:RegisterForClicks("LeftButtonUp")
+        button:EnableMouseWheel(true)
+        button:SetScript("OnMouseWheel", function(_, delta) ScrollHelp(frameRef, delta) end)
+        button:SetScript("OnClick", function(self)
+            if self.selection then self.selection:ClearFocus() end
+            local controller = NS.Internal.Controller
+            if controller then controller.Select(frameRef.pageSelector, frameRef) end
+            frameRef:ShowHelpLink(self.helpLink)
+        end)
+        button.underline = button:CreateTexture(nil, "ARTWORK")
+        button.underline:SetPoint("BOTTOMLEFT")
+        button.underline:SetPoint("BOTTOMRIGHT")
+        button.underline:SetHeight(1)
+        button.underline:SetAlpha(0.6)
+        button.hover = button:CreateTexture(nil, "HIGHLIGHT")
+        button.hover:SetAllPoints(button.underline)
+        pool[index] = button
+    end
+    pool.nextIndex = index + 1
+    button:SetFrameLevel(owner:GetFrameLevel() + 2)
+    return button
+end
+
+local function PlaceHelpLinks(frameRef, fontString, links)
+    if not links or type(fontString.CalculateScreenAreaFromCharacterSpan) ~= "function" then return end
+    for _, link in ipairs(links) do
+        local areas = fontString:CalculateScreenAreaFromCharacterSpan(link.startByte, link.endByte)
+        local primary = true
+        for _, area in ipairs(areas or {}) do
+            if area.width > 0 and area.height > 0 then
+                local button = AcquireHelpLinkButton(frameRef, fontString:GetParent(), primary)
+                button:ClearAllPoints()
+                button:SetPoint("BOTTOMLEFT", fontString, "BOTTOMLEFT", area.left, area.bottom)
+                button:SetSize(area.width, area.height)
+                button.underline:SetColorTexture(fontString:GetTextColor())
+                button.hover:SetColorTexture(fontString:GetTextColor())
+                button.selection = fontString.awpSelect
+                button.helpLink = link
+                -- Wrapped links have several mouse targets and one focus stop.
+                button:Show()
+                primary = false
+            end
+        end
+    end
 end
 
 local function AcquireText(frameRef)
@@ -239,6 +354,7 @@ local function MakeSelectable(frameRef, fontString)
     local eb = fontString.awpSelect
     if eb then return eb end
     eb = CreateFrame("EditBox", nil, fontString:GetParent())
+    eb._awpControllerVisualOnly = true
     eb:SetMultiLine(true)
     eb:SetAutoFocus(false)
     eb:EnableMouse(true)
@@ -253,11 +369,7 @@ local function MakeSelectable(frameRef, fontString)
     end)
     -- Keep page scrolling working while the cursor is over the text.
     eb:EnableMouseWheel(true)
-    eb:SetScript("OnMouseWheel", function(self, delta)
-        local scroll = frameRef.scroll
-        local handler = scroll and scroll:GetScript("OnMouseWheel")
-        if handler then handler(scroll, delta) end
-    end)
+    eb:SetScript("OnMouseWheel", function(_, delta) ScrollHelp(frameRef, delta) end)
     fontString.awpSelect = eb
     return eb
 end
@@ -341,6 +453,10 @@ local function AcquireDivider(frameRef)
     return widget
 end
 
+-- ============================================================
+-- Images and image rows
+-- ============================================================
+
 local function CreateImageBlock(parent)
     local wrapper = CreateFrame("Frame", nil, parent)
 
@@ -422,7 +538,13 @@ local function ApplyImageBlockData(blockFrame, data)
         blockFrame.borderRight:Show()
     end
 
-    if type(data.texture) == "string" and data.texture ~= "" then
+    if blockFrame.plaqueSample then blockFrame.plaqueSample:Hide() end
+    if data.plaqueType then
+        local plaques = NS.Internal.WorldOverlay.Plaques
+        blockFrame.plaqueSample = plaques.ShowSample(blockFrame.canvas, blockFrame.plaqueSample, data.plaqueType, true)
+        blockFrame.texture:Hide()
+        blockFrame.placeholder:Hide()
+    elseif type(data.texture) == "string" and data.texture ~= "" then
         blockFrame.texture:SetTexture(data.texture)
         if type(data.texCoord) == "table" then
             blockFrame.texture:SetTexCoord(unpack(data.texCoord))
@@ -501,6 +623,10 @@ local function ResetRowItems(row)
         item:Hide()
     end
 end
+
+-- ============================================================
+-- Headings and notes
+-- ============================================================
 
 local function AcquireHeadingLine(frameRef)
     local pool = frameRef.headingLinePool
@@ -603,7 +729,7 @@ local function ApplyNoteBlockLayout(noteFrame, text, contentWidth, block)
     noteWidth = math.floor(math.max(120, math.min(noteWidth, contentWidth)))
     local innerW = math.max(noteWidth - accentW - NOTE_PAD_X * 2, 80)
     noteFrame.label:SetWidth(innerW)
-    noteFrame.label:SetText(EscapeHelpText(text))
+    noteFrame.label:SetText(text)
     noteFrame.label:SetJustifyH(ResolveJustifyH(block.align, "LEFT"))
     noteFrame.label:ClearAllPoints()
     noteFrame.label:SetPoint("TOPLEFT", noteFrame, "TOPLEFT", accentW + NOTE_PAD_X, -NOTE_PAD_Y)
@@ -659,6 +785,7 @@ local function ApplyTextStyle(fontString, styleKey)
     else
         fontString:SetTextColor(1, 1, 1, 1)
     end
+    if NS.Internal.Appearance then NS.Internal.Appearance.Text(fontString, "windows.help", "TEXT", "colors") end
 end
 
 local function LayoutImageRow(row, block, contentWidth)
@@ -724,7 +851,13 @@ local function LayoutImageRow(row, block, contentWidth)
     row.totalHeight = tallest
 end
 
+-- ============================================================
+-- Page layout
+-- ============================================================
+
 local function HideDynamicWidgets(frameRef)
+    ResetPool(frameRef.linkPool)
+    ResetPool(frameRef.linkFragmentPool)
     ResetPool(frameRef.textPool)
     ResetPool(frameRef.dividerPool)
     ResetPool(frameRef.imagePool)
@@ -750,6 +883,7 @@ local function LayoutPage(frameRef, pageIndex, resetScroll)
     HideDynamicWidgets(frameRef)
 
     frameRef.currentPageIndex = pageIndex
+    frameRef.headingOffsets = {}
     frameRef.content:SetWidth(contentWidth)
 
     local cursorY = -CONTENT_TOP_PADDING
@@ -794,6 +928,7 @@ local function LayoutPage(frameRef, pageIndex, resetScroll)
         cursorY = cursorY - (tonumber(block.spacingBefore) or 0)
 
         if block.type == "heading" then
+            if block.id then frameRef.headingOffsets[block.id] = -cursorY end
             local widget = AcquireText(frameRef)
             ApplyTextStyle(widget, "heading")
             widget:SetWidth(contentWidth)
@@ -819,7 +954,8 @@ local function LayoutPage(frameRef, pageIndex, resetScroll)
                 local widget = AcquireText(frameRef)
                 ApplyTextStyle(widget, "body")
                 widget:SetWidth(contentWidth - BODY_INDENT)
-                widget:SetText(EscapeHelpText(seg.text))
+                local text, links = RenderHelpText(seg.text)
+                widget:SetText(text)
                 widget:ClearAllPoints()
                 widget:SetPoint("TOPLEFT", frameRef.content, "TOPLEFT", BODY_INDENT, cursorY)
                 if seg.selectable then
@@ -827,6 +963,7 @@ local function LayoutPage(frameRef, pageIndex, resetScroll)
                 elseif widget.awpSelect then
                     widget.awpSelect:Hide()
                 end
+                PlaceHelpLinks(frameRef, widget, links)
                 cursorY = cursorY - (widget:GetStringHeight() or widget:GetHeight() or 0)
                 if sIndex < #segments then
                     -- Replicate the single-block inter-line gap between segments.
@@ -836,7 +973,8 @@ local function LayoutPage(frameRef, pageIndex, resetScroll)
             cursorY = cursorY - (tonumber(block.spacingAfter) or BLOCK_SPACING)
         elseif block.type == "note" then
             local widget = AcquireNoteBlock(frameRef)
-            ApplyNoteBlockLayout(widget, tostring(block.text or ""), contentWidth, block)
+            local text, links = RenderHelpText(block.text)
+            ApplyNoteBlockLayout(widget, text, contentWidth, block)
             widget:ClearAllPoints()
             local noteWidth = widget:GetWidth() or contentWidth
             local offsetX = 0
@@ -847,6 +985,7 @@ local function LayoutPage(frameRef, pageIndex, resetScroll)
             end
             widget:SetPoint("TOPLEFT", frameRef.content, "TOPLEFT", offsetX, cursorY)
             ApplySelectable(frameRef, widget.label)
+            PlaceHelpLinks(frameRef, widget.label, links)
             cursorY = cursorY - widget.totalHeight - (tonumber(block.spacingAfter) or BLOCK_SPACING)
         elseif block.type == "divider" then
             local divider = AcquireDivider(frameRef)
@@ -911,6 +1050,7 @@ local function LayoutPage(frameRef, pageIndex, resetScroll)
     if resetScroll then
         frameRef.scroll:SetVerticalScroll(0)
     end
+    if NS.Internal.Controller then NS.Internal.Controller.Request(frameRef) end
 end
 
 local function ShowPage(frameRef, pageRef, resetScroll)
@@ -922,8 +1062,22 @@ local function ShowPage(frameRef, pageRef, resetScroll)
     LayoutPage(frameRef, pageIndex, resetScroll ~= false)
 end
 
+local function ShowHelpLink(frameRef, link)
+    if link.pageIndex ~= frameRef.currentPageIndex then
+        ShowPage(frameRef, link.pageIndex, false)
+    end
+    local scroll = frameRef.scroll
+    local offset = link.sectionID and frameRef.headingOffsets[link.sectionID] or 0
+    scroll:UpdateScrollChildRect()
+    scroll:SetVerticalScroll(Clamp(offset, 0, scroll:GetVerticalScrollRange()))
+end
+
 local TITLE_H  = 44
 local FOOTER_H = 44
+
+-- ============================================================
+-- Window creation
+-- ============================================================
 
 local function GetOrCreateFrame()
     if frame then
@@ -932,6 +1086,7 @@ local function GetOrCreateFrame()
 
     -- Base frame
     frame = CreateFrame("Frame", "AWPHelpFrame", UIParent)
+    frame.ShowHelpLink = ShowHelpLink
     frame:SetSize(FRAME_WIDTH, FRAME_HEIGHT)
     frame:SetPoint("CENTER")
     frame:SetFrameStrata("MEDIUM")
@@ -947,6 +1102,7 @@ local function GetOrCreateFrame()
     local versionStr = type(NS.GetAddonMetadataValue) == "function"
         and NS.GetAddonMetadataValue("Version", "") or ""
     local shell = FW.CreatePanelShell(frame, {
+        surface = "windows.help",
         title = FRAME_TITLE,
         titleHeight = TITLE_H,
         footerHeight = FOOTER_H,
@@ -1016,12 +1172,7 @@ local function GetOrCreateFrame()
     frame.scroll:SetPoint("TOPLEFT", frame, "TOPLEFT", 14, -(TITLE_H + 12))
     frame.scroll:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -22, FOOTER_H + 12)
     frame.scroll:EnableMouseWheel(true)
-    frame.scroll:SetScript("OnMouseWheel", function(self, delta)
-        local current = self:GetVerticalScroll() or 0
-        local range   = self:GetVerticalScrollRange() or 0
-        local target  = Clamp(current - (delta * SCROLL_STEP), 0, range)
-        self:SetVerticalScroll(target)
-    end)
+    frame.scroll:SetScript("OnMouseWheel", function(_, delta) ScrollHelp(frame, delta) end)
 
     FW.StyleScrollBar(frame.scroll, {
         trackInsetTop = 4,
@@ -1077,6 +1228,8 @@ local function GetOrCreateFrame()
     frame.rowPool         = { nextIndex = 1 }
     frame.notePool        = { nextIndex = 1 }
     frame.headingLinePool = { nextIndex = 1 }
+    frame.linkPool        = { nextIndex = 1 }
+    frame.linkFragmentPool = { nextIndex = 1 }
 
     -- Scripts
     frame:SetScript("OnShow", function(self)
@@ -1094,6 +1247,12 @@ local function GetOrCreateFrame()
             dropdown.Close()
         end
     end)
+
+    if NS.Internal.Appearance then
+        NS.Internal.Appearance.RegisterReflow(frame, function(self)
+            if self.currentPageIndex then LayoutPage(self, self.currentPageIndex, false) end
+        end)
+    end
 
     frame.scroll:SetScript("OnSizeChanged", function()
         if frame and frame:IsShown() and frame.currentPageIndex then
@@ -1122,160 +1281,3 @@ end
 function NS.ShowChangelog()
     NS.ShowWhatsNew()
 end
-
-local function GetStartupHelpMode()
-    return type(NS.GetStartupHelpMode) == "function"
-        and NS.GetStartupHelpMode()
-        or NS.Constants.STARTUP_HELP_MODE_ACCOUNT
-end
-
-local function GetStartupWhatsNewMode()
-    return type(NS.GetStartupWhatsNewMode) == "function"
-        and NS.GetStartupWhatsNewMode()
-        or NS.Constants.STARTUP_HELP_MODE_ACCOUNT
-end
-
-local function GetStoredAddonVersionForStartupMode(mode)
-    local C = NS.Constants
-    if mode == C.STARTUP_HELP_MODE_CHARACTER then
-        return type(NS.GetStoredAddonVersionForCurrentCharacter) == "function"
-            and NS.GetStoredAddonVersionForCurrentCharacter()
-            or nil
-    end
-    return NS.GetStoredAddonVersion and NS.GetStoredAddonVersion() or nil
-end
-
-local function UpdateStoredAddonVersionForStartupMode(mode)
-    local C = NS.Constants
-    if mode == C.STARTUP_HELP_MODE_DISABLED then
-        if type(NS.UpdateStoredAddonVersion) == "function" then
-            NS.UpdateStoredAddonVersion()
-        end
-        if type(NS.UpdateStoredAddonVersionForCurrentCharacter) == "function" then
-            NS.UpdateStoredAddonVersionForCurrentCharacter()
-        end
-        return
-    end
-    if mode == C.STARTUP_HELP_MODE_CHARACTER then
-        if type(NS.UpdateStoredAddonVersionForCurrentCharacter) == "function" then
-            NS.UpdateStoredAddonVersionForCurrentCharacter()
-        end
-        return
-    end
-    if type(NS.UpdateStoredAddonVersion) == "function" then
-        NS.UpdateStoredAddonVersion()
-    end
-end
-
-local function HasVersionUpgradePending(mode)
-    if mode == NS.Constants.STARTUP_HELP_MODE_DISABLED then
-        return false
-    end
-
-    local previousVersion = GetStoredAddonVersionForStartupMode(mode)
-    if type(previousVersion) ~= "string" or previousVersion == "" then
-        return false
-    end
-
-    return type(NS.CompareAddonVersions) == "function"
-        and NS.CompareAddonVersions(previousVersion, NS.VERSION) < 0
-        or false
-end
-
-local function HasSeenOverviewForStartupMode(mode)
-    local C = NS.Constants
-    if mode == C.STARTUP_HELP_MODE_CHARACTER then
-        return type(NS.HasSeenOverviewOnCurrentCharacter) == "function"
-            and NS.HasSeenOverviewOnCurrentCharacter()
-            or false
-    end
-    if mode == C.STARTUP_HELP_MODE_ACCOUNT then
-        if type(NS.HasSeenOverviewAccountWide) == "function" and NS.HasSeenOverviewAccountWide() then
-            return true
-        end
-        if type(NS.HasSeenOverviewOnCurrentCharacter) == "function"
-            and NS.HasSeenOverviewOnCurrentCharacter()
-        then
-            if type(NS.MarkOverviewShownAccountWide) == "function" then
-                NS.MarkOverviewShownAccountWide()
-            end
-            return true
-        end
-    end
-    return mode == C.STARTUP_HELP_MODE_DISABLED
-end
-
-local function MarkOverviewShownForStartupMode(mode)
-    local C = NS.Constants
-    if mode == C.STARTUP_HELP_MODE_CHARACTER then
-        if type(NS.MarkOverviewShownOnCurrentCharacter) == "function" then
-            NS.MarkOverviewShownOnCurrentCharacter()
-        end
-    elseif mode == C.STARTUP_HELP_MODE_ACCOUNT then
-        if type(NS.MarkOverviewShownAccountWide) == "function" then
-            NS.MarkOverviewShownAccountWide()
-        end
-    end
-end
-
-local function ShowOverviewNotification()
-    NS.Msg("Opening quick-start guide.")
-    NS.After(0.2, function()
-        if type(NS.ShowHelp) == "function" then
-            NS.ShowHelp("overview")
-        end
-    end)
-end
-
-function NS.CheckHelpNotification()
-    local mode = GetStartupWhatsNewMode()
-    if not HasVersionUpgradePending(mode) then
-        return false
-    end
-
-    NS.Msg(string.format("Updated to v%s - opening What's New.", NS.VERSION))
-    NS.After(0.2, function()
-        if type(NS.ShowWhatsNew) == "function" then
-            NS.ShowWhatsNew()
-        end
-    end)
-
-    UpdateStoredAddonVersionForStartupMode(mode)
-
-    return true
-end
-
-function NS.CheckStartupHelpNotification()
-    local helpMode = GetStartupHelpMode()
-    local whatsNewMode = GetStartupWhatsNewMode()
-    local hasVersionUpgrade = HasVersionUpgradePending(whatsNewMode)
-
-    if helpMode ~= NS.Constants.STARTUP_HELP_MODE_DISABLED then
-        local replayOverview = type(NS.ConsumePendingOverviewReplayForCurrentCharacter) == "function"
-            and NS.ConsumePendingOverviewReplayForCurrentCharacter()
-            or false
-        local hasSeenOverview = HasSeenOverviewForStartupMode(helpMode)
-
-        if replayOverview or not hasSeenOverview then
-            MarkOverviewShownForStartupMode(helpMode)
-
-            ShowOverviewNotification()
-
-            if not hasVersionUpgrade then
-                UpdateStoredAddonVersionForStartupMode(whatsNewMode)
-            end
-
-            return "overview"
-        end
-    end
-
-    if NS.CheckHelpNotification() then
-        return "whats_new"
-    end
-
-    UpdateStoredAddonVersionForStartupMode(whatsNewMode)
-
-    return nil
-end
-
-NS.CheckChangelogNotification = NS.CheckHelpNotification

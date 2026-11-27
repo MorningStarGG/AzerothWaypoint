@@ -1,11 +1,15 @@
+-- ============================================================
+-- Zygor arrow skin presets
+-- ============================================================
+--
+-- Registers the Starlight and Stealth presets when Zygor is loaded. The shared
+-- arrow skin code owns construction, animation and suppression. These
+-- registrations show the zygor_mirror and zygor_full preset formats.
+
 local NS = _G.AzerothWaypointNS
 if not NS.IsZygorLoaded() then return end
 
 local C = NS.Constants
-
--- Zygor arrow skins. Only registers when ZygorGuidesViewer is installed and enabled.
--- All theme-building, animation, hooks, and suppression live in core/arrowskins.lua.
--- These are also the canonical examples of the zygor_mirror / zygor_full preset formats.
 
 NS.RegisterArrowSkin(C.SKIN_STARLIGHT, {
     themeKey    = C.THEME_STARLIGHT,
@@ -29,7 +33,7 @@ NS.RegisterArrowSkin(C.SKIN_STEALTH, {
     --   specials          arrival + misc icons (8×2 grid, cell 1,1 = arrival icon)
     --
     -- Stealth-specific: snap to a distinct color when facing the destination closely.
-    precise = {
+    precise     = {
         range  = 3,
         smooth = false,
         r      = 0.4,

@@ -7,7 +7,7 @@ local Queue = NS.RouteQueueInternal
 -- ============================================================
 --
 -- Guide addons are target providers, not routing backends. Each provider
--- extracts one current guide target; the selected routing backend still plans
+-- extracts one current guide target, the selected routing backend still plans
 -- the path. Manual/transient authority remains higher priority than all guide
 -- providers.
 
@@ -15,9 +15,11 @@ local GUIDE_COORD_EPSILON = 0.00005
 local providers = {}
 local providerOrder = {}
 local providerStarted = {}
-local pendingByProvider = {}
+local evaluationQueues = {}
 local pendingReasonByProvider = {}
 local pendingOptsByProvider = {}
+local pendingGuideSelection
+local guidePresence = {}
 
 local function TrimString(value)
     if type(value) ~= "string" then
@@ -111,36 +113,20 @@ local function IsGuideDestinationLegForTarget(leg, target)
         and (leg.kind == nil or leg.kind == "destination" or leg.kind == "guide_goal" or leg.kind == "guide")
 end
 
-local function ClearManualAuthorityForExplicitGuideActivation(reason)
-    local authority = type(NS.GetManualAuthority) == "function"
-        and NS.GetManualAuthority()
-        or state.routing.manualAuthority
-    if authority == nil then
-        return false
-    end
+-- Provider hooks still need to read their latest step, but an older click
+-- must lose its right to select a provider or replace a manual destination.
+function NS.ClearPendingGuideSelection()
+    if not pendingGuideSelection then return end
+    for key in pairs(pendingGuideSelection) do pendingGuideSelection[key] = nil end
+    pendingGuideSelection.presentationRefresh = true
+    pendingGuideSelection = nil
+end
 
-    local clearReason = type(reason) == "string" and reason or "guide_explicit_takeover"
-    if type(NS.ClearManualRoute) == "function" then
-        NS.ClearManualRoute(clearReason, { preserveGuide = true, preserveManualQueue = true })
-    elseif type(NS.ClearManualAuthority) == "function" then
-        NS.ClearManualAuthority(clearReason)
-    else
-        return false
+local function ClearManualRouteForGuideSelection(reason)
+    state.routing.queueAfterCorpse = nil
+    if state.routing.manualAuthority or state.routing.pendingManualAuthority then
+        NS.ClearManualRoute(reason or "guide_explicit_takeover", { preserveManualQueue = true })
     end
-
-    state.routing.manualArrival = nil
-    state.routing.specialActionState = nil
-    state.routing.presentationState = nil
-    if type(NS.DisarmSpecialActionButton) == "function" then
-        NS.DisarmSpecialActionButton()
-    end
-    if type(NS.ClearCarrierWaypoint) == "function" then
-        NS.ClearCarrierWaypoint()
-    end
-    if type(NS.ClearPublishedQueuePins) == "function" then
-        NS.ClearPublishedQueuePins()
-    end
-    return true
 end
 
 local function EnsureGuideQueue(providerKey, label)
@@ -156,6 +142,7 @@ end
 local function SetActiveGuideProvider(providerKey, persist)
     providerKey = NormalizeProviderKey(providerKey)
     local routing = EnsureGuideRoutingState()
+    local changed = routing.activeGuideProvider ~= providerKey
     if providerKey then
         EnsureGuideQueue(providerKey, providers[providerKey] and providers[providerKey].label)
     end
@@ -166,6 +153,17 @@ local function SetActiveGuideProvider(providerKey, persist)
     routing.guideRouteState = providerKey and routing.guideRouteStates[providerKey] or nil
     if persist ~= false then
         SaveActiveGuideProvider(providerKey)
+    end
+    if changed and type(NS.GetGuideTrackerViewerProviders) == "function"
+        and type(NS.RefreshGuideTrackerViewerProvider) == "function"
+    then
+        local function refreshIndicators()
+            local viewerProviders = NS.GetGuideTrackerViewerProviders()
+            for index = 1, #viewerProviders do
+                NS.RefreshGuideTrackerViewerProvider(viewerProviders[index], "active_provider_changed")
+            end
+        end
+        if type(NS.After) == "function" then NS.After(0, refreshIndicators) else refreshIndicators() end
     end
     return providerKey
 end
@@ -192,6 +190,10 @@ function NS.GetGuideRouteState(providerKey)
     end
     return NS.GetActiveGuideRouteState()
 end
+
+-- ============================================================
+-- Guide provider registry
+-- ============================================================
 
 local function GetProvider(providerKey)
     providerKey = NormalizeProviderKey(providerKey)
@@ -262,6 +264,72 @@ local function GetProviderVisibility(providerKey)
     return "visible"
 end
 
+function NS.GetActiveGuideTravelIntent()
+    if not NS.IsRoutingEnabled or not NS.IsRoutingEnabled() then return end
+    local key = NS.GetActiveGuideProvider()
+    local adapter = key and providers[key]
+    local getIntent = type(adapter) == "table" and rawget(adapter, "getTravelIntent")
+    if not ProviderIsLoaded(adapter) or type(getIntent) ~= "function" then return end
+    local routing = EnsureGuideRoutingState()
+    if routing.pendingManualAuthority or routing.cinematicActive then return end
+    local record = NS.GetActiveAuthorityRecord and NS.GetActiveAuthorityRecord()
+    if record and (record.authority ~= "guide" or record.guideProvider ~= key or record.suppressed) then return end
+    local ok, intent = pcall(getIntent)
+    if ok and type(intent) == "table" then return intent end
+end
+
+local function GuideDestinationReached(record, radius)
+    local target = record and record.target
+    local intent = target and target.guideTravelIntent
+    if not intent or NS.GetActiveGuideTravelIntent() ~= intent or record._coreRoutePending or record._corePlanning
+        or not record.legs or record.currentLegIndex ~= #record.legs
+        or InCombatLockdown and InCombatLockdown() or UnitOnTaxi and UnitOnTaxi("player")
+        or UnitInVehicle and UnitInVehicle("player") or UnitIsDeadOrGhost and UnitIsDeadOrGhost("player") then
+        return
+    end
+    local leg = record.legs[record.currentLegIndex]
+    if not leg or leg.specialAction or NS.RouteArrivalGateMatches and not NS.RouteArrivalGateMatches(leg) then return end
+    local distance = NS.GetPlayerWaypointDistance and NS.GetPlayerWaypointDistance(target.mapID, target.x, target.y)
+    if type(distance) ~= "number" or type(issecretvalue) == "function" and issecretvalue(distance) then return end
+    return distance >= 0 and distance <= radius and intent or nil
+end
+
+-- Observe the final accepted destination through the existing core monitor.
+-- Native progression runs next frame, after checking authority/generation again.
+function NS.CheckGuideRouteDestinationReached(record, radius)
+    local key = record and record.guideProvider
+    local adapter = key and providers[key]
+    if not adapter or type(adapter.onDestinationReached) ~= "function" then return end
+    local generation = record._routeAcceptedPlanGeneration
+    local expected = record.target and record.target.guideTravelIntent
+    if expected and record._guideArrivalIntent == expected and record._guideArrivalGeneration == generation then return end
+    local intent = GuideDestinationReached(record, radius)
+    if not intent then return end
+    record._guideArrivalIntent, record._guideArrivalGeneration = intent, generation
+    NS.After(0, function()
+        if NS.GetActiveAuthorityRecord() ~= record or record._routeAcceptedPlanGeneration ~= generation
+            or GuideDestinationReached(record, radius) ~= intent then
+            if record._guideArrivalIntent == intent and record._guideArrivalGeneration == generation then
+                record._guideArrivalIntent, record._guideArrivalGeneration = nil, nil
+            end
+            return
+        end
+        pcall(adapter.onDestinationReached, record, intent)
+    end)
+end
+
+-- A guide can own navigation without a waypoint (hearth instructions, paused
+-- engines, etc.). Availability must not be inferred from its current target.
+local function ProviderHasGuide(providerKey)
+    local adapter = providers[providerKey]
+    if not ProviderIsLoaded(adapter) then return false end
+    if type(adapter.hasGuide) == "function" then
+        local ok, present = pcall(adapter.hasGuide)
+        return ok and present == true
+    end
+    return GetProviderVisibility(providerKey) ~= "absent"
+end
+
 function NS.GetGuideVisibilityState(providerKey)
     providerKey = NormalizeProviderKey(providerKey)
     if providerKey then
@@ -286,6 +354,30 @@ function NS.GetGuideVisibilityState(providerKey)
         end
     end
     return sawHidden and "hidden" or "absent"
+end
+
+-- ============================================================
+-- Guide selection and visibility
+-- ============================================================
+
+-- Provider selection is authority, not route creation. An explicitly selected
+-- guide remains active even when its current step has no coordinates, the next
+-- routable step can then take over without requiring another user action.
+function NS.SelectGuideProvider(providerKey, reason)
+    providerKey = NormalizeProviderKey(providerKey)
+    local adapter = providerKey and providers[providerKey] or nil
+    if not providerKey or not ProviderIsLoaded(adapter) then return false end
+    if NS.Internal.ServiceSearch then NS.Internal.ServiceSearch.Cancel() end
+    NS.ClearPendingGuideSelection()
+    SetActiveGuideProvider(providerKey, true)
+    ClearManualRouteForGuideSelection(reason or "guide_provider_selected")
+    if type(NS.SetActiveRouteSource) == "function" then NS.SetActiveRouteSource("guide") end
+    if type(NS.ScheduleGuideProviderEvaluation) == "function" then
+        NS.ScheduleGuideProviderEvaluation(providerKey, reason or "guide_provider_selected", {
+            presentationRefresh = true,
+        })
+    end
+    return true
 end
 
 local function ShouldShowGuideVisuals()
@@ -317,16 +409,7 @@ function NS.ClearGuideRouteState(providerKey)
 
     local record = routing.guideRouteStates[providerKey]
     if type(record) == "table" and type(record.backend) == "string" then
-        local backend = nil
-        if record.backend == "zygor" then
-            backend = NS.RoutingBackend_Zygor
-        elseif record.backend == "mapzeroth" then
-            backend = NS.RoutingBackend_Mapzeroth
-        elseif record.backend == "farstrider" then
-            backend = NS.RoutingBackend_Farstrider
-        elseif record.backend == "direct" then
-            backend = NS.RoutingBackend_Direct
-        end
+        local backend = NS.GetRoutingBackend(record.backend)
         if backend and type(backend.Clear) == "function" then
             pcall(backend.Clear, record, "guide_clear")
         end
@@ -345,34 +428,37 @@ function NS.ClearGuideRouteState(providerKey)
     end
 end
 
-local function BuildPassiveGuideRecord(providerKey, target)
-    return {
-        mapID = target.mapID,
-        x = target.x,
-        y = target.y,
-        title = target.title,
-        rawTitle = target.rawTitle,
-        subtext = target.subtext,
-        target = target,
-        suppressed = false,
-        authority = "guide",
-        guideProvider = providerKey,
-        guideSource = target.source,
-        sourceAddon = providerKey,
-        semanticKind = target.semanticKind,
-        semanticQuestID = target.semanticQuestID,
-        semanticTravelType = target.semanticTravelType,
-        iconHintKind = target.iconHintKind,
-        iconHintQuestID = target.iconHintQuestID,
-        createdAt = GetTimeSafe(),
-    }
+local guideLegPresentation = { "title", "rawTitle", "subtext", "source", "guideProvider",
+    "semanticKind", "semanticQuestID", "semanticTravelType", "iconHintKind", "iconHintQuestID",
+    "navigationHeight", "navigationContinent", "destinationName", "destinationKind", "destinationAction",
+    "destinationPurpose" }
+
+-- Both a live guide refresh and a newly accepted backend plan use the current
+-- guide's text and quest identity at its destination. Travel legs own theirs.
+function NS.ApplyGuideDestinationPresentation(leg, target)
+    if not IsGuideDestinationLegForTarget(leg, target) then return false end
+    local changed = false
+    for _, key in ipairs(guideLegPresentation) do
+        if leg[key] ~= target[key] then
+            leg[key] = target[key]
+            changed = true
+        end
+    end
+    return changed
 end
 
-local function ApplyGuideTargetPresentation(record, target, providerKey)
-    if type(record) ~= "table" or type(target) ~= "table" then
-        return false
-    end
+-- ============================================================
+-- Publishing guide targets
+-- ============================================================
 
+-- All guide records take their navigation coordinates from the route request.
+-- The provider supplies step identity and display fields for the same target.
+---@param mapID? number
+---@param x? number
+---@param y? number
+---@param title? string
+function NS.SetGuideRouteTarget(record, target, providerKey, mapID, x, y, title)
+    if mapID == nil then mapID, x, y, title = target.mapID, target.x, target.y, target.title end
     local changed = false
     local function set(tbl, key, value)
         if tbl[key] ~= value then
@@ -391,26 +477,36 @@ local function ApplyGuideTargetPresentation(record, target, providerKey)
         changed = true
     end
 
-    set(recordTarget, "mapID", target.mapID)
-    set(recordTarget, "x", target.x)
-    set(recordTarget, "y", target.y)
-    set(recordTarget, "title", target.title)
+    set(recordTarget, "mapID", mapID)
+    set(recordTarget, "x", x)
+    set(recordTarget, "y", y)
+    set(recordTarget, "title", title)
     set(recordTarget, "rawTitle", target.rawTitle)
     set(recordTarget, "subtext", target.subtext)
     set(recordTarget, "source", target.source)
     set(recordTarget, "kind", target.kind or "guide_goal")
     set(recordTarget, "guideProvider", providerKey)
+    set(recordTarget, "guideStepIdentity", target.guideStepIdentity)
     set(recordTarget, "liveRouteLegKind", target.liveRouteLegKind)
     set(recordTarget, "semanticKind", target.semanticKind)
+    set(recordTarget, "guideTravelIntent", target.guideTravelIntent)
     set(recordTarget, "semanticQuestID", target.semanticQuestID)
     set(recordTarget, "semanticTravelType", target.semanticTravelType)
     set(recordTarget, "iconHintKind", target.iconHintKind)
     set(recordTarget, "iconHintQuestID", target.iconHintQuestID)
+    set(recordTarget, "navigationArea", target.navigationArea)
+    set(recordTarget, "navigationNpcID", target.navigationNpcID)
+    set(recordTarget, "navigationHeight", target.navigationHeight)
+    set(recordTarget, "navigationContinent", target.navigationContinent)
+    for _, key in ipairs({ "destinationName", "destinationKind", "destinationAction", "destinationPurpose" }) do
+        set(recordTarget, key, target[key])
+        set(record, key, target[key])
+    end
 
-    set(record, "mapID", target.mapID)
-    set(record, "x", target.x)
-    set(record, "y", target.y)
-    set(record, "title", target.title)
+    set(record, "mapID", mapID)
+    set(record, "x", x)
+    set(record, "y", y)
+    set(record, "title", title)
     set(record, "rawTitle", target.rawTitle)
     set(record, "subtext", target.subtext)
     set(record, "guideProvider", providerKey)
@@ -422,40 +518,53 @@ local function ApplyGuideTargetPresentation(record, target, providerKey)
     set(record, "semanticTravelType", target.semanticTravelType)
     set(record, "iconHintKind", target.iconHintKind)
     set(record, "iconHintQuestID", target.iconHintQuestID)
-
-    local function applyLegPresentation(leg)
-        if not IsGuideDestinationLegForTarget(leg, target) then
-            return
-        end
-
-        set(leg, "title", target.title)
-        set(leg, "rawTitle", target.rawTitle)
-        set(leg, "subtext", target.subtext)
-        set(leg, "source", target.source)
-        set(leg, "guideProvider", providerKey)
-        set(leg, "semanticKind", target.semanticKind)
-        set(leg, "semanticQuestID", target.semanticQuestID)
-        set(leg, "semanticTravelType", target.semanticTravelType)
-        set(leg, "iconHintKind", target.iconHintKind)
-        set(leg, "iconHintQuestID", target.iconHintQuestID)
-    end
+    set(record, "navigationArea", target.navigationArea)
+    set(record, "navigationHeight", target.navigationHeight)
+    set(record, "navigationContinent", target.navigationContinent)
 
     if type(record.legs) == "table" then
         for index = 1, #record.legs do
-            applyLegPresentation(record.legs[index])
+            changed = NS.ApplyGuideDestinationPresentation(record.legs[index], recordTarget) or changed
         end
     end
-    applyLegPresentation(record.currentLeg)
-
-    return changed
+    return NS.ApplyGuideDestinationPresentation(record.currentLeg, recordTarget) or changed
 end
 
 local function SameGuideRecordTarget(record, target, providerKey)
+    local previousTarget = type(record) == "table" and record.target or nil
+    local previousIdentity = type(previousTarget) == "table" and previousTarget.guideStepIdentity or nil
+    local identity = type(target) == "table" and target.guideStepIdentity or nil
+    -- A named native interaction can hand in another quest without changing
+    -- the accepted walk. Identity still refreshes all presentation metadata;
+    -- unknown actors and pending plans retain normal goal-change semantics.
+    local function Handoff(action) return action == "accept" or action == "turnin" end
+    local sameInteraction = previousTarget and target and previousTarget.destinationName ~= nil
+        and previousTarget.destinationName == target.destinationName
+        and (target.destinationKind == "npc" or target.destinationKind == "object")
+        and previousTarget.destinationKind == target.destinationKind
+        and Handoff(previousTarget.destinationAction) and Handoff(target.destinationAction)
+        and not previousTarget.navigationArea and not target.navigationArea
+        and not previousTarget.guideTravelIntent and not target.guideTravelIntent
+        and not record._corePlanning and not record._coreRoutePending
+        and record.currentLeg and record.currentLeg.walkingDescription ~= nil
+    local sameStep
+    -- Providers with stable step identities can update localized text or late
+    -- item/NPC names without turning a presentation refresh into pathfinding.
+    if previousIdentity ~= nil or identity ~= nil then
+        sameStep = previousIdentity == identity
+    else
+        sameStep = tostring(previousTarget and previousTarget.rawTitle or "") ==
+            tostring(target and target.rawTitle or "")
+    end
     return type(record) == "table"
         and NormalizeProviderKey(record.guideProvider) == providerKey
         and IsSameGuideRouteTarget(record.target, target)
-        and tostring(record.target and record.target.rawTitle or "") == tostring(target and target.rawTitle or "")
-        and tostring(record.target and record.target.source or "") == tostring(target and target.source or "")
+        and record.target.navigationNpcID == target.navigationNpcID
+        and record.target.navigationHeight == target.navigationHeight
+        and record.target.navigationContinent == target.navigationContinent
+        and (sameStep or sameInteraction)
+        and
+        (sameInteraction or tostring(record.target and record.target.source or "") == tostring(target and target.source or ""))
 end
 
 local function ShouldRouteProvider(providerKey, opts)
@@ -475,40 +584,50 @@ local function ShouldRouteProvider(providerKey, opts)
     end
 
     local allowProviderSwitch = opts.allowProviderSwitch == true
+    local savedProvider = GetSavedGuideProvider()
+    if not allowProviderSwitch and savedProvider and ProviderHasGuide(savedProvider) then
+        return savedProvider == providerKey
+    end
     local activeProvider = NS.GetActiveGuideProvider()
     if activeProvider then
         if activeProvider == providerKey then
             return true
         end
-        if GetProviderVisibility(activeProvider) ~= "visible" then
+        if not ProviderHasGuide(activeProvider) then
             return true
         end
         return allowProviderSwitch
     end
 
-    local savedProvider = GetSavedGuideProvider()
-    if savedProvider and ProviderIsLoaded(providers[savedProvider]) and GetProviderVisibility(savedProvider) == "visible" then
-        return savedProvider == providerKey or allowProviderSwitch
-    end
     return true
 end
 
 local function StorePassiveGuideProjection(providerKey, target)
     local routing = EnsureGuideRoutingState()
-    local record = BuildPassiveGuideRecord(providerKey, target)
     local previous = routing.guideRouteStates[providerKey]
     if type(previous) == "table"
         and previous.authority == "guide"
         and SameGuideRecordTarget(previous, target, providerKey)
         and type(previous.legs) == "table"
     then
-        if ApplyGuideTargetPresentation(previous, target, providerKey)
+        if NS.SetGuideRouteTarget(previous, target, providerKey)
             and type(NS.SyncGuideQueueProjection) == "function"
         then
             NS.SyncGuideQueueProjection(previous)
         end
         return previous
     end
+    -- Preserve provider-specific fields without sharing its mutable target table.
+    local snapshot = {}
+    for key, value in pairs(target) do snapshot[key] = value end
+    local record = {
+        target = snapshot,
+        authority = "guide",
+        suppressed = false,
+        createdAt = GetTimeSafe(),
+        _routePlanningResume = true
+    }
+    NS.SetGuideRouteTarget(record, target, providerKey)
     routing.guideRouteStates[providerKey] = record
     if routing.activeGuideProvider == providerKey then
         routing.guideRouteState = record
@@ -548,12 +667,17 @@ function NS.UpdateGuideTarget(providerKey, target, suppressed, opts)
         return true
     end
 
-    SetActiveGuideProvider(providerKey, true)
+    -- A temporary fallback must not erase the provider we are waiting to
+    -- restore. Explicit selection replaces that preference immediately.
+    SetActiveGuideProvider(providerKey, not GetSavedGuideProvider()
+        or opts.explicit == true or opts.allowProviderSwitch == true)
     if type(NS.SetActiveRouteSource) == "function" then
         NS.SetActiveRouteSource("guide")
     end
     if opts.explicit == true then
-        ClearManualAuthorityForExplicitGuideActivation(opts.reason or "guide_explicit_takeover")
+        local reason = opts.reason
+        NS.ClearPendingGuideSelection()
+        ClearManualRouteForGuideSelection(reason)
     end
 
     local routing = EnsureGuideRoutingState()
@@ -567,9 +691,12 @@ function NS.UpdateGuideTarget(providerKey, target, suppressed, opts)
         and not HasCarrierLeg(gs and gs.legs)
         and not routePending
     if sameTarget and (hasPlannedLegs or routePending) and not needsCarrierRetry then
-        local presentationChanged = ApplyGuideTargetPresentation(gs, target, providerKey)
+        local presentationChanged = NS.SetGuideRouteTarget(gs, target, providerKey)
         routing.guideRouteState = gs
-        if presentationChanged or opts.presentationRefresh == true then
+        -- Explicit activation must republish an accepted route even when its
+        -- target/text are unchanged: the carrier can still belong to another
+        -- provider (or a manual route that was just cleared).
+        if opts.explicit == true or presentationChanged or opts.presentationRefresh == true then
             if hasPlannedLegs and type(NS.RecomputeCarrier) == "function" then
                 NS.RecomputeCarrier()
             elseif type(NS.SyncGuideQueueProjection) == "function" then
@@ -592,12 +719,16 @@ function NS.UpdateGuideTarget(providerKey, target, suppressed, opts)
     return routed == true
 end
 
-local function ExtractProviderTarget(providerKey)
+-- ============================================================
+-- Target extraction and diagnostics
+-- ============================================================
+
+local function ExtractProviderTarget(providerKey, opts)
     local adapter = providers[providerKey]
     if not ProviderIsLoaded(adapter) or type(adapter.extractTarget) ~= "function" then
         return nil, true
     end
-    local ok, target, suppressed = pcall(adapter.extractTarget)
+    local ok, target, suppressed = pcall(adapter.extractTarget, opts)
     if not ok then
         return nil, true
     end
@@ -684,7 +815,8 @@ local function BuildGenericProviderDebugLines(providerKey)
             "reason=" .. tostring(record.routeOutcomeReason or record.replanReason),
             "legs=" .. tostring(type(record.legs) == "table" and #record.legs or 0),
             "currentLegIndex=" .. tostring(record.currentLegIndex),
-            "current=" .. FormatDebugCoords(currentLeg and currentLeg.mapID, currentLeg and currentLeg.x, currentLeg and currentLeg.y),
+            "current=" ..
+            FormatDebugCoords(currentLeg and currentLeg.mapID, currentLeg and currentLeg.x, currentLeg and currentLeg.y),
             "currentTitle=" .. tostring(currentLeg and currentLeg.title),
         }, " ")
     else
@@ -711,28 +843,52 @@ function NS.GetGuideProviderDebugLines(providerKey)
     return BuildGenericProviderDebugLines(providerKey)
 end
 
+-- ============================================================
+-- Refresh scheduling
+-- ============================================================
+
 local function EvaluateGuideProvider(providerKey, reason, opts)
     providerKey = NormalizeProviderKey(providerKey)
-    if not providerKey or GetProviderVisibility(providerKey) ~= "visible" then
+    if not providerKey then return false end
+    local hasGuide = ProviderHasGuide(providerKey)
+    local previousPresence = guidePresence[providerKey]
+    guidePresence[providerKey] = hasGuide
+    local savedProvider = GetSavedGuideProvider()
+    if hasGuide and (providerKey == savedProvider
+            or (type(opts) == "table" and (opts.explicit or opts.allowProviderSwitch)))
+        and NS.GetActiveGuideProvider() ~= providerKey
+    then
+        opts = opts or {}
+        opts.presentationRefresh = true
+        SetActiveGuideProvider(providerKey, opts.explicit == true or opts.allowProviderSwitch == true)
+    end
+    if not hasGuide and previousPresence ~= false and NS.GetActiveGuideProvider() == providerKey then
+        -- Reconsider other providers when a guide is closed or becomes
+        -- unavailable. Their normal evaluations choose the available fallback,
+        -- coordinate-less and paused guides never enter this path.
+        for index = 1, #providerOrder do
+            local other = providerOrder[index]
+            if other ~= providerKey then NS.ScheduleGuideProviderEvaluation(other, "guide_unavailable") end
+        end
+    end
+    local visibility = providerKey and GetProviderVisibility(providerKey) or "absent"
+    if visibility == "hidden" then
+        -- AFK cameras, cinematics and native-frame cloaking hide presentation,
+        -- they do not relinquish the user's provider selection or accepted plan.
+        NS.SyncGuideVisualState()
+        return false
+    end
+    if not providerKey or visibility ~= "visible" then
         NS.ClearGuideRouteState(providerKey)
         return false
     end
-    local target, suppressed = ExtractProviderTarget(providerKey)
+    local target, suppressed = ExtractProviderTarget(providerKey, opts)
     return NS.UpdateGuideTarget(providerKey, target, suppressed, opts)
 end
 
 local function MergeEvaluationOpts(previous, nextOpts)
-    if type(previous) ~= "table" then
-        return nextOpts
-    end
-    if type(nextOpts) ~= "table" then
-        return previous
-    end
-
-    local merged = {}
-    for key, value in pairs(previous) do
-        merged[key] = value
-    end
+    if type(nextOpts) ~= "table" then return previous end
+    local merged = previous or {}
     for key, value in pairs(nextOpts) do
         if key == "explicit" or key == "allowProviderSwitch" then
             merged[key] = merged[key] == true or value == true
@@ -745,31 +901,28 @@ end
 
 function NS.ScheduleGuideProviderEvaluation(providerKey, reason, opts)
     providerKey = NormalizeProviderKey(providerKey)
-    if not providerKey then
-        return false
-    end
-    pendingReasonByProvider[providerKey] = type(reason) == "string" and reason or pendingReasonByProvider[providerKey] or "guide_signal"
+    if not providerKey then return false end
+    local selection = type(opts) == "table" and (opts.explicit or opts.allowProviderSwitch)
+    if selection then NS.ClearPendingGuideSelection() end
+    pendingReasonByProvider[providerKey] = type(reason) == "string" and reason
+        or pendingReasonByProvider[providerKey] or "guide_signal"
     pendingOptsByProvider[providerKey] = MergeEvaluationOpts(pendingOptsByProvider[providerKey], opts)
-    if pendingByProvider[providerKey] then
-        return true
+    if selection then pendingGuideSelection = pendingOptsByProvider[providerKey] end
+    local queue = evaluationQueues[providerKey]
+    if not queue then
+        queue = NS.Internal.Scheduling.CreateCoalescer(function()
+            local signalReason = pendingReasonByProvider[providerKey] or "guide_signal"
+            local signalOpts = pendingOptsByProvider[providerKey]
+            pendingReasonByProvider[providerKey], pendingOptsByProvider[providerKey] = nil, nil
+            EvaluateGuideProvider(providerKey, signalReason, signalOpts)
+            if pendingGuideSelection == signalOpts then pendingGuideSelection = nil end
+            if type(NS.HandlePendingGuideTakeoverSignal) == "function" then
+                NS.HandlePendingGuideTakeoverSignal(signalReason)
+            end
+        end)
+        evaluationQueues[providerKey] = queue
     end
-    pendingByProvider[providerKey] = true
-    local function run()
-        local signalReason = pendingReasonByProvider[providerKey] or "guide_signal"
-        local signalOpts = pendingOptsByProvider[providerKey]
-        pendingByProvider[providerKey] = nil
-        pendingReasonByProvider[providerKey] = nil
-        pendingOptsByProvider[providerKey] = nil
-        EvaluateGuideProvider(providerKey, signalReason, signalOpts)
-        if type(NS.HandlePendingGuideTakeoverSignal) == "function" then
-            NS.HandlePendingGuideTakeoverSignal(signalReason)
-        end
-    end
-    if type(NS.After) == "function" then
-        NS.After(0, run)
-    else
-        run()
-    end
+    queue:Request()
     return true
 end
 
@@ -835,6 +988,10 @@ local function FindVisibleProviderForTarget(fallbackTarget)
     end
     return nil
 end
+
+-- ============================================================
+-- Explicit guide activation
+-- ============================================================
 
 function NS.ActivateGuideProvider(providerKey, reason, opts)
     providerKey = NormalizeProviderKey(providerKey)
@@ -906,11 +1063,8 @@ end
 function NS.StartGuideRoutingEvaluation()
     local routing = EnsureGuideRoutingState()
     if not NormalizeProviderKey(routing.activeGuideProvider) then
-        local savedSource = type(NS.GetSavedActiveRouteSource) == "function"
-            and NS.GetSavedActiveRouteSource()
-            or "guide"
-        local savedProvider = savedSource == "guide" and GetSavedGuideProvider() or nil
-        if savedProvider and ProviderIsLoaded(providers[savedProvider]) then
+        local savedProvider = GetSavedGuideProvider()
+        if savedProvider and ProviderHasGuide(savedProvider) then
             SetActiveGuideProvider(savedProvider, false)
         end
     end

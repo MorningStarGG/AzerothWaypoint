@@ -1,3 +1,12 @@
+-- ============================================================
+-- Queue state and persistence
+-- ============================================================
+--
+-- Owns guide, manual and transient queue records and restores the saved queues
+-- at login. A pending click is committed to the saved queue only when its
+-- route is accepted. A cancelled or failed attempt rolls back the pending
+-- transaction.
+
 local NS = _G.AzerothWaypointNS
 local state = NS.State
 local Queue = NS.RouteQueueInternal or {}
@@ -113,26 +122,6 @@ local function GetGuideQueueByProviderFromRouting(routing, provider)
     return type(byID) == "table" and byID[BuildGuideQueueID(provider)] or nil
 end
 
-local function SetLegacyGuideQueueAlias(routing)
-    if type(routing) ~= "table" then
-        return nil
-    end
-    local activeProvider = NormalizeGuideProviderKey(routing.activeGuideProvider)
-        or type(routing.guideQueues) == "table" and NormalizeGuideProviderKey(routing.guideQueues.activeProvider)
-        or nil
-    local queue = GetGuideQueueByProviderFromRouting(routing, activeProvider)
-    if type(queue) ~= "table" and type(routing.guideQueues) == "table" and type(routing.guideQueues.order) == "table" then
-        for index = 1, #routing.guideQueues.order do
-            queue = routing.guideQueues.byID[routing.guideQueues.order[index]]
-            if type(queue) == "table" then
-                break
-            end
-        end
-    end
-    routing.guideQueue = queue
-    return queue
-end
-
 function Queue.DeepCopy(value)
     if type(value) ~= "table" then
         return value
@@ -175,6 +164,10 @@ function Queue.NormalizeTitleKey(value)
     return value:lower()
 end
 
+-- ============================================================
+-- Queue storage and access
+-- ============================================================
+
 function Queue.EnsureQueueState()
     local routing = state.routing
     routing.manualQueues = routing.manualQueues or {
@@ -189,18 +182,6 @@ function Queue.EnsureQueueState()
         activeProvider = routing.activeGuideProvider,
     }
     routing.guideRouteStates = routing.guideRouteStates or {}
-    if type(routing.guideQueue) == "table"
-        and type(routing.guideQueue.provider) == "string"
-        and type(routing.guideQueues.order) == "table"
-        and #routing.guideQueues.order == 0
-    then
-        local legacyQueue = routing.guideQueue
-        local queue = EnsureGuideQueueForRouting(routing, legacyQueue.provider, legacyQueue.label)
-        queue.projection = legacyQueue.projection
-        routing.activeGuideProvider = routing.activeGuideProvider or legacyQueue.provider
-        routing.guideQueues.activeProvider = routing.guideQueues.activeProvider or legacyQueue.provider
-    end
-    SetLegacyGuideQueueAlias(routing)
     routing.transientQueueStack = routing.transientQueueStack or {}
     routing.queueUIState = routing.queueUIState or {
         selectedKey = nil,
@@ -219,17 +200,9 @@ function Queue.GetManualQueueState()
     return routing.manualQueues
 end
 
-function Queue.GetGuideQueueState(provider)
-    local routing = Queue.EnsureQueueState()
-    provider = NormalizeGuideProviderKey(provider)
-    local queue = provider and GetGuideQueueByProviderFromRouting(routing, provider) or SetLegacyGuideQueueAlias(routing)
-    return queue or (provider and EnsureGuideQueueForRouting(routing, provider)) or EnsureGuideQueueForRouting(routing, "zygor", "Guide")
-end
-
 function NS.SetGuideQueueProvider(key, label)
     local routing = Queue.EnsureQueueState()
     local q = EnsureGuideQueueForRouting(routing, key, label)
-    SetLegacyGuideQueueAlias(routing)
     return q
 end
 
@@ -296,7 +269,6 @@ function Queue.SetActiveGuideProvider(provider)
     end
     routing.activeGuideProvider = provider
     routing.guideQueues.activeProvider = provider
-    SetLegacyGuideQueueAlias(routing)
     return provider
 end
 
@@ -332,7 +304,6 @@ function Queue.AllocateQueueID(prefix)
     manualQueues.nextID = (tonumber(manualQueues.nextID) or 1) + 1
     return id
 end
-
 
 function Queue.FindManualQueueIndex(queueID)
     local manualQueues = Queue.GetManualQueueState()
@@ -370,8 +341,13 @@ end
 
 function Queue.GetAnyQueueByID(queueID)
     return Queue.GetQueueByID(queueID)
-        or (type(queueID) == "string" and Queue.GetGuideProviderFromQueueID(queueID) and Queue.GetGuideQueueByProvider(Queue.GetGuideProviderFromQueueID(queueID)) or nil)
+        or
+        (type(queueID) == "string" and Queue.GetGuideProviderFromQueueID(queueID) and Queue.GetGuideQueueByProvider(Queue.GetGuideProviderFromQueueID(queueID)) or nil)
 end
+
+-- ============================================================
+-- Saved manual queues
+-- ============================================================
 
 function Queue.PersistManualQueues()
     local db = type(NS.GetDB) == "function" and NS.GetDB() or nil
@@ -475,6 +451,10 @@ function Queue.DeleteManualQueue(queueID)
     Queue.RefreshQueueUI()
 end
 
+-- ============================================================
+-- Transient queue stack
+-- ============================================================
+
 function Queue.PushTransientQueue(queue)
     if type(queue) ~= "table" then
         return nil
@@ -523,6 +503,10 @@ function Queue.BuildQueueContext(queue, itemIndex)
     }
 end
 
+-- ============================================================
+-- Commit and rollback
+-- ============================================================
+
 function Queue.CreateQueueTransaction(label, queueContext, commitFn, rollbackFn)
     if type(queueContext) == "table" then
         queueContext.strictRouteSuccess = true
@@ -537,14 +521,10 @@ function Queue.CreateQueueTransaction(label, queueContext, commitFn, rollbackFn)
 end
 
 function Queue.CommitQueueTransaction(transaction, record)
-    if type(transaction) ~= "table" then
-        return false
-    end
-    if type(transaction.commit) == "function" then
-        transaction.commit(record)
-    end
+    if transaction == nil then return true end
+    if type(transaction) ~= "table" then return false end
+    if type(transaction.commit) == "function" and transaction.commit(record) == false then return false end
     Queue.PersistManualQueues()
-    Queue.RefreshQueueUI()
     return true
 end
 
@@ -574,6 +554,10 @@ function NS.RollbackPendingManualQueueTransaction(record, outcome, reason)
     end
     return Queue.RollbackQueueTransaction(transaction, record, outcome, reason)
 end
+
+-- ============================================================
+-- Restoring an active route
+-- ============================================================
 
 function Queue.AddQueueRestoreCandidate(candidates, seen, queueID)
     if type(queueID) ~= "string" or seen[queueID] then
@@ -605,11 +589,13 @@ function Queue.ResolveSavedActiveQueueRoute(saved, manualQueues, record)
         local queue = manualQueues.byID[queueID]
         if type(queue) == "table" then
             local itemIndex = tonumber(record.queueItemIndex) or tonumber(queue.activeItemIndex) or 1
-            if Queue.QueueItemMatchesDestination(queue.items and queue.items[itemIndex], record.mapID, record.x, record.y, record.title) then
+            local meta = record.meta or record
+            if Queue.QueueItemMatchesDestination(queue.items and queue.items[itemIndex], record.mapID, record.x, record.y, record.title, meta) then
                 return queueID, itemIndex
             end
 
-            local matchedIndex = Queue.FindQueueItemByDestination(queue, record.mapID, record.x, record.y, record.title)
+            local matchedIndex = Queue.FindQueueItemByDestination(queue, record.mapID, record.x, record.y, record.title,
+                meta)
             if matchedIndex then
                 return queueID, matchedIndex
             end
@@ -676,6 +662,8 @@ function NS.HydrateManualQueues()
                         sourceAddon = itemMeta.sourceAddon,
                         searchKind = itemMeta.searchKind,
                         manualQuestID = itemMeta.manualQuestID,
+                        backendOverride = itemMeta.backendOverride,
+                        questContext = itemMeta.questContext,
                         mapPinInfo = itemMeta.mapPinInfo,
                     })
                 end
@@ -710,7 +698,8 @@ function NS.HydrateManualQueues()
                 local duplicateQueue = nil
                 if #queue.items == 1 then
                     local item = queue.items[1]
-                    duplicateQueue = Queue.FindSingleDestinationManualQueue(item.mapID, item.x, item.y, item.title)
+                    duplicateQueue = Queue.FindSingleDestinationManualQueue(item.mapID, item.x, item.y, item.title, nil,
+                        item.meta)
                 end
                 if type(duplicateQueue) == "table" then
                     prunedDuplicateQueues = true
@@ -773,4 +762,3 @@ function NS.RestoreManualQueues(opts)
     end
     return false
 end
-

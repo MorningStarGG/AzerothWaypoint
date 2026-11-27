@@ -1,3 +1,10 @@
+-- ============================================================
+-- Area POI waypoints
+-- ============================================================
+--
+-- Adopts a supertracked area POI as a manual route and tracks the pin metadata
+-- used for its destination.
+
 local NS = _G.AzerothWaypointNS
 local state = NS.State
 NS.Internal.BlizzardTakeovers = NS.Internal.BlizzardTakeovers or {}
@@ -7,7 +14,6 @@ local GetActiveManualDestination = NS.GetActiveManualDestination
 local ClearActiveManualDestination = NS.ClearActiveManualDestination
 local GetGuideVisibilityState = NS.GetGuideVisibilityState
 local ReadWaypointCoords = NS.ReadWaypointCoords
-local Signature = NS.Signature
 
 state.bridgeAreaPoiTakeover = state.bridgeAreaPoiTakeover or {
     adoptionRetrySerial = 0,
@@ -20,7 +26,7 @@ local AREA_POI_ADOPTION_RETRY_MAX_ATTEMPTS = 4
 local BLIZZARD_MAP_PIN_KIND_AREA_POI = "area_poi"
 
 -- ============================================================
--- Local helpers
+-- Area POI identifiers and map candidates
 -- ============================================================
 
 local function NormalizeAreaPoiID(areaPoiID)
@@ -49,51 +55,11 @@ local function IsAreaPoiMapPinType(pinType)
     return pinType == GetAreaPoiMapPinType()
 end
 
-local function GetWaypointSignature(mapID, x, y)
-    if type(Signature) ~= "function" then
-        return nil
-    end
-    if type(mapID) ~= "number" or type(x) ~= "number" or type(y) ~= "number" then
-        return nil
-    end
-    return Signature(mapID, x, y)
-end
+local GetWaypointSignature = NS.GetWaypointSignatureForCoords
 
-local function ReadMapPositionCoords(position)
-    if type(position) ~= "table" then
-        return nil, nil
-    end
-    if type(position.GetXY) == "function" then
-        local ok, x, y = pcall(position.GetXY, position)
-        if ok and type(x) == "number" and type(y) == "number" then
-            return x, y
-        end
-    end
-    local x = type(position.x) == "number" and position.x or nil
-    local y = type(position.y) == "number" and position.y or nil
-    return x, y
-end
+local ReadMapPositionCoords = NS.Internal.ReadMapPositionCoords
 
-local function ResolveMapTitle(mapID, x, y)
-    local mapInfo = type(C_Map) == "table"
-        and type(C_Map.GetMapInfo) == "function"
-        and C_Map.GetMapInfo(mapID)
-        or nil
-    local mapName = mapInfo and mapInfo.name or nil
-    if type(mapName) == "string" and mapName ~= "" then
-        if type(x) == "number" and type(y) == "number" then
-            return string.format("%s %.0f, %.0f", mapName, x * 100, y * 100)
-        end
-        return mapName
-    end
-    if type(mapID) == "number" then
-        if type(x) == "number" and type(y) == "number" then
-            return string.format("Waypoint %d %.0f, %.0f", mapID, x * 100, y * 100)
-        end
-        return "Waypoint " .. tostring(mapID)
-    end
-    return "Waypoint"
-end
+local ResolveMapTitle = M.ResolveMapTitle
 
 local function BumpChurnCounter(key, amount)
     if type(NS.BumpChurnCounter) == "function" then
@@ -102,7 +68,7 @@ local function BumpChurnCounter(key, amount)
 end
 
 -- ============================================================
--- GetCurrentSuperTrackedAreaPoiID
+-- Current supertracked POI
 -- ============================================================
 
 local function GetCurrentSuperTrackedMapPinID(expectedPinType)
@@ -209,7 +175,7 @@ local function ResolveAreaPoiDestination(areaPoiID, preferredMapID)
 end
 
 -- ============================================================
--- MapPinInfo
+-- Pin metadata lookup
 -- ============================================================
 
 local function ReadCanonicalAreaPoiMapPinInfo(destination)
@@ -311,7 +277,7 @@ local function GetActiveBlizzardAreaPoiManual()
 end
 
 -- ============================================================
--- Metadata builder
+-- Destination metadata
 -- ============================================================
 
 local function BuildBlizzardAreaPoiMeta(areaPoiID, mapID, x, y, explicit, areaPoiInfo)
@@ -456,7 +422,7 @@ local function ScheduleAreaPoiAdoptionRetry(areaPoiID, preferredMapID, explicit,
 end
 
 -- ============================================================
--- Clear
+-- Clearing a POI route
 -- ============================================================
 
 local function ClearBlizzardAreaPoiBackedManual(clearReason)
@@ -529,7 +495,7 @@ local function HandleAreaPoiMapPinChanged(pinID, preferredMapID, explicit)
 end
 
 -- ============================================================
--- NS exports
+-- Public takeover handlers
 -- ============================================================
 
 function NS.GetAreaPoiIDForMapPinBackedManual(destination)
@@ -545,7 +511,7 @@ function NS.ClearSuperTrackedAreaPoiIfCurrent(areaPoiID)
 end
 
 -- ============================================================
--- Kind registration
+-- Pin type registration
 -- ============================================================
 
 M.BlizzardKinds["area_poi"] = {
@@ -557,7 +523,9 @@ M.BlizzardKinds["area_poi"] = {
     commitPending = function(pending)
         local adopted, reason = AdoptBlizzardAreaPoiAsManual(
             pending.areaPoiID, pending.preferredMapID, true)
-        if adopted then CancelAreaPoiAdoptionRetry(); return true end
+        if adopted then
+            CancelAreaPoiAdoptionRetry(); return true
+        end
         if reason == "unresolved" then
             ScheduleAreaPoiAdoptionRetry(pending.areaPoiID, pending.preferredMapID, true)
         end

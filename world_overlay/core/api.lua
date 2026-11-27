@@ -62,6 +62,26 @@ local MODE_CONFIRM_WINDOW = {
     ["pinpoint->waypoint"] = 0.10,
 }
 
+-- Visible mode changes must remain stable for the same target. Hiding the
+-- marker and showing it for the first time take effect on the current update.
+local function ConfirmOverlayMode(previous, candidate)
+    if candidate ~= previous and candidate ~= "hidden" and previous ~= "hidden" then
+        local now = GetTime()
+        if overlay.pendingMode ~= candidate or overlay.pendingModeSig ~= target.sig then
+            overlay.pendingMode = candidate
+            overlay.pendingModeSince = now
+            overlay.pendingModeSig = target.sig
+            return previous
+        end
+        local window = MODE_CONFIRM_WINDOW[previous .. "->" .. candidate] or 0
+        if now - (overlay.pendingModeSince or 0) < window then return previous end
+    end
+    overlay.pendingMode = nil
+    overlay.pendingModeSince = 0
+    overlay.pendingModeSig = nil
+    return candidate
+end
+
 local function EnsureActiveModeFrames(mode, prevMode)
     if transition.active then
         if transition.fromMode == "waypoint" or transition.toMode == "waypoint" then
@@ -169,7 +189,8 @@ function NS.SyncNativeWorldOverlay(uid, mapID, x, y, title, source, kind, conten
     local phase = StartChurnPhase()
     EnsureDriverRoot()
     ApplyOverlayAdornmentStyleToAll()
-    local nextSig = uid ~= nil and type(mapID) == "number" and type(x) == "number" and type(y) == "number" and Signature(mapID, x, y) or nil
+    local nextSig = uid ~= nil and type(mapID) == "number" and type(x) == "number" and type(y) == "number" and
+    Signature(mapID, x, y) or nil
     local sigChanged = nextSig ~= target.sig
     local normalizedTitle = NormalizeText(title) or title
     local nextContentSig = type(contentSnapshot) == "table" and contentSnapshot.contentSig or nil
@@ -270,6 +291,34 @@ function NS.RefreshNativeWorldOverlay()
     EndChurnPhase("phaseNativeSyncKB", phase)
 end
 
+-- The slower driver tick positions and populates the active frames. Drawing
+-- once at zero elapsed applies the new layout without advancing animation time.
+local function UpdateVisibleMode(mode, prevMode)
+    EnsureActiveModeFrames(mode, prevMode)
+
+    RefreshNativeOverlayContent(false)
+    local iconSpec = overlay.cachedIconSpec or CONFIG.ICON_SPECS.guide
+    local pinpointSubtext = overlay.cachedPinpointSubtext
+    if transition.active then
+        if transition.fromMode == "waypoint" or transition.toMode == "waypoint" then
+            UpdateWaypointFrame(iconSpec, target.title)
+        end
+        if transition.fromMode == "pinpoint" or transition.toMode == "pinpoint" then
+            UpdatePinpointFrame(iconSpec, target.title, pinpointSubtext)
+        end
+    elseif mode == "waypoint" then
+        UpdateWaypointFrame(iconSpec, target.title)
+    elseif mode == "pinpoint" then
+        UpdatePinpointFrame(iconSpec, target.title, pinpointSubtext)
+    elseif mode == "navigator" then
+        UpdateNavigatorFrame(iconSpec)
+        ResetModeTransition("navigator")
+    else
+        return
+    end
+    RenderNativeOverlayVisuals(0)
+end
+
 function NS.UpdateNativeWorldOverlay()
     local phase = StartChurnPhase()
 
@@ -288,44 +337,7 @@ function NS.UpdateNativeWorldOverlay()
         M.frameCacheDirty = false
     end
     local prevMode = derived.mode
-    local rawMode = ResolveMode()
-    local now = GetTime()
-    local mode
-
-    if overlay.pendingMode and overlay.pendingModeSig ~= target.sig then
-        overlay.pendingMode = nil
-        overlay.pendingModeSince = 0
-        overlay.pendingModeSig = nil
-    end
-
-    if rawMode == prevMode then
-        overlay.pendingMode = nil
-        overlay.pendingModeSince = 0
-        overlay.pendingModeSig = nil
-        mode = rawMode
-    elseif rawMode == "hidden" or prevMode == "hidden" then
-        overlay.pendingMode = nil
-        overlay.pendingModeSince = 0
-        overlay.pendingModeSig = nil
-        mode = rawMode
-    elseif rawMode == overlay.pendingMode then
-        local key = prevMode .. "->" .. rawMode
-        local window = MODE_CONFIRM_WINDOW[key] or 0
-        if window <= 0 or (now - (overlay.pendingModeSince or 0)) >= window then
-            overlay.pendingMode = nil
-            overlay.pendingModeSince = 0
-            overlay.pendingModeSig = nil
-            mode = rawMode
-        else
-            mode = prevMode
-        end
-    else
-        overlay.pendingMode = rawMode
-        overlay.pendingModeSince = now
-        overlay.pendingModeSig = target.sig
-        mode = prevMode
-    end
-
+    local mode = ConfirmOverlayMode(prevMode, ResolveMode())
     derived.mode = mode
     if mode ~= prevMode then
         local isNavWaypoint = (prevMode == "navigator" and mode == "waypoint")
@@ -363,49 +375,7 @@ function NS.UpdateNativeWorldOverlay()
         return
     end
 
-    EnsureActiveModeFrames(mode, prevMode)
-
-    RefreshNativeOverlayContent(false)
-    local iconSpec = overlay.cachedIconSpec or CONFIG.ICON_SPECS.guide
-    local pinpointSubtext = overlay.cachedPinpointSubtext
-    if transition.active then
-        if transition.fromMode == "waypoint" or transition.toMode == "waypoint" then
-            UpdateWaypointFrame(iconSpec, target.title)
-        end
-        if transition.fromMode == "pinpoint" or transition.toMode == "pinpoint" then
-            UpdatePinpointFrame(iconSpec, target.title, pinpointSubtext)
-        end
-        RenderNativeOverlayVisuals(0)
-        ApplySuperTrackedFrameVisibility()
-        EndChurnPhase("phaseNativeUpdateKB", phase)
-        return
-    end
-
-    if mode == "waypoint" then
-        UpdateWaypointFrame(iconSpec, target.title)
-        RenderNativeOverlayVisuals(0)
-        ApplySuperTrackedFrameVisibility()
-        EndChurnPhase("phaseNativeUpdateKB", phase)
-        return
-    end
-
-    if mode == "pinpoint" then
-        UpdatePinpointFrame(iconSpec, target.title, pinpointSubtext)
-        RenderNativeOverlayVisuals(0)
-        ApplySuperTrackedFrameVisibility()
-        EndChurnPhase("phaseNativeUpdateKB", phase)
-        return
-    end
-
-    if mode == "navigator" then
-        UpdateNavigatorFrame(iconSpec)
-        ResetModeTransition("navigator")
-        RenderNativeOverlayVisuals(0)
-        ApplySuperTrackedFrameVisibility()
-        EndChurnPhase("phaseNativeUpdateKB", phase)
-        return
-    end
-
+    UpdateVisibleMode(mode, prevMode)
     ApplySuperTrackedFrameVisibility()
     EndChurnPhase("phaseNativeUpdateKB", phase)
 end

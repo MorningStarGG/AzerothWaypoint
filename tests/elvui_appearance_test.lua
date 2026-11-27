@@ -1,0 +1,100 @@
+local c=assert(loadfile("tests/elvui_fixture.lua"))()
+local f,e,s,a,p=c.f,c.e,c.s,c.a,c.p
+assert(not p.GetSettings().enabled)
+f.Fire("PLAYER_LOGIN");f.Flush()
+assert(f.pluginName=="AzerothWaypoint" and f.pluginRegistrations==1 and #c.hooks==4)
+assert(not p.IsEnabled("plaque"))
+
+local root=f.Frame();a.Tag(root,"windows.options")
+local function make(kind,options)
+    local frame=f.Frame(root);frame:SetSize(226,24)
+    local original=f.Frame(frame);original:SetAlpha(0.7)
+    local descriptor={kind=kind,regions={original},target=frame}
+    for key,value in pairs(options or {})do descriptor[key]=value end
+    return frame,a.RegisterVisual(frame,descriptor),original
+end
+local label=f.Frame(root);label:SetText("Close")
+local close,closeRecord=make("close",{text=label})
+local button,buttonRecord=make("button")
+button:SetNormalTexture("Original/arrow")
+local native=button:GetNormalTexture()
+local dropdown,dropdownRecord=make("dropdown")
+local check,checkRecord=make("checkbox")
+check:SetChecked(true)
+local progress,progressRecord=make("progress")
+progress:SetValue(34)
+local value=0.5
+local slider,sliderRecord=make("slider",{min=0,max=1,step=0.1,get=function()return value end,set=function(v)value=v end})
+slider:SetValue(value)
+local panel,panelRecord,art=make("window")
+local _,queueInset,queueArt=make("inset",{surface="windows.queue"})
+local _,taxiShell=make("window",{surface="windows.taxi"})
+local scrollBar = f.Frame(root)
+local scrollThumb, scrollTrack = f.Frame(scrollBar), f.Frame(scrollBar)
+local scrollbar = a.RegisterVisual(scrollBar, { kind = "scrollbar", target = scrollThumb, track = scrollTrack,
+    regions = { scrollThumb, scrollTrack } })
+local header,headerRecord=make("header")
+local text=f.Frame(root);a.Text(text,"guide.zygor","TEXT")
+local clicks=0
+button:SetScript("OnClick",function()clicks=clicks+1 end)
+a.Select("elvui");f.Flush()
+assert(not p.lastError,p.lastError)
+assert(text:GetFont()=="ElvUI.ttf" and not p.GetRGB("guide.zygor","TEXT"))
+assert(panelRecord.applied and art:GetAlpha()==0 and panelRecord.currentState.root.template=="Transparent")
+assert(queueInset.applied and queueArt:GetAlpha()==0 and queueInset.currentState.root.template=="Default")
+assert(taxiShell.applied and taxiShell.currentState.root.template=="Transparent")
+assert(scrollbar.currentState.fill.colorTexture[1] == e.media.rgbvaluecolor[1])
+assert(scrollbar.holder.awpScrollTrack.allPoints == scrollTrack and scrollTrack:GetAlpha() == 0)
+assert(buttonRecord.currentState.root.stripped==nil and buttonRecord.currentState.root.IsSkinned)
+assert(button:GetNormalTexture()==native and native.textureFile=="Original/arrow" and not button.IsSkinned)
+button:GetScript("OnEnter")(button);button:GetScript("OnClick")(button)
+assert(clicks==1 and buttonRecord.currentState.root.hovered)
+assert(not button.stripped and button:GetWidth()==226)
+assert(closeRecord.currentState.hideText and label:GetAlpha()==0 and not close.hitInsets)
+assert(closeRecord.currentState.widget.hitInsets[1]==6)
+assert(dropdownRecord.currentState.root.backdrop and not dropdown.stripped)
+assert(checkRecord.currentState.widget:GetChecked()==true)
+assert(progressRecord.currentState.bar:GetValue()==34)
+assert(sliderRecord.currentState.slider:GetValue()==0.5 and slider:GetHeight()==24)
+assert(not headerRecord.currentState.fill and not headerRecord.currentState.line)
+local input=sliderRecord.currentState.input
+input:SetText("0.74");input:GetScript("OnEnterPressed")(input)
+assert(math.abs(value-0.7)<0.001)
+
+local count=#f.frames
+local before=p.counters.applied
+for _=1,1000 do p.RequestRefresh()end
+f.Flush();assert(#f.frames==count and p.counters.applied==before)
+collectgarbage("collect");collectgarbage("stop")
+local memory=collectgarbage("count")
+for _=1,2000 do a.UpdateVisual(panel);a.UpdateVisual(button)end
+local allocated=collectgarbage("count")-memory
+collectgarbage("restart")
+assert(allocated<8 and #f.frames==count,"Unchanged visuals churn: "..allocated)
+
+e.media.rgbvaluecolor={0.8,0.2,0.3};e:UpdateMedia();f.Flush()
+assert(a.GetRGB("guide.zygor","ACCENT","header")==0.8)
+assert(scrollbar.currentState.fill.colorTexture[1] == 0.8)
+assert(p.counters.applied==before+1 and #f.frames==count)
+p.SetSetting("guide.dugi","fonts",false);f.Flush()
+assert(p.GetSettings("guide.zygor").fonts and not p.GetSettings("guide.dugi").fonts)
+e.media.normTex="New/bar";e:UpdateMedia();f.Flush()
+assert(progressRecord.currentState.bar.textureFile=="New/bar")
+f.combat=true;e.media.normTex="Combat/bar";e:UpdateEnd();f.Flush()
+assert(a.deferred and progressRecord.currentState.bar.textureFile=="New/bar")
+f.combat=false;f.Fire("PLAYER_REGEN_ENABLED");f.Flush()
+assert(progressRecord.currentState.bar.textureFile=="Combat/bar")
+a.Select("awp");f.Flush()
+assert(art:GetAlpha()==0.7 and label:GetAlpha()==1 and text:GetFont()=="AWP.ttf")
+assert(queueArt:GetAlpha()==0.7 and not queueInset.applied and not taxiShell.applied)
+assert(scrollThumb:GetAlpha() == 1 and scrollTrack:GetAlpha() == 1 and not scrollbar.holder:IsShown())
+assert(not panelRecord.applied and not closeRecord.holder:IsShown())
+a.Select("elvui");f.Flush()
+local actual=s.HandleButton;s.HandleButton=nil;p.RequestRefresh();f.Flush()
+assert(not p.IsEnabled("plaque") and select(2,p.GetStatus()):find("HandleButton",1,true))
+assert(art:GetAlpha()==0.7 and label:GetAlpha()==1)
+s.HandleButton=actual;p.RequestRefresh();f.Flush();assert(panelRecord.applied)
+local observers=0
+for _,hook in ipairs(c.hooks)do if hook.owner==e then observers=observers+1 end end
+assert(f.pluginRegistrations==1 and observers==4)
+print("ElvUI appearance: installed helpers, client-neutral rendering, independent settings, restoration, bounded refresh and combat passed")

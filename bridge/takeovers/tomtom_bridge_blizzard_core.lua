@@ -1,3 +1,10 @@
+-- ============================================================
+-- Blizzard waypoint takeover coordination
+-- ============================================================
+--
+-- Shares Blizzard pin classification, click ownership and pending adoption
+-- state across takeover modules.
+
 local NS = _G.AzerothWaypointNS
 local state = NS.State
 
@@ -178,7 +185,15 @@ local function DoesStackMatchAnyPattern(stack, patterns)
     return false
 end
 
-local IsBuiltinGenericAddonDenied
+local function IsBuiltinGenericAddonDenied(addonName)
+    if type(addonName) ~= "string" then
+        return true
+    end
+    local key = addonName:lower()
+    return BUILTIN_GENERIC_ADDON_DENYLIST[key] == true
+        or key:find("^blizzard_") ~= nil
+        or key:find("^zygorguidesviewer") ~= nil
+end
 
 local function ExtractAddonNameFromStack(stack)
     if type(stack) ~= "string" then
@@ -193,16 +208,6 @@ local function ExtractAddonNameFromStack(stack)
         end
     end
     return nil
-end
-
-IsBuiltinGenericAddonDenied = function(addonName)
-    if type(addonName) ~= "string" then
-        return true
-    end
-    local key = addonName:lower()
-    return BUILTIN_GENERIC_ADDON_DENYLIST[key] == true
-        or key:find("^blizzard_") ~= nil
-        or key:find("^zygorguidesviewer") ~= nil
 end
 
 local function IsGenericAddonClickStack(stack)
@@ -399,6 +404,27 @@ end
 -- Coord and visibility helpers
 -- ============================================================
 
+function M.ResolveMapTitle(mapID, x, y)
+    local mapInfo = type(C_Map) == "table"
+        and type(C_Map.GetMapInfo) == "function"
+        and C_Map.GetMapInfo(mapID)
+        or nil
+    local mapName = mapInfo and mapInfo.name or nil
+    if type(mapName) == "string" and mapName ~= "" then
+        if type(x) == "number" and type(y) == "number" then
+            return string.format("%s %.0f, %.0f", mapName, x * 100, y * 100)
+        end
+        return mapName
+    end
+    if type(mapID) == "number" then
+        if type(x) == "number" and type(y) == "number" then
+            return string.format("Waypoint %d %.0f, %.0f", mapID, x * 100, y * 100)
+        end
+        return "Waypoint " .. tostring(mapID)
+    end
+    return "Waypoint"
+end
+
 local function GetWaypointSignature(mapID, x, y)
     local Signature = NS.Signature
     if type(Signature) ~= "function" then
@@ -547,7 +573,7 @@ local function DoesCurrentGuideStepLabelMatchID(id)
     for labelName, labelData in pairs(labels) do
         local labelStepNum = type(labelData) == "table" and tonumber(labelData[1]) or tonumber(labelData)
         if type(labelName) == "string"
-            and labelName:sub(-#suffix) == suffix
+            and labelName:sub(- #suffix) == suffix
             and labelStepNum == currentStepNum
         then
             return true
@@ -806,19 +832,20 @@ local function ActivateGuideRouteFromPendingTakeover(pending, mapID, x, y, trigg
         return false
     end
 
-    local activated = NS.ActivateGuideRouteForExplicitTakeover("guide_explicit_" .. tostring(pending.kind or "takeover"), {
-        startGuideStateToken = pending.startGuideStateToken,
-        fallbackTarget = {
-            mapID = mapID,
-            x = x,
-            y = y,
-        },
-        -- The pending takeover state already proved guide ownership for this
-        -- exact click. Do not re-apply the coordinate fallback gate here,
-        -- because guide-loaded POIs often route to the guide's first step,
-        -- not to the clicked map pin itself.
-        requireGuideChangeOrTargetMatch = false,
-    })
+    local activated = NS.ActivateGuideRouteForExplicitTakeover("guide_explicit_" .. tostring(pending.kind or "takeover"),
+        {
+            startGuideStateToken = pending.startGuideStateToken,
+            fallbackTarget = {
+                mapID = mapID,
+                x = x,
+                y = y,
+            },
+            -- The pending takeover state already proved guide ownership for this
+            -- exact click. Do not re-apply the coordinate fallback gate here,
+            -- because guide-loaded POIs often route to the guide's first step,
+            -- not to the clicked map pin itself.
+            requireGuideChangeOrTargetMatch = false,
+        })
 
     if activated and type(NS.Log) == "function" then
         NS.Log("Guide takeover adopted manual authority", tostring(pending.kind or "-"), tostring(trigger or "-"))
@@ -1016,7 +1043,7 @@ local function HandleSuperTrackedMapPinCleared()
 end
 
 -- ============================================================
--- Multi-type resolver chains (used by manual.lua and sync.lua)
+-- Resolving and releasing adopted destinations
 -- ============================================================
 
 function NS.HandleRemovedBlizzardMapPinDestination(destination)
@@ -1078,7 +1105,7 @@ function NS.GetMapPinInfoForMapPinBackedManualDestination(destination)
 end
 
 -- ============================================================
--- NS exports called from init.lua and hooks.lua
+-- Supertracking and pin-change entry points
 -- ============================================================
 
 function NS.HandlePendingGuideTakeoverSignal(trigger)
@@ -1184,7 +1211,7 @@ function NS.InstallBlizzardTakeoverHooks()
         end
     end
 
-    -- UserWaypoint hooks install themselves (hook-based, not event-based; reads debugstack at call site)
+    -- UserWaypoint hooks install themselves (hook-based, not event-based, reads debugstack at call site)
     if type(NS.InstallUserWaypointHooks) == "function" then
         NS.InstallUserWaypointHooks()
     end

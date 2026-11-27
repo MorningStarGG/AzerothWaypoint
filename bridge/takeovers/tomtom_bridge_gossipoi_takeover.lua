@@ -1,3 +1,10 @@
+-- ============================================================
+-- Gossip POI waypoints
+-- ============================================================
+--
+-- Remembers gossip POI selections and matches the resulting destination to the
+-- option the player chose.
+
 local NS = _G.AzerothWaypointNS
 local state = NS.State
 
@@ -20,9 +27,8 @@ local M = NS.Internal.BlizzardTakeovers
 local GetActiveManualDestination = NS.GetActiveManualDestination
 local ClearActiveManualDestination = NS.ClearActiveManualDestination
 local GetGuideVisibilityState = NS.GetGuideVisibilityState
-local Signature = NS.Signature
 
--- Confirmed in-game: GetPoiForUiMapID exists; GetGossipPoiForUiMapID is nil.
+-- Confirmed in-game: GetPoiForUiMapID exists, GetGossipPoiForUiMapID is nil.
 local GetPoiForUiMapID = C_GossipInfo and C_GossipInfo.GetPoiForUiMapID
 local GetPoiInfo = C_GossipInfo and C_GossipInfo.GetPoiInfo
 local GetOptions = C_GossipInfo and C_GossipInfo.GetOptions
@@ -34,14 +40,10 @@ local cachedGossipTypeMatcher
 local gossipEventFrame
 
 -- ============================================================
--- Helpers
+-- Gossip coordinates and option matching
 -- ============================================================
 
-local function GetWaypointSignature(mapID, x, y)
-    if type(Signature) ~= "function" then return nil end
-    if type(mapID) ~= "number" or type(x) ~= "number" or type(y) ~= "number" then return nil end
-    return Signature(mapID, x, y)
-end
+local GetWaypointSignature = NS.GetWaypointSignatureForCoords
 
 local function GetNormalizedGossipPoiCoords(poiInfo)
     if type(poiInfo) ~= "table" then return nil, nil end
@@ -403,7 +405,8 @@ local function GetActiveGossipPoiSearchKind(sig)
     end
 
     local destination = GetActiveManualDestination and GetActiveManualDestination() or nil
-    local identity = type(destination) == "table" and type(destination.identity) == "table" and destination.identity or nil
+    local identity = type(destination) == "table" and type(destination.identity) == "table" and destination.identity or
+    nil
     if type(destination) ~= "table"
         or destination.type ~= "manual"
         or type(identity) ~= "table"
@@ -438,11 +441,12 @@ local function ResolveAdoptedGossipSearchKind(sig)
 end
 
 -- ============================================================
--- Meta builder
+-- Destination metadata
 -- ============================================================
 
 local function BuildBlizzardGossipPoiMeta(mapID, x, y, sig, searchKind, optionName)
-    local normalizedSearchKind = type(searchKind) == "string" and searchKind ~= "" and searchKind or GetGossipFallbackTypeKey()
+    local normalizedSearchKind = type(searchKind) == "string" and searchKind ~= "" and searchKind or
+    GetGossipFallbackTypeKey()
     return NS.BuildRouteMeta(NS.BuildGossipPoiIdentity(mapID, x, y, {
         sig = sig,
         optionName = optionName,
@@ -466,7 +470,8 @@ local function AdoptGossipPoiAsTransient(mapID, x, y, title, searchKind, optionN
     gossip.activeGossipPoiSig = sig
     gossip.activeGossipPoiMapID = mapID
 
-    local routed = NS.RequestManualRoute(mapID, x, y, title, BuildBlizzardGossipPoiMeta(mapID, x, y, sig, searchKind, optionName))
+    local routed = NS.RequestManualRoute(mapID, x, y, title,
+        BuildBlizzardGossipPoiMeta(mapID, x, y, sig, searchKind, optionName))
     if not routed then
         if gossip.activeGossipPoiSig == sig then
             gossip.activeGossipPoiSig = nil
@@ -575,11 +580,12 @@ local function HandleRemovedGossipPoiDestination()
 end
 
 -- ============================================================
--- NS exports
+-- Public takeover handlers
 -- ============================================================
 
 function NS.HandleRemovedGossipPoiDestination(destination, clearReason)
-    local identity = type(destination) == "table" and type(destination.identity) == "table" and destination.identity or nil
+    local identity = type(destination) == "table" and type(destination.identity) == "table" and destination.identity or
+    nil
     if type(identity) ~= "table" or identity.kind ~= "gossip_poi" then
         return false
     end
@@ -631,7 +637,7 @@ function NS.InstallGossipPoiHooks()
 end
 
 -- Called by init.lua when DYNAMIC_GOSSIP_POI_UPDATED fires.
--- Fires with zero args; uses GetBestMapForUnit("player") to find context.
+-- Fires with zero args, uses GetBestMapForUnit("player") to find context.
 function NS.OnDynamicGossipPoiUpdated()
     if type(GetPoiForUiMapID) ~= "function" then return end
 

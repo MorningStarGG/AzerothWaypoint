@@ -97,7 +97,7 @@ local function ApplyCurrentTarget()
 
     -- Continent/world/cosmic maps are too coarse for interior locations.
     -- Farstrider can supply continent-level mapIDs (e.g. Eastern Kingdoms = 13)
-    -- for indoor destinations like the Wizard's Sanctum; those coordinates have
+    -- for indoor destinations like the Wizard's Sanctum, those coordinates have
     -- nav geometry outdoors but the destination is inside, so the overlay fires
     -- incorrectly. Suppress it whenever the leg map is continent-or-higher AND
     -- the player is currently indoors.
@@ -174,3 +174,6 @@ function NS.ClearWorldOverlay()
     overlay.contentSnapshot = nil
     ApplyCurrentTarget()
 end
+
+local _, private = ...
+if private and private.finishLoadGroup then private.finishLoadGroup("Sources and overlay") end

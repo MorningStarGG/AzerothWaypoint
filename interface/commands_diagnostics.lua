@@ -1,59 +1,14 @@
+-- ============================================================
+-- Navigation and guide diagnostics
+-- ============================================================
+--
+-- Runs the on-demand plaque, waypoint, route, guide step and resolver
+-- diagnostics.
+
 local NS = _G.AzerothWaypointNS
 local state = NS.State
 local M = NS.Internal.Interface.commands
 local trim = M.trim
-local IsAddonLoaded = NS.IsAddonLoaded
-
--- ============================================================
--- Formatting utilities
--- ============================================================
-
-local function countTableEntries(tbl)
-    if type(tbl) ~= "table" then
-        return 0
-    end
-
-    local count = 0
-    for _ in pairs(tbl) do
-        count = count + 1
-    end
-    return count
-end
-
-local function formatMemoryKB(value)
-    value = tonumber(value)
-    if not value then
-        return "n/a"
-    end
-    return string.format("%.1f KB", value)
-end
-
-local function formatPercent(numerator, denominator)
-    numerator = tonumber(numerator)
-    denominator = tonumber(denominator)
-    if not numerator or not denominator or denominator <= 0 then
-        return "n/a"
-    end
-    return string.format("%.1f%%", (numerator / denominator) * 100)
-end
-
-local function getTotalAddonMemoryKB()
-    UpdateAddOnMemoryUsage()
-    local total = 0
-    local count = C_AddOns.GetNumAddOns()
-    for index = 1, count do
-        total = total + (tonumber(GetAddOnMemoryUsage(index)) or 0)
-    end
-    return total
-end
-
-local function getAddonMemoryKB(name)
-    if type(name) ~= "string" or name == "" then
-        return nil
-    end
-    UpdateAddOnMemoryUsage()
-    return GetAddOnMemoryUsage(name)
-end
 
 -- ============================================================
 -- Plaque test
@@ -98,7 +53,7 @@ local DEFAULT_GLOW_PULSE = {
 local function getDefaultPlaqueSpec(native)
     local plaques = native and native.Plaques or nil
     if plaques and plaques.GetSpec then
-        return plaques.GetSpec(NS.Constants.WORLD_OVERLAY_PLAQUE_DEFAULT) or DEFAULT_PINPOINT_PANEL_SPEC
+        return plaques.GetSpec(NS.GetDefaultPlaqueType()) or DEFAULT_PINPOINT_PANEL_SPEC
     end
     return DEFAULT_PINPOINT_PANEL_SPEC
 end
@@ -962,17 +917,7 @@ local function diagSnapshot()
         and C_SuperTrack.IsSuperTrackingUserWaypoint()
         or false
     local rb = routing.selectedBackend or "-"
-    local ra, raBackend
-    if routing.manualAuthority then
-        ra = "manual"
-        raBackend = routing.manualAuthority.backend or "-"
-    elseif routing.guideRouteState then
-        ra = "guide"
-        raBackend = routing.guideRouteState.backend or "-"
-    else
-        ra = "none"
-        raBackend = "-"
-    end
+    local record, source = NS.GetActiveAuthorityRecord()
 
     return string.format(
         "IC:%s ICS:%s UIP:%s ZF:%s AF:%s TT:%s CA:%s GVS:%s WO:%s WM:%s WR:%s WNF:%s UW:%s STU:%s RB:%s RA:%s/%s",
@@ -980,7 +925,7 @@ local function diagSnapshot()
         tostring(zfv), tostring(afv), tostring(tmv),
         tostring(ca), gvs, tostring(wob), tostring(wom),
         tostring(wor), tostring(wof), tostring(wouw), tostring(wostu),
-        tostring(rb), tostring(ra), tostring(raBackend)
+        tostring(rb), tostring(source or "none"), tostring(record and record.backend or "-")
     )
 end
 
@@ -1208,12 +1153,7 @@ end
 
 local function describeCoreRoute()
     local routing = state.routing or {}
-    local record = routing.manualAuthority
-    local source = "manual"
-    if not record then
-        record = routing.guideRouteState
-        source = "guide"
-    end
+    local record, source = NS.GetActiveAuthorityRecord()
 
     if type(record) ~= "table" then
         return "CORE=nil"
@@ -1243,13 +1183,7 @@ local function describeCoreRoute()
 end
 
 local function describeCoreRouteLegs()
-    local routing = state.routing or {}
-    local record = routing.manualAuthority
-    local source = "manual"
-    if not record then
-        record = routing.guideRouteState
-        source = "guide"
-    end
+    local record, source = NS.GetActiveAuthorityRecord()
     if type(record) ~= "table" then
         return { "[ROUTE] LEGS nil" }
     end
@@ -1305,17 +1239,6 @@ local function packResults(...)
     return { n = select("#", ...), ... }
 end
 
-local function getActiveRouteRecord()
-    local routing = state.routing or {}
-    if routing.manualAuthority then
-        return routing.manualAuthority, "manual"
-    end
-    if routing.guideRouteState then
-        return routing.guideRouteState, "guide"
-    end
-    return nil, "-"
-end
-
 local function routeEnvTraceRawFacts()
     local indoors = nil
     if type(IsIndoors) == "function" and IsIndoors() then
@@ -1335,7 +1258,7 @@ end
 
 local function routeEnvTraceRecord()
     local routing = state.routing or {}
-    local record, source = getActiveRouteRecord()
+    local record, source = NS.GetActiveAuthorityRecord()
     if type(record) ~= "table" then
         return string.format(
             "state{lastEnv=%s pending=%s reason=%s} rec=nil",
@@ -1519,9 +1442,13 @@ local function handleRouteEnvTrace(arg)
     end
 end
 
+-- ============================================================
+-- Travel monitor snapshots and polling
+-- ============================================================
+
 local function describeTravelDiagProvider()
     local routing = state.routing or {}
-    local record, source = getActiveRouteRecord()
+    local record, source = NS.GetActiveAuthorityRecord()
     local backend = type(record) == "table" and record.backend or routing.selectedBackend
     local carrier = routing.carrierState
     return string.format(
@@ -1556,7 +1483,7 @@ local function describeTravelDiagAction()
 end
 
 local function shouldShowZygorPointerTravelDiag()
-    local record = getActiveRouteRecord()
+    local record = NS.GetActiveAuthorityRecord()
     return type(record) == "table" and record.backend == "zygor"
 end
 
@@ -1582,7 +1509,7 @@ local function travelDiagSnapshot()
         parts[#parts + 1] = describeWaypoint("CW", P.current_waypoint)
         parts[#parts + 1] = describeWaypoint("W1", type(P.waypoints) == "table" and P.waypoints[1] or nil)
     elseif P then
-        parts[#parts + 1] = "ZYGOR_POINTER=inactive activeBackend=" .. tostring((getActiveRouteRecord() or {}).backend or "-")
+        parts[#parts + 1] = "ZYGOR_POINTER=inactive activeBackend=" .. tostring((NS.GetActiveAuthorityRecord() or {}).backend or "-")
     else
         parts[#parts + 1] = "ZYGOR_POINTER=nil"
     end
@@ -1875,91 +1802,6 @@ local function handleDiag()
 end
 
 -- ============================================================
--- Memory report
--- ============================================================
-
-local function handleMem()
-    local worldOverlayBackend = NS.GetWorldOverlayBackend()
-    local selectedRoutingBackend = type(NS.GetSelectedBackendID) == "function"
-        and NS.GetSelectedBackendID()
-        or "unknown"
-    local effectiveRoutingBackend = type(NS.GetEffectiveBackendID) == "function"
-        and NS.GetEffectiveBackendID()
-        or "unknown"
-    local won = NS.State.WorldOverlay
-    local wo = NS.State.worldOverlay
-    local native = NS.Internal.WorldOverlay
-    local bridge = NS.State.bridge
-
-    local addonName = NS.ADDON_NAME
-    local zygorAddonName = type(NS.GetZygorAddonName) == "function"
-        and NS.GetZygorAddonName()
-        or "ZygorGuidesViewer"
-    local addonMem = getAddonMemoryKB(addonName)
-    local tomtomMem = getAddonMemoryKB("TomTom")
-    local zygorMem = getAddonMemoryKB(zygorAddonName)
-    local waypointUIMem = getAddonMemoryKB("WaypointUI")
-    local totalMem = getTotalAddonMemoryKB()
-    local waypointUIEnabled = type(NS.IsAddonEnabledForCurrentCharacter) == "function"
-        and NS.IsAddonEnabledForCurrentCharacter("WaypointUI")
-        or false
-
-    local questIconCacheCount = native and countTableEntries(native.questIconCache) or 0
-    local fontStringCacheCount = native and countTableEntries(native.fontStringTextCache) or 0
-
-    NS.Msg("[MEM] AddOn memory snapshot")
-    NS.Msg(
-        "[MEM] TotalAddOns:", formatMemoryKB(totalMem),
-        addonName .. ":", formatMemoryKB(addonMem), "(" .. formatPercent(addonMem, totalMem) .. ")"
-    )
-    NS.Msg(
-        "[MEM] TomTom:", formatMemoryKB(tomtomMem), "(" .. formatPercent(tomtomMem, totalMem) .. ")",
-        zygorAddonName .. ":", formatMemoryKB(zygorMem), "(" .. formatPercent(zygorMem, totalMem) .. ")"
-    )
-    NS.Msg(
-        "[MEM] WaypointUI:", formatMemoryKB(waypointUIMem), "(" .. formatPercent(waypointUIMem, totalMem) .. ")",
-        "Loaded=" .. tostring(IsAddonLoaded("WaypointUI")),
-        "EnabledForChar=" .. tostring(waypointUIEnabled)
-    )
-
-    NS.Msg(
-        "[MEM] RoutingBackend:",
-        "selected=" .. tostring(selectedRoutingBackend),
-        "effective=" .. tostring(effectiveRoutingBackend)
-    )
-    NS.Msg(
-        "[MEM] WorldOverlayBackend:", tostring(worldOverlayBackend),
-        "State:", tostring(wo and wo.backend or "nil"),
-        "NativeTarget:", tostring(won and won.target and won.target.active or false)
-    )
-
-    NS.Msg(
-        "[MEM] NativeFrames:",
-        "driver=" .. tostring(won and won.driver ~= nil or false),
-        "root=" .. tostring(won and won.root ~= nil or false),
-        "waypoint=" .. tostring(won and won.waypoint ~= nil or false),
-        "pinpoint=" .. tostring(won and won.pinpoint ~= nil or false),
-        "navigator=" .. tostring(won and won.navigator ~= nil or false),
-        "cachedNavFrame=" .. tostring(won and won.cachedNavFrame ~= nil or false)
-    )
-
-    NS.Msg(
-        "[MEM] NativeCaches:",
-        "questIconCache=" .. tostring(questIconCacheCount),
-        "fontStringTextCache=" .. tostring(fontStringCacheCount),
-        "contentDirty=" .. tostring(won and won.contentDirty or false),
-        "navFadeState=" .. tostring(won and won.navFadeState or "nil")
-    )
-
-    NS.Msg(
-        "[MEM] Diagnostics:",
-        "diag=" .. tostring(diagState.active),
-        "traveldiag=" .. tostring(travelDiagState.active),
-        "bridgeHeartbeat=" .. tostring(bridge and bridge.heartbeatFrame ~= nil or false)
-    )
-end
-
--- ============================================================
 -- Step debug
 -- ============================================================
 
@@ -1979,14 +1821,65 @@ local function sanitizeStepDebugLine(value)
 end
 
 local function handleStepDebug()
+    local progress = NS.Internal.RouteProgress
+    if progress then NS.Msg("[STEPDEBUG] " .. progress.GetDebugLine()) end
+    local record = NS.GetActiveAuthorityRecord and NS.GetActiveAuthorityRecord()
+    if record and record.manualQuestID and NS.ResolveQuestPresentation then
+        local quest = NS.ResolveQuestPresentation(record.manualQuestID, record.title, record)
+        if quest then
+            NS.Msg("[STEPDEBUG] quest=" .. record.manualQuestID .. " action=" .. tostring(quest.action)
+                .. " objective=" .. tostring(quest.objectiveIndex) .. " data=" .. tostring(quest.provenance)
+                .. " entity=" .. tostring(quest.entityKind) .. ":" .. tostring(quest.entityID))
+            NS.Msg("[STEPDEBUG] questTitle=" .. tostring(quest.title) .. " context=" .. tostring(quest.subtext))
+        end
+    end
+    local planning = NS.GetRoutePlanningStatus and NS.GetRoutePlanningStatus(record)
+    if planning then
+        NS.Msg("[STEPDEBUG] planner preferred=" .. planning.preferred .. " active=" .. tostring(planning.active)
+            .. " attempting=" .. tostring(planning.attempting) .. " deferred=" .. tostring(planning.deferred)
+            .. " nextRecoveryAt=" .. tostring(planning.nextRecoveryAt)
+            .. (planning.waiting and (" waiting=" .. planning.waiting .. " until=" .. tostring(planning.waitUntil)) or ""))
+        for id, reason in pairs(planning.reasons) do NS.Msg("[STEPDEBUG] " .. id .. " failure=" .. reason) end
+    end
+    local farstrider = NS.RoutingBackend_Farstrider
+    if planning and (planning.preferred == "farstrider" or planning.active == "farstrider")
+        and NS.IsWoWForever() and farstrider
+        and farstrider.GetFlightDataStatus(NS.GetPlayerMapID()) == false then
+        NS.Msg("[STEPDEBUG] Farstrider has no flight data for this character on this continent. Open a flight master to scan it.")
+    end
+    local dugiBackend = NS.RoutingBackend_Dugi
+    if NS.GetEffectiveBackendID and NS.GetEffectiveBackendID() == "dugi" and dugiBackend then
+        NS.Msg("[STEPDEBUG]", dugiBackend.GetDebugLine(record))
+    end
+    local polestar = NS.RoutingBackend_Polestar
+    local mapzeroth = NS.RoutingBackend_Mapzeroth
+    if record and record.backend == "mapzeroth" and mapzeroth then
+        NS.Msg("[STEPDEBUG] " .. mapzeroth.GetWalkingDiagnostics())
+    end
+    local questieRouter = NS.RoutingBackend_QuestieRouter
+    if record and record.backend == "questierouter" and questieRouter then
+        local line = questieRouter.GetWalkingDebugLine(record)
+        if line then NS.Msg("[STEPDEBUG] " .. line) end
+    end
+    if polestar then
+        local line = polestar.GetWalkingDebugLine()
+        if line then NS.Msg("[STEPDEBUG] " .. line) end
+    end
     local activeProvider = type(NS.GetActiveGuideProvider) == "function" and NS.GetActiveGuideProvider() or nil
     if (activeProvider == nil or activeProvider == "zygor")
         and type(NS.RequestGuideResolverFullDebug) == "function"
     then
         NS.RequestGuideResolverFullDebug()
+        NS.TickUpdate()
+        activeProvider = type(NS.GetActiveGuideProvider) == "function" and NS.GetActiveGuideProvider() or activeProvider
     end
-    NS.TickUpdate()
-    activeProvider = type(NS.GetActiveGuideProvider) == "function" and NS.GetActiveGuideProvider() or activeProvider
+    local actions = NS.Internal.GuideTrackerViewer and NS.Internal.GuideTrackerViewer.GuideActions
+    if actions and activeProvider then
+        local count, shown, pending = actions.GetStatus(activeProvider)
+        local model = actions.models[activeProvider]
+        NS.Msg("[STEPDEBUG] actions provider=" .. activeProvider .. " count=" .. count .. " panel=" .. tostring(shown)
+            .. " pending=" .. tostring(pending) .. " guide=" .. tostring(model and model.guide) .. " step=" .. tostring(model and model.step))
+    end
 
     local bridge = state.bridge
     local lastAppliedKind = type(bridge) == "table" and bridge.lastAppliedKind or nil
@@ -2066,12 +1959,12 @@ local function printResolverCaseResult(result)
     NS.Msg("[RESOLVERCASES] " .. table.concat({
         result.pass and "PASS" or "FAIL",
         tostring(result.id),
+        "fallbackOff=" .. (result.fallbackOffPassed and "PASS" or "FAIL"),
+        "fallbackOn=" .. (result.fallbackOnPassed and "PASS" or "FAIL"),
         "title=" .. formatResolverCaseValue(result.title),
         "subtext=" .. formatResolverCaseValue(result.subtext),
         "reason=" .. formatResolverCaseValue(result.debugReason),
         "subtextReason=" .. formatResolverCaseValue(result.subtextReason),
-        "legacyReason=" .. formatResolverCaseValue(result.legacyDebugReason),
-        "legacySubtextReason=" .. formatResolverCaseValue(result.legacySubtextReason),
         "clusterKind=" .. formatResolverCaseValue(result.clusterKind),
         "routeAllowed=" .. formatResolverCaseValue(result.routePresentationAllowed),
     }, " "))
@@ -2108,6 +2001,7 @@ local function handleResolverCases(rest)
             "summary",
             "total=" .. tostring(summary.total),
             "passed=" .. tostring(summary.passed),
+            "settingChecks=" .. tostring(summary.settingsPassed) .. "/" .. tostring(summary.total * 2),
             "failed=" .. tostring(summary.failed),
         }, " "))
 
@@ -2138,6 +2032,8 @@ local function handleResolverCases(rest)
         "detail",
         "category=" .. formatResolverCaseValue(result.category),
         "classification=" .. formatResolverCaseValue(result.classification),
+        "fallbackOnSubtext=" .. formatResolverCaseValue(result.fallbackOnSubtext),
+        "fallbackOnReason=" .. formatResolverCaseValue(result.fallbackOnReason),
     }, " "))
 
     if type(result.error) == "string" and result.error ~= "" then
@@ -2161,356 +2057,11 @@ local function handleResolverCases(rest)
     end
 end
 
--- ============================================================
--- Churn sampler
--- ============================================================
-
-local CHURN_COUNTER_KEYS = {
-    "tickUpdate",
-    "tickFromHook",
-    "tickFromHeartbeat",
-    "tickFromOther",
-    "resolveHit",
-    "resolveMiss",
-    "resolveMissNoCache",
-    "resolveMissStep",
-    "resolveMissGoal",
-    "resolveMissTargetSig",
-    "resolveMissMap",
-    "resolveMissCoord",
-    "resolveMissKind",
-    "resolveMissLegKind",
-    "resolveMissRouteType",
-    "resolveMissTitle",
-    "resolveMissFactsEpoch",
-    "resolveMissDialogEpoch",
-    "resolveMissFactsDirty",
-    "resolveMissFullDebug",
-    "resolveMissOther",
-    "buildFacts",
-    "invalidateFacts",
-    "invalidateDialog",
-    "driverUpdate",
-    "driverUpdateHidden",
-    "driverVisuals",
-    "nativeWorldOverlayUpdate",
-    "extractWaypoint",
-    "extractManual",
-    "manualMapPinAreaHit",
-    "manualMapPinAreaMiss",
-    "manualMapPinTaxiHit",
-    "manualMapPinTaxiMiss",
-    "manualIdentityAreaHit",
-    "manualIdentityAreaMiss",
-    "manualIdentityTaxiHit",
-    "manualIdentityTaxiMiss",
-    "manualIdentityEmptyBase",
-    "manualPersistCalls",
-    "manualPersistRecordReuse",
-    "manualPersistRecordBuild",
-    "manualPersistEqualSkip",
-    "manualPersistWrite",
-    "manualPersistNoRecord",
-    "routePlanAccept",
-    "routePlanSkip",
-    "routeBackendInvalidation",
-    "routeBackendInvalidationSkip",
-    "ensureHost",
-    "resolveSettableTarget",
-    "trySetHost",
-    "setUserWaypointCall",
-    "hostNotReady",
-    "hostThrottled",
-    "refreshWorldOverlay",
-    "userWaypointUpdatedEvent",
-    "samples",
-}
-
-local CHURN_PHASE_KEYS = {
-    "phaseBridgeSetupKB",
-    "phaseManualExtractKB",
-    "phaseManualLookupKB",
-    "phaseManualMapPinResolveKB",
-    "phaseManualMapPinKeyKB",
-    "phaseManualIdentityResolveKB",
-    "phaseTargetKB",
-    "phaseRouteKB",
-    "phaseResolverKB",
-    "phaseFinalizeKB",
-    "phaseBridgeStatePrepKB",
-    "phaseBridgeStatePersistKB",
-    "phaseBridgeStateCompareKB",
-    "phaseBridgePushKB",
-    "phaseBridgeOverlayKB",
-    "phaseWorldOverlayKB",
-    "phaseNativeSyncKB",
-    "phaseNativeUpdateKB",
-}
-
-local churnSampleFrame = nil
-
-local function resetChurnCounters(churn)
-    for _, key in ipairs(CHURN_COUNTER_KEYS) do
-        churn[key] = 0
-    end
-    for _, key in ipairs(CHURN_PHASE_KEYS) do
-        churn[key] = 0
-        churn[key .. "Peak"] = 0
-        churn[key .. "Count"] = 0
-    end
-    churn.routeValidation = {
-        mapzeroth = {},
-        farstrider = {},
-    }
-end
-
-local function formatRate(count, seconds)
-    if type(count) ~= "number" or type(seconds) ~= "number" or seconds <= 0 then
-        return "0/s"
-    end
-    return string.format("%d (%.1f/s)", count, count / seconds)
-end
-
-local function formatCount(count)
-    return tostring(tonumber(count) or 0)
-end
-
-local function formatRouteValidation(churn, backendID)
-    local all = type(churn.routeValidation) == "table" and churn.routeValidation or nil
-    local counters = all and type(all[backendID]) == "table" and all[backendID] or {}
-    return string.format(
-        "requested=%s coalesced=%s combatDeferred=%s executed=%s changed=%s failed=%s stale=%s depChecked=%s depChanged=%s depUnknown=%s",
-        formatCount(counters.requested),
-        formatCount(counters.coalesced),
-        formatCount(counters.combatDeferred),
-        formatCount(counters.executed),
-        formatCount(counters.stateChanged),
-        formatCount(counters.failed),
-        formatCount(counters.stale),
-        formatCount(counters.dependencyChecked),
-        formatCount(counters.dependencyChanged),
-        formatCount(counters.dependencyUnknown))
-end
-
-local function formatPhaseKB(churn, key)
-    local total = tonumber(churn[key]) or 0
-    local peak = tonumber(churn[key .. "Peak"]) or 0
-    local count = tonumber(churn[key .. "Count"]) or 0
-    return string.format("%.1f/%.1f/%d", total, peak, count)
-end
-
-local function parseChurnArgs(rest)
-    local duration
-    local phaseMemoryEnabled = false
-
-    for token in tostring(rest or ""):gmatch("%S+") do
-        local lower = token:lower()
-        local numeric = tonumber(token)
-        if numeric and not duration then
-            duration = numeric
-        elseif lower == "phase" or lower == "phases" or lower == "mem" or lower == "memory" then
-            phaseMemoryEnabled = true
-        end
-    end
-
-    return duration, phaseMemoryEnabled
-end
-
-local function handleChurn(rest)
-    local churn = state.churn
-    if type(churn) ~= "table" then
-        NS.Msg("[CHURN] State unavailable.")
-        return
-    end
-
-    if churn.active then
-        churn.active = false
-        churn.phaseMemoryEnabled = false
-        if churnSampleFrame then
-            churnSampleFrame:SetScript("OnUpdate", nil)
-        end
-        NS.Msg("[CHURN] Sampling cancelled.")
-        return
-    end
-
-    local duration, phaseMemoryEnabled = parseChurnArgs(rest)
-    if not duration or duration <= 0 then
-        duration = 5
-    end
-    if duration > 60 then
-        duration = 60
-    end
-
-    local addonName = NS.ADDON_NAME
-    local startMem = getAddonMemoryKB(addonName) or 0
-
-    resetChurnCounters(churn)
-    churn.startedAt = GetTime()
-    churn.duration = duration
-    churn.startMem = startMem
-    churn.peakMemKB = startMem
-    churn.phaseMemoryEnabled = phaseMemoryEnabled == true
-    churn.active = true
-
-    if not churnSampleFrame then
-        churnSampleFrame = CreateFrame("Frame")
-    end
-
-    local sampleElapsed = 0
-    local SAMPLE_INTERVAL = 0.25
-    churnSampleFrame:SetScript("OnUpdate", function(_, dt)
-        if not churn.active then
-            return
-        end
-        sampleElapsed = sampleElapsed + dt
-        if sampleElapsed < SAMPLE_INTERVAL then
-            return
-        end
-        sampleElapsed = 0
-        local mem = getAddonMemoryKB(addonName) or 0
-        if mem > (churn.peakMemKB or 0) then
-            churn.peakMemKB = mem
-        end
-        churn.samples = (churn.samples or 0) + 1
-    end)
-
-    if churn.phaseMemoryEnabled then
-        NS.Msg(string.format("[CHURN] Sampling for %ds with phase memory attribution. Stand still, don't touch anything.", duration))
-    else
-        NS.Msg(string.format("[CHURN] Sampling for %ds. Stand still, don't touch anything.", duration))
-    end
-
-    NS.After(duration, function()
-        if not churn.active then
-            return
-        end
-        churn.active = false
-        if churnSampleFrame then
-            churnSampleFrame:SetScript("OnUpdate", nil)
-        end
-
-        local grossMem = getAddonMemoryKB(addonName) or 0
-        if grossMem > (churn.peakMemKB or 0) then
-            churn.peakMemKB = grossMem
-        end
-        collectgarbage("collect")
-        local endMem = getAddonMemoryKB(addonName) or 0
-
-        local actualSeconds = math.max(0.01, GetTime() - churn.startedAt)
-        local churnKB = math.max(0, (churn.peakMemKB or grossMem) - (churn.startMem or 0))
-        local churnRate = churnKB / actualSeconds
-        local liveDelta = (endMem or 0) - (churn.startMem or 0)
-
-        NS.Msg(string.format("[CHURN] Results over %.1fs (%d samples):",
-            actualSeconds, churn.samples or 0))
-        NS.Msg(string.format("[CHURN] Mem: start=%s peak=%s end(pre-GC)=%s end(post-GC)=%s",
-            formatMemoryKB(churn.startMem),
-            formatMemoryKB(churn.peakMemKB),
-            formatMemoryKB(grossMem),
-            formatMemoryKB(endMem)))
-        NS.Msg(string.format("[CHURN] Churn=%.1f KB  rate=%.1f KB/s  live leak=%.1f KB",
-            churnKB, churnRate, liveDelta))
-        local phaseMemoryWasEnabled = churn.phaseMemoryEnabled == true
-        churn.phaseMemoryEnabled = false
-
-        NS.Msg(string.format("[CHURN] TickUpdate total=%s  hook=%s  heartbeat=%s",
-            formatRate(churn.tickUpdate, actualSeconds),
-            formatRate(churn.tickFromHook, actualSeconds),
-            formatRate(churn.tickFromHeartbeat, actualSeconds)))
-        NS.Msg(string.format("[CHURN] Resolver hit=%s  miss=%s  buildFacts=%s  invFacts=%s  invDialog=%s",
-            formatRate(churn.resolveHit, actualSeconds),
-            formatRate(churn.resolveMiss, actualSeconds),
-            formatRate(churn.buildFacts, actualSeconds),
-            formatRate(churn.invalidateFacts, actualSeconds),
-            formatRate(churn.invalidateDialog, actualSeconds)))
-        NS.Msg(string.format("[CHURN] Resolver missBy noCache=%s step=%s goal=%s target=%s map=%s coord=%s kind=%s leg=%s route=%s title=%s factsEpoch=%s dialogEpoch=%s factsDirty=%s fullDebug=%s other=%s",
-            formatCount(churn.resolveMissNoCache),
-            formatCount(churn.resolveMissStep),
-            formatCount(churn.resolveMissGoal),
-            formatCount(churn.resolveMissTargetSig),
-            formatCount(churn.resolveMissMap),
-            formatCount(churn.resolveMissCoord),
-            formatCount(churn.resolveMissKind),
-            formatCount(churn.resolveMissLegKind),
-            formatCount(churn.resolveMissRouteType),
-            formatCount(churn.resolveMissTitle),
-            formatCount(churn.resolveMissFactsEpoch),
-            formatCount(churn.resolveMissDialogEpoch),
-            formatCount(churn.resolveMissFactsDirty),
-            formatCount(churn.resolveMissFullDebug),
-            formatCount(churn.resolveMissOther)))
-        NS.Msg(string.format("[CHURN] Extract waypoint=%s  manual=%s",
-            formatRate(churn.extractWaypoint, actualSeconds),
-            formatRate(churn.extractManual, actualSeconds)))
-        NS.Msg(string.format("[CHURN] ManualMeta mapPin area hit=%s miss=%s  taxi hit=%s miss=%s",
-            formatCount(churn.manualMapPinAreaHit),
-            formatCount(churn.manualMapPinAreaMiss),
-            formatCount(churn.manualMapPinTaxiHit),
-            formatCount(churn.manualMapPinTaxiMiss)))
-        NS.Msg(string.format("[CHURN] ManualMeta identity area hit=%s miss=%s  taxi hit=%s miss=%s  emptyBase=%s",
-            formatCount(churn.manualIdentityAreaHit),
-            formatCount(churn.manualIdentityAreaMiss),
-            formatCount(churn.manualIdentityTaxiHit),
-            formatCount(churn.manualIdentityTaxiMiss),
-            formatCount(churn.manualIdentityEmptyBase)))
-        NS.Msg(string.format("[CHURN] ManualMeta persist calls=%s build=%s reuse=%s equalSkip=%s write=%s noRecord=%s",
-            formatCount(churn.manualPersistCalls),
-            formatCount(churn.manualPersistRecordBuild),
-            formatCount(churn.manualPersistRecordReuse),
-            formatCount(churn.manualPersistEqualSkip),
-            formatCount(churn.manualPersistWrite),
-            formatCount(churn.manualPersistNoRecord)))
-        NS.Msg(string.format("[CHURN] Route plan accept=%s skip=%s  backendInvalidation=%s skipped=%s",
-            formatRate(churn.routePlanAccept, actualSeconds),
-            formatRate(churn.routePlanSkip, actualSeconds),
-            formatRate(churn.routeBackendInvalidation, actualSeconds),
-            formatRate(churn.routeBackendInvalidationSkip, actualSeconds)))
-        NS.Msg("[CHURN] Validation Mapzeroth " .. formatRouteValidation(churn, "mapzeroth"))
-        NS.Msg("[CHURN] Validation Farstrider " .. formatRouteValidation(churn, "farstrider"))
-        NS.Msg(string.format("[CHURN] Driver total=%s  hidden=%s  visuals=%s  worldOverlayUpdate=%s",
-            formatRate(churn.driverUpdate, actualSeconds),
-            formatRate(churn.driverUpdateHidden, actualSeconds),
-            formatRate(churn.driverVisuals, actualSeconds),
-            formatRate(churn.nativeWorldOverlayUpdate, actualSeconds)))
-        NS.Msg(string.format("[CHURN] Host ensure=%s  notReady=%s  throttled=%s  resolveSettable=%s",
-            formatRate(churn.ensureHost, actualSeconds),
-            formatRate(churn.hostNotReady, actualSeconds),
-            formatRate(churn.hostThrottled, actualSeconds),
-            formatRate(churn.resolveSettableTarget, actualSeconds)))
-        NS.Msg(string.format("[CHURN] Host trySet=%s  setUserWaypoint=%s  USER_WAYPOINT_UPDATED=%s  refreshWorldOverlay=%s",
-            formatRate(churn.trySetHost, actualSeconds),
-            formatRate(churn.setUserWaypointCall, actualSeconds),
-            formatRate(churn.userWaypointUpdatedEvent, actualSeconds),
-            formatRate(churn.refreshWorldOverlay, actualSeconds)))
-        if phaseMemoryWasEnabled then
-            NS.Msg("[CHURN] PhaseKB format total/peak/calls; totals are diagnostic and may include sampling overhead.")
-            NS.Msg(string.format("[CHURN] PhaseKB bridge setup=%s manualExtract=%s manualLookup=%s manualMapPinResolve=%s manualMapPinKey=%s manualIdentityResolve=%s",
-                formatPhaseKB(churn, "phaseBridgeSetupKB"),
-                formatPhaseKB(churn, "phaseManualExtractKB"),
-                formatPhaseKB(churn, "phaseManualLookupKB"),
-                formatPhaseKB(churn, "phaseManualMapPinResolveKB"),
-                formatPhaseKB(churn, "phaseManualMapPinKeyKB"),
-                formatPhaseKB(churn, "phaseManualIdentityResolveKB")))
-            NS.Msg(string.format("[CHURN] PhaseKB target=%s route=%s resolver=%s finalize=%s statePrep=%s statePersist=%s stateCompare=%s push=%s overlayCall=%s",
-                formatPhaseKB(churn, "phaseTargetKB"),
-                formatPhaseKB(churn, "phaseRouteKB"),
-                formatPhaseKB(churn, "phaseResolverKB"),
-                formatPhaseKB(churn, "phaseFinalizeKB"),
-                formatPhaseKB(churn, "phaseBridgeStatePrepKB"),
-                formatPhaseKB(churn, "phaseBridgeStatePersistKB"),
-                formatPhaseKB(churn, "phaseBridgeStateCompareKB"),
-                formatPhaseKB(churn, "phaseBridgePushKB"),
-                formatPhaseKB(churn, "phaseBridgeOverlayKB")))
-            NS.Msg(string.format("[CHURN] PhaseKB overlay world=%s nativeSync=%s nativeUpdate=%s",
-                formatPhaseKB(churn, "phaseWorldOverlayKB"),
-                formatPhaseKB(churn, "phaseNativeSyncKB"),
-                formatPhaseKB(churn, "phaseNativeUpdateKB")))
-        end
-    end)
+function M.getDiagnosticMonitorStatus()
+    return diagState.active, travelDiagState.active
 end
 
 M.handleDiag = handleDiag
-M.handleMem = handleMem
 M.handlePlaque = handlePlaque
 M.handleWaytype = handleWaytype
 M.handleRouteDump = handleRouteDump
@@ -2518,4 +2069,3 @@ M.handleRouteEnvTrace = handleRouteEnvTrace
 M.handleTravelDiag = handleTravelDiag
 M.handleStepDebug = handleStepDebug
 M.handleResolverCases = handleResolverCases
-M.handleChurn = handleChurn

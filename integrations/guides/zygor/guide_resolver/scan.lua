@@ -1,3 +1,10 @@
+-- ============================================================
+-- Zygor neighboring goal search
+-- ============================================================
+--
+-- Scans neighboring Zygor goals for the header, instruction or objective that
+-- describes the selected goal.
+
 local NS = _G.AzerothWaypointNS
 if not NS.IsZygorLoaded() then return end
 
@@ -195,7 +202,8 @@ local function FindPrecedingTalkHeaderContext(facts, startIndex, targetMapID, ta
     return nil
 end
 
-local function ResolveQuestHeaderContext(facts, startIndex, endIndex, mirrorTitle, targetMapID, targetX, targetY, targetSig, allowInformationalTextBridge)
+local function ResolveQuestHeaderContext(facts, startIndex, endIndex, mirrorTitle, targetMapID, targetX, targetY,
+                                         targetSig, allowInformationalTextBridge)
     local headerFact = SelectHeaderFact(facts, startIndex, endIndex, allowInformationalTextBridge)
     if type(headerFact) == "table"
         and type(headerFact.text) == "string"
@@ -324,7 +332,8 @@ local function IsQuestObjectiveHelperActionFact(fact, titleText)
         and type(fact.y) ~= "number"
 end
 
-local function ScanQuestObjectiveHelperActionFact(facts, edgeIndex, direction, titleText, targetMapID, targetX, targetY, targetSig)
+local function ScanQuestObjectiveHelperActionFact(facts, edgeIndex, direction, titleText, targetMapID, targetX, targetY,
+                                                  targetSig)
     local bridgedCompletedQuestCount = 0
     return WalkDirectionalVisibleFacts(facts, edgeIndex, direction, function(fact)
         if IsGuidanceFact(fact) or IsInformationalTextFact(fact) then
@@ -353,7 +362,8 @@ local function SelectQuestObjectiveHelperActionFact(facts, seedIndex, titleText)
     return SelectNearestDirectionalCandidate(backward, forward, seedIndex)
 end
 
-local function SelectQuestObjectiveHelperActionFactForBlock(facts, startIndex, endIndex, titleText, targetMapID, targetX, targetY, targetSig)
+local function SelectQuestObjectiveHelperActionFactForBlock(facts, startIndex, endIndex, titleText, targetMapID, targetX,
+                                                            targetY, targetSig)
     if type(startIndex) ~= "number" or type(endIndex) ~= "number" then
         return nil
     end

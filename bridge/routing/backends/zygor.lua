@@ -1,7 +1,16 @@
+-- ============================================================
+-- Zygor routing backend
+-- ============================================================
+--
+-- Translates LibRover paths and travel actions into AWP legs and handles
+-- Zygor's asynchronous planner results. An asynchronous result belongs to the
+-- request that started it. The adapter reconciles LibRover results before
+-- offering legs to the routing core.
+
 local NS = _G.AzerothWaypointNS
 
 -- ============================================================
--- Zygor backend - LibRover planner adapter
+-- LibRover planner state and availability
 -- ============================================================
 
 local backend = {}
@@ -142,11 +151,12 @@ function NS.BuildSpecialActionFromZygorNode(node)
     local mode = NormalizeToken(GetTravelField(node, "mode"))
     local atlas = GetTravelField(node, "atlas")
     local actionTitle = TrimString(GetTravelField(node, "name")
-        or GetTravelField(node, "label")
-        or GetTravelField(node, "title")
-        or node.maplabel)
+            or GetTravelField(node, "label")
+            or GetTravelField(node, "title")
+            or node.maplabel)
         or ResolveNodeTitle(node)
-    local destinationName = TrimString(GetTravelField(node, "destination") or GetTravelField(node, "destname") or node.maplabel)
+    local destinationName = TrimString(GetTravelField(node, "destination") or GetTravelField(node, "destname") or
+        node.maplabel)
     if type(destinationName) == "string" and destinationName:sub(1, 1) == "@" then
         destinationName = nil
     end
@@ -192,6 +202,10 @@ function NS.BuildSpecialActionFromZygorNode(node)
     }
 end
 
+-- ============================================================
+-- Native node and travel kinds
+-- ============================================================
+
 local function ClassifyNodeKind(node, specialAction, isDestination)
     if isDestination then
         return "destination"
@@ -205,7 +219,7 @@ local function ClassifyNodeKind(node, specialAction, isDestination)
 
     local mode = NormalizeToken(GetTravelField(node, "mode"))
     local nodeType = NormalizeToken(type(node) == "table" and (node.type or node.subtype or node.linktype) or nil)
-    if nodeType == "portal" or nodeType == "taxi" or nodeType == "ship" or nodeType == "zeppelin" then
+    if nodeType == "portal" or nodeType == "taxi" or NS.IsVehicleTravelType(nodeType) then
         return nodeType
     end
     if mode == "hearth" then
@@ -233,18 +247,7 @@ local function RouteTravelTypeForKind(kind)
     if kind == "destination" then
         return nil
     end
-    if kind == "hearthstone" then
-        return "hearth"
-    end
-    if kind == "walk"
-        or kind == "fly"
-        or kind == "carrier"
-        or kind == "ship"
-        or kind == "zeppelin"
-    then
-        return "travel"
-    end
-    return kind
+    return NS.NormalizeTravelType(kind)
 end
 
 local function BuildTaxiMetadata(node, kind)
@@ -252,7 +255,8 @@ local function BuildTaxiMetadata(node, kind)
         return nil
     end
 
-    local nodeID = tonumber(GetTravelField(node, "taxinodeID") or GetTravelField(node, "taxiNodeID") or GetTravelField(node, "taxinodeid"))
+    local nodeID = tonumber(GetTravelField(node, "taxinodeID") or GetTravelField(node, "taxiNodeID") or
+        GetTravelField(node, "taxinodeid"))
     local operator = TrimString(GetTravelField(node, "taxioperator"))
     local final = node.taxiFinal == true or node.taxiDestination == true
         or GetTravelField(node, "taxiFinal") == true
@@ -262,7 +266,22 @@ local function BuildTaxiMetadata(node, kind)
         return nil
     end
 
+    -- LibRover marks the boarding node with the end of the whole ticket.
+    local mode = NormalizeToken(GetTravelField(node, "mode"))
+    local destination = node.taxiDestination
+    local sourceNodeID
+    if type(destination) == "table" and (mode == "walk" or mode == "fly") then
+        local destinationID = tonumber(GetTravelField(destination, "taxinodeID")
+            or GetTravelField(destination, "taxiNodeID") or GetTravelField(destination, "taxinodeid"))
+        if destinationID and destinationID ~= nodeID then
+            sourceNodeID, nodeID, final = nodeID, destinationID, true
+        end
+    elseif mode == "taxi" and type(node.prev) == "table" and node.prev.type == "taxi" then
+        sourceNodeID = tonumber(GetTravelField(node.prev, "taxinodeID")
+            or GetTravelField(node.prev, "taxiNodeID") or GetTravelField(node.prev, "taxinodeid"))
+    end
     return {
+        sourceNodeID = sourceNodeID,
         nodeID = nodeID,
         operator = operator,
         final = final or nil,
@@ -318,21 +337,18 @@ local function ShouldUseSourceCoordsForSpecialAction(routeLegKind, kind, special
     return kind ~= "walk" and kind ~= "fly"
 end
 
+-- ============================================================
+-- Route legs and plan acceptance
+-- ============================================================
+
 local function MakeDestinationLeg(record, source)
     local mapID, x, y, title = ResolveRecordDestination(record)
     if type(mapID) ~= "number" or type(x) ~= "number" or type(y) ~= "number" then
         return nil
     end
-    return {
-        mapID = mapID,
-        x = x,
-        y = y,
-        title = title,
-        kind = "destination",
-        routeLegKind = "destination",
-        routeTravelType = ResolveRouteTravelType(record, mapID, x, y, "destination", "destination"),
-        source = source or "zygor",
-    }
+    local leg = NS.RouteSpecials.MakeDestinationLeg(source or "zygor", mapID, x, y, title)
+    leg.routeTravelType = ResolveRouteTravelType(record, mapID, x, y, "destination", "destination")
+    return leg
 end
 
 local function TranslatePathToLegs(path, record, fallbackTitle)
@@ -368,7 +384,7 @@ local function TranslatePathToLegs(path, record, fallbackTitle)
                         end
                     end
                     hasDestinationLeg = hasDestinationLeg or isDestination
-                    legs[#legs + 1] = {
+                    local leg = {
                         mapID = legMapID,
                         x = legX,
                         y = legY,
@@ -383,6 +399,17 @@ local function TranslatePathToLegs(path, record, fallbackTitle)
                         arrivalGate = BuildArrivalGate(node),
                         specialAction = specialAction,
                     }
+                    local sanctum = NS.RouteSpecials.Sanctum
+                    if sanctum and kind == "portal" and sourceMapID == 1416 and mapID == 1453
+                        and NS.RouteSpecials.CoordsMatch(mapID, x, y, 1453, .4987, .8667, .0005) then
+                        -- The incoming Skyborne portal already reaches the
+                        -- interior. Keep its native departure instruction.
+                        sanctum.SetCrossing(leg, sanctum.ForeverPortalArrival())
+                    end
+                    if kind == "walk" and not specialAction then
+                        NS.Internal.RouteWalkingPresentation.Describe(leg, "path", leg, nil, leg.title)
+                    end
+                    legs[#legs + 1] = leg
                     sourceMapID, sourceX, sourceY = mapID, x, y
                     sourceIsPlayer = false
                 end
@@ -395,34 +422,11 @@ local function TranslatePathToLegs(path, record, fallbackTitle)
             legs[#legs + 1] = destination
         end
     end
-    if #legs == 0 then
-        local fallback = MakeDestinationLeg(record, "zygor")
-        if fallback then
-            legs[1] = fallback
-        end
-    end
     return legs
 end
 
 local function AcceptPlan(record, legs, reason, serial)
-    if type(NS.AcceptBackendPlan) == "function" then
-        return NS.AcceptBackendPlan(record, "zygor", legs, reason, serial)
-    end
-    record.backend = "zygor"
-    record.legs = legs
-    record.currentLegIndex = nil
-    record.currentLeg = nil
-    record.specialAction = nil
-    record.replanReason = reason
-    return true
-end
-
-local function SetFallbackRoute(record, reason, serial)
-    local leg = MakeDestinationLeg(record, "zygor")
-    if not leg then
-        return
-    end
-    AcceptPlan(record, { leg }, reason or "zygor_fallback", serial)
+    return NS.RouteSpecials.CompletePlan(record, "zygor", "success", legs, reason, serial)
 end
 
 local function SuppressOwnLibRoverReport(record)
@@ -446,12 +450,6 @@ local function BuildPendingTargetSignature(mapID, x, y, title, meta)
         tostring(title or "-"),
         tostring(direct),
     }, "|")
-end
-
-local function HasAcceptedPlan(record)
-    return type(record) == "table"
-        and type(record.legs) == "table"
-        and #record.legs > 0
 end
 
 local function CopyPlanMeta(meta)
@@ -484,13 +482,40 @@ local function ClearPendingPlan(record)
     record._zygorPendingTargetSignature = nil
 end
 
-function backend.IsAvailable()
-    return type(NS.IsZygorLoaded) == "function"
-        and NS.IsZygorLoaded() == true
-        and type(GetLibRover()) == "table"
+function backend.GetReadiness()
+    if type(NS.IsZygorLoaded) ~= "function" or not NS.IsZygorLoaded() then
+        return "unavailable", "zygor_not_loaded"
+    end
+    local zygor, rover = GetZygor(), GetLibRover()
+    if type(rover) ~= "table" or type(rover.QueueFindPath) ~= "function" then
+        return "unavailable", "zygor_no_librover"
+    end
+    local profile = zygor and zygor.db and zygor.db.profile
+    if profile and profile.pathfinding == false then return "unavailable", "zygor_travel_disabled" end
+    if rover.ready == true then return "ready" end
+    if type(rover.startup_thread) == "thread" then return "waiting", "zygor_librover_initializing" end
+    return "unavailable", "zygor_librover_not_ready"
 end
 
-function backend.PlanRoute(record, mapID, x, y, title, meta)
+function backend.IsAvailable()
+    return backend.GetReadiness() == "ready"
+end
+
+local observedRovers = setmetatable({}, { __mode = "k" })
+function backend.InstallReadinessHooks(notify)
+    local rover = GetLibRover()
+    if not rover or observedRovers[rover] or type(rover.StopStartup) ~= "function" then return end
+    -- The native startup step stops its worker on success and on error.
+    -- The shared coalescer reads ready after that step returns.
+    hooksecurefunc(rover, "StopStartup", notify)
+    observedRovers[rover] = true
+end
+
+-- ============================================================
+-- LibRover requests and completion
+-- ============================================================
+
+local function PlanRoute(record, mapID, x, y, title, meta)
     if type(record) ~= "table" or type(mapID) ~= "number" or type(x) ~= "number" or type(y) ~= "number" then
         return
     end
@@ -506,7 +531,6 @@ function backend.PlanRoute(record, mapID, x, y, title, meta)
 
     PLAN_SERIAL = PLAN_SERIAL + 1
     local serial = PLAN_SERIAL
-    local hadAcceptedPlan = HasAcceptedPlan(record)
     record._zygorPlanSerial = serial
     record._zygorTimedOutSerial = nil
     record._zygorPendingTargetSignature = pendingTargetSignature
@@ -515,18 +539,11 @@ function backend.PlanRoute(record, mapID, x, y, title, meta)
     record._coreRoutePending = true
     record.replanReason = "zygor_planning"
 
-    if not hadAcceptedPlan then
-        SetFallbackRoute(record, "zygor_planning_fallback", serial)
-        record._corePlanning = true
-        record._coreRoutePending = true
-    end
 
     local rover = GetLibRover()
     if type(rover) ~= "table" or type(rover.QueueFindPath) ~= "function" then
         ClearPendingPlan(record)
-        if not hadAcceptedPlan or resetRequested then
-            SetFallbackRoute(record, "zygor_no_librover", serial)
-        end
+        NS.RouteSpecials.CompletePlan(record, "zygor", "failed", nil, "zygor_no_librover", serial)
         return
     end
 
@@ -549,12 +566,13 @@ function backend.PlanRoute(record, mapID, x, y, title, meta)
         record._zygorPlanRetryCount = retryMeta._zygorRetryCount
         record._zygorLastPlanRetryReason = failureReason
         record._zygorLastPlanRetryAt = type(GetTime) == "function" and GetTime() or nil
+        record._corePlanning, record._coreRoutePending = true, true
 
         NS.After(PLAN_RETRY_DELAY_SECONDS, function()
             if type(record) ~= "table" or record._zygorPlanSerial ~= serial then
                 return
             end
-            backend.PlanRoute(record, mapID, x, y, title, retryMeta)
+            PlanRoute(record, mapID, x, y, title, retryMeta)
         end)
         return true
     end
@@ -562,19 +580,8 @@ function backend.PlanRoute(record, mapID, x, y, title, meta)
     local function finishWithoutPlan(reason)
         ClearPendingPlan(record)
         local retrying = scheduleRetry(reason)
-        if not hadAcceptedPlan or resetRequested then
-            local fallbackReason = reason
-            if retrying then
-                fallbackReason = tostring(reason or "zygor_plan_retry") .. "_fallback"
-            elseif reason == "zygor_plan_timeout" then
-                fallbackReason = "zygor_plan_timeout_fallback"
-            end
-            record._coreRouteOutcomeHint = retrying and "planning" or nil
-            SetFallbackRoute(record, fallbackReason, serial)
-            record._coreRouteOutcomeHint = nil
-        end
-        if type(NS.RecomputeCarrier) == "function" then
-            NS.RecomputeCarrier()
+        if not retrying then
+            NS.RouteSpecials.CompletePlan(record, "zygor", "failed", nil, reason, serial)
         end
     end
 
@@ -611,17 +618,25 @@ function backend.PlanRoute(record, mapID, x, y, title, meta)
             record._zygorLastPlanTimeoutAt = nil
             record._zygorLastPlanTimeoutReason = nil
             local legs = TranslatePathToLegs(path, record, title)
+            if #legs == 0 then
+                if record._routePlanAttempt:IsAtDestination() then
+                    legs = { MakeDestinationLeg(record, "zygor") }
+                else
+                    finishWithoutPlan("zygor_empty_path"); return
+                end
+            end
             AcceptPlan(record, legs, "zygor_librover_success", serial)
         elseif status == "arrival" then
+            if record._routePlanAttempt:IsAtDestination() then
+                AcceptPlan(record, { MakeDestinationLeg(record, "zygor") }, "zygor_librover_success", serial)
+                return
+            end
             finishWithoutPlan("zygor_librover_arrival")
             return
         else
             local failureReason = "zygor_librover_" .. tostring(status or "failure")
             finishWithoutPlan(failureReason)
             return
-        end
-        if type(NS.RecomputeCarrier) == "function" then
-            NS.RecomputeCarrier()
         end
     end
 
@@ -636,13 +651,19 @@ function backend.PlanRoute(record, mapID, x, y, title, meta)
     end
 end
 
-function backend.PollCurrentLeg(record)
-    if type(NS.PollNeutralRouteLeg) == "function" then
-        return NS.PollNeutralRouteLeg(record, "zygor_poll")
-    end
-    return false
+function backend.BeginPlan(attempt)
+    PlanRoute(attempt.record, attempt.mapID, attempt.x, attempt.y, attempt.title, attempt.meta)
+    if not attempt.result and attempt.record._coreRoutePending then return "pending" end
 end
 
+function backend.CancelPlan(attempt)
+    attempt.record._zygorPlanSerial = nil
+    ClearPendingPlan(attempt.record)
+end
+
+function backend.AdoptPlan(attempt, owner)
+    owner._zygorSuppressLibRoverReportedUntil = attempt.record._zygorSuppressLibRoverReportedUntil
+end
 
 function backend.Clear(record)
     if type(record) ~= "table" then
@@ -657,19 +678,5 @@ function backend.Clear(record)
     record._zygorLastPlanRetryAt = nil
     record._zygorLastPlanTimeoutAt = nil
     record._zygorLastPlanTimeoutReason = nil
-    record._corePlanning = nil
-    record._coreRoutePending = nil
-    record.planFingerprint = nil
-    record.lastPlanSkippedAt = nil
-    record.lastPlanSkipReason = nil
-    record.lastPlanSkipStatus = nil
-    record.lastPlanSkippedFingerprint = nil
-    record.routeOutcome = nil
-    record.routeOutcomeReason = nil
-    record.routeOutcomeAt = nil
-    record.legs = nil
-    record.currentLegIndex = nil
-    record.currentLeg = nil
-    record.specialAction = nil
-    record.replanReason = nil
+    NS.ClearAcceptedRoutePlan(record)
 end

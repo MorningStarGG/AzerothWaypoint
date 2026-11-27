@@ -1,3 +1,10 @@
+-- ============================================================
+-- Zygor pointer targets
+-- ============================================================
+--
+-- Extracts Zygor guide and manual waypoint targets from its pointer and
+-- resolves their titles.
+
 local NS = _G.AzerothWaypointNS
 if not NS.IsZygorLoaded() then return end
 
@@ -310,7 +317,8 @@ local function shouldAllowPointerWaypoint(suppressGuideWaypoint, waypoint)
     return not suppressGuideWaypoint or isManualWaypoint(waypoint)
 end
 
-local function extractPointerWaypoint(pointerOnly, suppressGuideWaypoint, step, Z, waypoint, source, requireWaypointListFallback)
+local function extractPointerWaypoint(pointerOnly, suppressGuideWaypoint, step, Z, waypoint, source,
+                                      requireWaypointListFallback)
     if type(waypoint) ~= "table" then
         return
     end
@@ -331,88 +339,8 @@ local function extractPointerWaypoint(pointerOnly, suppressGuideWaypoint, step, 
     end
 end
 
-local function extractCanonicalGuideTargetFromRouteWaypoint(step, waypoint, source, destinationWaypoint, title)
-    if type(NS.CanonicalizeLiveWaypointTarget) ~= "function" then
-        return
-    end
-    if type(step) ~= "table" or type(waypoint) ~= "table" then
-        return
-    end
-    if isManualWaypoint(waypoint) or isCorpseWaypoint(waypoint) then
-        return
-    end
-    if not isRouteLikeWaypoint(waypoint, source) then
-        return
-    end
-
-    local rawTitle = getWaypointArrowTitle(waypoint)
-    local finalTitle = chooseFirstTitle(
-        getWaypointArrowTitle(destinationWaypoint),
-        getWaypointDisplayTitle(destinationWaypoint),
-        title
-    )
-    local canonical = NS.CanonicalizeLiveWaypointTarget(
-        step,
-        waypoint,
-        source,
-        finalTitle,
-        rawTitle,
-        destinationWaypoint
-    )
-    if type(canonical) ~= "table"
-        or type(canonical.mapID) ~= "number"
-        or type(canonical.x) ~= "number"
-        or type(canonical.y) ~= "number"
-    then
-        return
-    end
-
-    return {
-        mapID = canonical.mapID,
-        x = canonical.x,
-        y = canonical.y,
-        title = canonical.title or finalTitle,
-        source = canonical.source or source,
-        kind = canonical.kind or "guide",
-        rawTitle = canonical.rawTitle or rawTitle,
-        liveRouteLegKind = canonical.legKind,
-    }
-end
-
-local function extractGuideRouteTargetFromPointerSources(Z, P, step, suppressGuideWaypoint)
-    if suppressGuideWaypoint or not P then
-        return
-    end
-
-    local sources = {
-        { P.ArrowFrame and P.ArrowFrame.waypoint, "pointer.ArrowFrame.waypoint" },
-        { P.arrow and P.arrow.waypoint, "pointer.arrow.waypoint" },
-        { P.current_waypoint, "pointer.current_waypoint" },
-        { P.waypoint, "pointer.waypoint" },
-        { type(P.waypoints) == "table" and P.waypoints[1] or nil, "pointer.waypoints[1]" },
-    }
-
-    for index = 1, #sources do
-        local waypoint = sources[index][1]
-        local source = sources[index][2]
-        local m, x, y = ReadWaypointCoords(waypoint)
-        if m and x and y then
-            local title = resolvePointerTitle(false, Z, waypoint)
-            local canonical = extractCanonicalGuideTargetFromRouteWaypoint(
-                step,
-                waypoint,
-                source,
-                P.DestinationWaypoint,
-                title
-            )
-            if canonical then
-                return canonical
-            end
-        end
-    end
-end
-
-local function extractManualAuthorityCandidate(pointerOnly, suppressGuideWaypoint, step, Z, manualDestination, waypoint, source)
+local function extractManualAuthorityCandidate(pointerOnly, suppressGuideWaypoint, step, Z, manualDestination, waypoint,
+                                               source)
     if type(waypoint) ~= "table" or type(manualDestination) ~= "table" then
         return
     end

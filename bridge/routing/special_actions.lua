@@ -1,5 +1,12 @@
-local NS = _G.AzerothWaypointNS
-local state = NS.State
+-- ============================================================
+-- Travel action button
+-- ============================================================
+--
+-- Prepares the secure travel-action button and holds the active route while
+-- its cast or equipment change completes.
+
+local NS                                = _G.AzerothWaypointNS
+local state                             = NS.State
 
 -- ============================================================
 -- state.routing — neutral routing state (shared with all backends)
@@ -11,32 +18,31 @@ local state = NS.State
 -- can bind them as file-local upvalues at load time without ordering
 -- against bridge/*.
 
-state.routing = state.routing or {
-    manualAuthority      = nil,    -- {mapID,x,y,title,sig,identity,meta,backend,createdAt,legs,currentLeg,specialAction}
-    guideRouteState      = nil,    -- {target = {mapID,x,y,title,kind="guide_goal"}, suppressed=false, legs, currentLeg, specialAction}
-    carrierState         = nil,    -- {mapID,x,y,title,sig,source="manual"|"guide",uid}
-    manualQueues         = nil,    -- {order={},byID={},activeQueueID=nil,nextID=1}
-    guideQueue           = nil,    -- {id="guide",kind="route",sourceType="guide",projection={...}}
-    transientQueueStack  = nil,    -- { {id,kind="route",sourceType="transient_source",items={...},projection={...}} }
-    queueUIState         = nil,    -- {selectedKey=nil,detailsByKey={}}
-    publishedQueueState  = nil,    -- {queueKey=nil,signature=nil,uidByEntryKey={}}
-    specialActionState   = nil,    -- see Special Action Schema in PLAN
-    presentationState    = nil,    -- {carrierTitle,carrierStatus,overlayTitle,overlaySubtext,iconHint}
-    specialActionPresented = false,
-    specialActionPresentedSig = nil,
+state.routing                           = state.routing or {
+    manualAuthority             = nil, -- {mapID,x,y,title,sig,identity,meta,backend,createdAt,legs,currentLeg,specialAction}
+    guideRouteState             = nil, -- {target = {mapID,x,y,title,kind="guide_goal"}, suppressed=false, legs, currentLeg, specialAction}
+    carrierState                = nil, -- {mapID,x,y,title,sig,source="manual"|"guide",uid}
+    manualQueues                = nil, -- {order={},byID={},activeQueueID=nil,nextID=1}
+    transientQueueStack         = nil, -- { {id,kind="route",sourceType="transient_source",items={...},projection={...}} }
+    queueUIState                = nil, -- {selectedKey=nil,detailsByKey={}}
+    publishedQueueState         = nil, -- {queueKey=nil,signature=nil,uidByEntryKey={}}
+    specialActionState          = nil, -- see Special Action Schema in PLAN
+    presentationState           = nil, -- {carrierTitle,carrierStatus,overlayTitle,overlaySubtext,iconHint}
+    specialActionPresented      = false,
+    specialActionPresentedSig   = nil,
 
-    cinematicActive      = false,
-    pendingSpecialAction = nil,    -- queued when in combat, applied on PLAYER_REGEN_ENABLED
-    pendingSpecialActionClear = false, -- queued when combat blocks secure-button cleanup
-    specialActionCasting       = false,  -- true while a click→cast is in flight; freezes route replans
-    specialActionCastSeq       = 0,      -- monotonic seq, scopes safety-timer callbacks to a single click
-    specialActionCastGUID      = nil,    -- castGUID captured at UNIT_SPELLCAST_START, scopes cast-end matching
-    specialActionCastStartSeen = false,  -- true once UNIT_SPELLCAST_START fired for the current freeze
+    cinematicActive             = false,
+    pendingSpecialAction        = nil,   -- queued when in combat, applied on PLAYER_REGEN_ENABLED
+    pendingSpecialActionClear   = false, -- queued when combat blocks secure-button cleanup
+    specialActionCasting        = false, -- true while a click→cast is in flight, freezes route replans
+    specialActionCastSeq        = 0,     -- monotonic seq, scopes safety-timer callbacks to a single click
+    specialActionCastGUID       = nil,   -- castGUID captured at UNIT_SPELLCAST_START, scopes cast-end matching
+    specialActionCastStartSeen  = false, -- true once UNIT_SPELLCAST_START fired for the current freeze
     specialActionCastDependency = nil,   -- numeric backend dependency associated with the clicked travel action
-    lastPushedOverlaySig = nil,
-    lastPushedCarrierUID = nil,
+    lastPushedOverlaySig        = nil,
+    lastPushedCarrierUID        = nil,
 
-    selectedBackend      = nil,    -- "zygor" | "farstrider" | "mapzeroth" | "direct" (resolved at boot)
+    selectedBackend             = nil, -- selected routing backend (resolved at boot)
 }
 
 -- ============================================================
@@ -48,29 +54,29 @@ state.routing = state.routing or {
 -- specialActionState changes during combat, attribute application is
 -- queued and replayed on PLAYER_REGEN_ENABLED.
 
-local SECURE_PAYLOAD_ATTR = {
+local SECURE_PAYLOAD_ATTR               = {
     spell = "spell",
     item  = "item",
     toy   = "toy",
     macro = "macrotext",
 }
 
-local secureButton = nil
-local secureButtonIcon = nil
-local secureButtonBackdrop = nil
-local secureButtonHighlight = nil
-local secureButtonLabel = nil
-local activeSecureAttributeKeys = {}
-local tomTomArrowStatusSuppressed = false
+local secureButton                      = nil
+local secureButtonIcon                  = nil
+local secureButtonBackdrop              = nil
+local secureButtonHighlight             = nil
+local secureButtonLabel                 = nil
+local activeSecureAttributeKeys         = {}
+local tomTomArrowStatusSuppressed       = false
 local tomTomStatusSuppressionSubscribed = false
-local tomTomCallbackOwner = {}
-local specialActionCombatHidden = false
-local specialActionCombatStateDriver = false
+local tomTomCallbackOwner               = {}
+local specialActionCombatHidden         = false
+local specialActionCombatStateDriver    = false
 
-local QUESTION_MARK_TEXTURE = "Interface\\Icons\\INV_Misc_QuestionMark"
-local ACTION_BUTTON_BASE_SIZE = 56
-local ACTION_BUTTON_MIN_SIZE = 40
-local TOMTOM_STATUS_FIELDS = { "status", "tta", "eta" }
+local QUESTION_MARK_TEXTURE             = "Interface\\Icons\\INV_Misc_QuestionMark"
+local ACTION_BUTTON_BASE_SIZE           = 56
+local ACTION_BUTTON_MIN_SIZE            = 40
+local TOMTOM_STATUS_FIELDS              = { "status", "tta", "eta" }
 
 -- ============================================================
 -- Special-action cast-freeze
@@ -90,16 +96,31 @@ local TOMTOM_STATUS_FIELDS = { "status", "tta", "eta" }
 -- the no-op-click case (item on cooldown, OOR — no UNIT_SPELLCAST_START
 -- arrives) and the stuck-cast case (events somehow don't resolve).
 
-local CAST_NO_START_TIMEOUT_SECONDS = 2.0
-local CAST_MAX_DURATION_SECONDS     = 30.0
-local OFFHAND_SLOT                  = 17
-local EQUIPMENT_SLOTS = {
-    INVTYPE_HEAD = 1, INVTYPE_NECK = 2, INVTYPE_SHOULDER = 3, INVTYPE_BODY = 4,
-    INVTYPE_CHEST = 5, INVTYPE_ROBE = 5, INVTYPE_WAIST = 6, INVTYPE_LEGS = 7,
-    INVTYPE_FEET = 8, INVTYPE_WRIST = 9, INVTYPE_HAND = 10, INVTYPE_FINGER = 11,
-    INVTYPE_TRINKET = 13, INVTYPE_CLOAK = 15, INVTYPE_WEAPON = 16,
-    INVTYPE_2HWEAPON = 16, INVTYPE_WEAPONMAINHAND = 16, INVTYPE_WEAPONOFFHAND = 17,
-    INVTYPE_SHIELD = 17, INVTYPE_HOLDABLE = 17, INVTYPE_TABARD = 19,
+local CAST_NO_START_TIMEOUT_SECONDS     = 2.0
+local CAST_MAX_DURATION_SECONDS         = 30.0
+local OFFHAND_SLOT                      = 17
+local EQUIPMENT_SLOTS                   = {
+    INVTYPE_HEAD = 1,
+    INVTYPE_NECK = 2,
+    INVTYPE_SHOULDER = 3,
+    INVTYPE_BODY = 4,
+    INVTYPE_CHEST = 5,
+    INVTYPE_ROBE = 5,
+    INVTYPE_WAIST = 6,
+    INVTYPE_LEGS = 7,
+    INVTYPE_FEET = 8,
+    INVTYPE_WRIST = 9,
+    INVTYPE_HAND = 10,
+    INVTYPE_FINGER = 11,
+    INVTYPE_TRINKET = 13,
+    INVTYPE_CLOAK = 15,
+    INVTYPE_WEAPON = 16,
+    INVTYPE_2HWEAPON = 16,
+    INVTYPE_WEAPONMAINHAND = 16,
+    INVTYPE_WEAPONOFFHAND = 17,
+    INVTYPE_SHIELD = 17,
+    INVTYPE_HOLDABLE = 17,
+    INVTYPE_TABARD = 19,
 }
 
 local function ScheduleAfter(delay, fn)
@@ -127,7 +148,11 @@ local function ReleaseSpecialActionCastFreeze(reason)
     routing.specialActionCastGUID = nil
     routing.specialActionCastStartSeen = false
     routing.specialActionCastDependency = nil
+    if NS.ResumeDeferredRoutePlanning then NS.ResumeDeferredRoutePlanning() end
     local requested = false
+    if reason == "post_cast" and dependency and NS.SignalPreferredRouteRecovery then
+        NS.SignalPreferredRouteRecovery(nil, "travel_transition")
+    end
     if reason == "post_cast" and dependency and type(NS.NotifyRouteTravelActionUsed) == "function" then
         requested = NS.NotifyRouteTravelActionUsed(dependency, "awp_travel_action_succeeded") == true
     end
@@ -142,7 +167,7 @@ local function ReleaseSpecialActionCastFreeze(reason)
             end
         end
         local backendID = type(record) == "table" and record.backend or nil
-        if backendID == "mapzeroth" or backendID == "farstrider" then
+        if backendID == "mapzeroth" or backendID == "farstrider" or backendID == "polestar" or backendID == "dugi" then
             requested = NS.RequestRouteBackendStateValidation(
                 backendID,
                 reason or "post_cast",
@@ -242,10 +267,6 @@ local function IsCombatLocked()
     return type(InCombatLockdown) == "function" and InCombatLockdown() == true
 end
 
-local function ShouldUseSpecialActionCombatDriver()
-    return type(NS.ShouldHideTomTomInCombat) == "function" and NS.ShouldHideTomTomInCombat() == true
-end
-
 local function ClearSpecialActionCombatStateDriver(btn)
     if type(btn) ~= "table" or IsCombatLocked() then
         return
@@ -264,15 +285,16 @@ local function ApplySpecialActionCombatStateDriver(btn)
         return
     end
 
-    local wanted = ShouldUseSpecialActionCombatDriver()
-    if wanted and not specialActionCombatStateDriver then
+    -- Navigation can change in combat, but the armed payload cannot.
+    if not specialActionCombatStateDriver then
         RegisterStateDriver(btn, "visibility", "[combat] hide; show")
         specialActionCombatStateDriver = true
-    elseif not wanted and specialActionCombatStateDriver then
-        UnregisterStateDriver(btn, "visibility")
-        specialActionCombatStateDriver = false
     end
 end
+
+-- ============================================================
+-- Equipping and restoring travel items
+-- ============================================================
 
 local function EquipmentLocation(itemID)
     local fn = type(C_Item) == "table" and C_Item.GetItemInfoInstant or rawget(_G, "GetItemInfoInstant")
@@ -320,6 +342,7 @@ end
 
 local function FinishEquipmentTransaction(transaction)
     ClearEquipmentTransaction(transaction)
+    if NS.ResumeDeferredRoutePlanning then NS.ResumeDeferredRoutePlanning() end
     if type(NS.FlushDeferredRouteBackendStateValidations) == "function" then
         NS.FlushDeferredRouteBackendStateValidations()
     end
@@ -337,7 +360,7 @@ local function RestoreEquipmentTransaction(transaction)
     transaction.restorePending = nil
     local equipped = EquippedItemID(transaction.slot)
     if equipped ~= transaction.itemID then
-        -- The player replaced AWP's item themselves. Their new choice wins;
+        -- The player replaced AWP's item themselves. Their new choice wins,
         -- neither the main slot nor the offhand is ours to touch now.
         FinishEquipmentTransaction(transaction)
         return true
@@ -399,7 +422,8 @@ local function ExecuteEquipmentAction(action)
     local itemID, slot = tonumber(action.itemID), EquipmentSlot(action.itemID)
     if not itemID or not slot then return false end
     local record = type(NS.GetActiveAuthorityRecord) == "function" and NS.GetActiveAuthorityRecord() or nil
-    local identity = type(NS.GetRouteSpecialActionIdentity) == "function" and NS.GetRouteSpecialActionIdentity(action) or nil
+    local identity = type(NS.GetRouteSpecialActionIdentity) == "function" and NS.GetRouteSpecialActionIdentity(action) or
+        nil
     if type(record) ~= "table" or type(identity) ~= "string" then return false end
     local existing = state.routing.equipmentTransaction
     if type(existing) == "table" then
@@ -410,14 +434,19 @@ local function ExecuteEquipmentAction(action)
         if not RestoreEquipmentTransaction(existing) then return false end
     end
     if IsItemEquipped(itemID) or EquippedItemID(slot) == itemID then
-        return NS.AdvanceActiveRouteAction(identity, record._routeAcceptedPlanGeneration, "equipment_already_equipped") == true
+        return NS.AdvanceActiveRouteAction(identity, record._routeAcceptedPlanGeneration, "equipment_already_equipped") ==
+            true
     end
     local location = EquipmentLocation(itemID)
     local transaction = {
-        record = record, itemID = itemID, slot = slot,
-        previous = EquippedItemID(slot), twoHand = location == "INVTYPE_2HWEAPON",
+        record = record,
+        itemID = itemID,
+        slot = slot,
+        previous = EquippedItemID(slot),
+        twoHand = location == "INVTYPE_2HWEAPON",
         previousOffhand = location == "INVTYPE_2HWEAPON" and EquippedItemID(OFFHAND_SLOT) or nil,
-        actionIdentity = identity, planGeneration = record._routeAcceptedPlanGeneration,
+        actionIdentity = identity,
+        planGeneration = record._routeAcceptedPlanGeneration,
     }
     state.routing.equipmentTransaction = transaction
     if not EquipItem(itemID, slot) then
@@ -434,6 +463,10 @@ local function ExecuteEquipmentAction(action)
     end)
     return true
 end
+
+-- ============================================================
+-- Secure button and TomTom arrow visibility
+-- ============================================================
 
 local function GetOrCreateSecureButton()
     if secureButton then return secureButton end
@@ -457,6 +490,10 @@ local function GetOrCreateSecureButton()
     secureButtonLabel:SetPoint("TOP", secureButton, "BOTTOM", 0, -2)
     secureButtonLabel:SetWidth(180)
     secureButtonLabel:SetJustifyH("CENTER")
+    if NS.Internal and NS.Internal.Appearance then
+        NS.Internal.Appearance.Text(secureButtonLabel, "travel", "TEXT")
+        NS.Internal.Appearance.Shell(secureButton, "travel", { secureButtonBackdrop })
+    end
     secureButtonLabel:SetText("")
     secureButtonLabel:Hide()
 
@@ -606,8 +643,18 @@ local function ClearSecureActionAttributes()
     end
 end
 
+-- ============================================================
+-- Action icon, label and placement
+-- ============================================================
+
 local function IsAtlasLike(texture)
     return type(texture) == "string" and texture ~= "" and texture:find("[\\/]") == nil
+end
+
+local function IconIdentifier(value)
+    if type(issecretvalue) == "function" and issecretvalue(value) then return nil end
+    if type(value) == "string" and value ~= "" then return value end
+    if type(value) == "number" and value > 0 and value < math.huge and value % 1 == 0 then return value end
 end
 
 local function ResolveActionTexture(action)
@@ -615,30 +662,30 @@ local function ResolveActionTexture(action)
         return QUESTION_MARK_TEXTURE, false
     end
 
-    if type(action.iconTexture) == "string" and action.iconTexture ~= "" then
-        return action.iconTexture, IsAtlasLike(action.iconTexture)
+    local explicit = IconIdentifier(action.iconTexture)
+    if explicit then
+        return explicit, IsAtlasLike(explicit)
     end
 
-    if action.secureType == "spell"
-        and (type(action.securePayload) == "string" or type(action.securePayload) == "number")
-    then
-        local texture = ResolveSpellTexture(action.securePayload)
-        if texture then
-            return texture, false
+    if action.secureType == "spell" then
+        local identifier = IconIdentifier(action.spellID) or IconIdentifier(action.securePayload)
+        if identifier then
+            local ok, texture = pcall(ResolveSpellTexture, identifier)
+            if ok and IconIdentifier(texture) then return texture, false end
         end
     end
 
-    local itemID = nil
+    local item = nil
     if action.secureType == "item" or action.secureType == "toy" then
-        itemID = tonumber(action.securePayload)
+        item = IconIdentifier(action.itemID) or IconIdentifier(action.securePayload)
     elseif action.executionType == "equip" then
-        itemID = tonumber(action.itemID)
+        item = IconIdentifier(action.itemID)
     end
-    if itemID and type(C_Item) == "table" and type(C_Item.GetItemIconByID) == "function" then
-        local texture = C_Item.GetItemIconByID(itemID)
-        if texture then
-            return texture, false
-        end
+    if item and type(C_Item) == "table" and type(C_Item.GetItemIconByID) == "function" then
+        -- ItemInfo accepts IDs, names, item strings and links. Keep execution
+        -- payloads intact, Polestar supplies "item:6948" plus a numeric itemID.
+        local ok, texture = pcall(C_Item.GetItemIconByID, item)
+        if ok and IconIdentifier(texture) then return texture, false end
     end
 
     return QUESTION_MARK_TEXTURE, false
@@ -753,6 +800,29 @@ local function ApplyActionLabelLayout(anchorFrame)
     secureButtonLabel:SetScale(scale and scale > 0 and scale or 1)
 end
 
+local function PositionActionButton(btn, arrow, mode)
+    -- A secure button anchored directly to TomTom restricts the arrow's own
+    -- Show/Hide operations. Use the same screen position in UIParent instead.
+    local x, y = arrow:GetCenter()
+    if not x or not y then return false end
+    local scale = arrow:GetEffectiveScale() / btn:GetEffectiveScale()
+    local companion = mode == "companion_icon"
+    x = companion and arrow:GetRight() or x
+    y = companion and y or arrow:GetBottom()
+    if not x or not y then return false end
+    btn:ClearAllPoints()
+    btn:SetPoint(companion and "LEFT" or "BOTTOM", UIParent, "BOTTOMLEFT",
+        x * scale + (companion and 10 or 0), y * scale)
+    return true
+end
+
+local observedArrow
+local function FollowArrow(arrow)
+    if not IsCombatLocked() and state.routing.specialActionPresented and arrow == observedArrow then
+        PositionActionButton(secureButton, arrow, GetDisplayMode())
+    end
+end
+
 local function AnchorActionButton(mode)
     local btn = GetOrCreateSecureButton()
     local arrowFrame = GetTomTomArrowFrame()
@@ -761,17 +831,17 @@ local function AnchorActionButton(mode)
         return false
     end
 
-    btn:ClearAllPoints()
     btn:SetParent(UIParent)
     ApplyActionButtonScale(btn, arrowFrame)
     ApplyActionLabelLayout(arrowFrame)
     btn:SetFrameLevel((arrowFrame:GetFrameLevel() or 1) + 10)
-    if mode == "companion_icon" then
-        btn:SetPoint("LEFT", arrowFrame, "RIGHT", 10, 0)
-    else
-        btn:SetPoint("BOTTOM", arrowFrame, "BOTTOM", 0, 0)
+    if observedArrow ~= arrowFrame then
+        observedArrow = arrowFrame
+        arrowFrame:HookScript("OnDragStop", FollowArrow)
+        arrowFrame:HookScript("OnSizeChanged", FollowArrow)
+        if hooksecurefunc then hooksecurefunc(arrowFrame, "SetPoint", FollowArrow) end
     end
-    return true
+    return PositionActionButton(btn, arrowFrame, mode)
 end
 
 local function SetTomTomArrowVisible(visible)
@@ -889,10 +959,10 @@ function NS.SpecialActionShowActive(action)
     ShowSecureActionVisuals(action)
 end
 
--- Clear secure attributes when safe. No-op if currently in combat.
+-- Removing the button does not end a cast the player already started.
+-- Cast events and the click's safety timers release the planner.
 function NS.DisarmSpecialActionButton()
     state.routing.pendingSpecialAction = nil
-    ReleaseSpecialActionCastFreeze("disarm")
     if IsCombatLocked() then
         state.routing.pendingSpecialActionClear = true
         return
@@ -1023,15 +1093,16 @@ end
 -- mid-cast.
 
 local CAST_END_EVENTS = {
-    UNIT_SPELLCAST_STOP          = true,
-    UNIT_SPELLCAST_CHANNEL_STOP  = true,
-    UNIT_SPELLCAST_SUCCEEDED     = true,
-    UNIT_SPELLCAST_INTERRUPTED   = true,
-    UNIT_SPELLCAST_FAILED        = true,
-    UNIT_SPELLCAST_FAILED_QUIET  = true,
+    UNIT_SPELLCAST_STOP         = true,
+    UNIT_SPELLCAST_CHANNEL_STOP = true,
+    UNIT_SPELLCAST_SUCCEEDED    = true,
+    UNIT_SPELLCAST_INTERRUPTED  = true,
+    UNIT_SPELLCAST_FAILED       = true,
+    UNIT_SPELLCAST_FAILED_QUIET = true,
 }
 
 local combatFrame = CreateFrame("Frame")
+combatFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
 combatFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 combatFrame:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
 combatFrame:RegisterEvent("PLAYER_LOGOUT")
@@ -1044,6 +1115,15 @@ combatFrame:RegisterUnitEvent("UNIT_SPELLCAST_INTERRUPTED", "player")
 combatFrame:RegisterUnitEvent("UNIT_SPELLCAST_FAILED", "player")
 combatFrame:RegisterUnitEvent("UNIT_SPELLCAST_FAILED_QUIET", "player")
 combatFrame:SetScript("OnEvent", function(_, event, unit, castGUID, spellID)
+    if event == "PLAYER_REGEN_DISABLED" then
+        if state.routing.specialActionPresented then
+            state.routing.pendingSpecialAction = state.routing.specialActionState
+            ResetSpecialActionPresentation()
+            RestoreTomTomArrowVisuals()
+            SetTomTomArrowStatusVisible(true)
+        end
+        return
+    end
     if event == "PLAYER_REGEN_ENABLED" then
         local transaction = state.routing.equipmentTransaction
         if type(transaction) == "table" and transaction.restorePending then
@@ -1057,12 +1137,6 @@ combatFrame:SetScript("OnEvent", function(_, event, unit, castGUID, spellID)
         elseif state.routing.pendingSpecialActionClear then
             state.routing.pendingSpecialActionClear = nil
             NS.DisarmSpecialActionButton()
-        end
-        if state.routing.pendingCarrierRecompute then
-            state.routing.pendingCarrierRecompute = nil
-            if type(NS.RecomputeCarrier) == "function" then
-                NS.RecomputeCarrier()
-            end
         end
         if type(NS.FlushDeferredRouteBackendStateValidations) == "function" then
             NS.FlushDeferredRouteBackendStateValidations()

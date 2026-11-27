@@ -1,3 +1,9 @@
+-- ============================================================
+-- Zygor step and goal helpers
+-- ============================================================
+--
+-- Reads Zygor step numbers, labels and confirmation goals for the tracker.
+
 local NS = _G.AzerothWaypointNS
 if not NS.IsZygorLoaded() then return end
 

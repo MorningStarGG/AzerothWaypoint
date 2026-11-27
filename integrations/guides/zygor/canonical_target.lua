@@ -1,3 +1,10 @@
+-- ============================================================
+-- Zygor canonical waypoints
+-- ============================================================
+--
+-- Resolves Zygor route proxies to the guide waypoint that owns the displayed
+-- destination.
+
 local NS = _G.AzerothWaypointNS
 if not NS.IsZygorLoaded() then return end
 
@@ -8,7 +15,7 @@ local ResolveWaypointOwner = NS.ResolveWaypointOwner
 local Signature = NS.Signature
 
 -- ============================================================
--- Internal helpers
+-- Guide goals and linked waypoints
 -- ============================================================
 
 local function getGoalMapID(goal)
@@ -164,7 +171,7 @@ local function ResolveCanonicalLiveWaypointTargetFields(step, waypoint, source, 
     if type(linkedGoal) ~= "table" then
         return
     end
-    legKindGoal = type(legKindGoal) == "table" and legKindGoal or linkedGoal
+    legKindGoal     = type(legKindGoal) == "table" and legKindGoal or linkedGoal
 
     local canonical = NS.ResolveCanonicalGuideGoal(step)
     local goalNum   = canonical and canonical.canonicalGoalNum
@@ -173,10 +180,11 @@ local function ResolveCanonicalLiveWaypointTargetFields(step, waypoint, source, 
         canonicalSourceString = "step.goal#" .. tostring(goalNum)
     end
 
-    local linkedGoalMapID  = getGoalMapID(linkedGoal)
-    local legKindGoalMapID = getGoalMapID(legKindGoal)
+    local linkedGoalMapID                     = getGoalMapID(linkedGoal)
+    local legKindGoalMapID                    = getGoalMapID(legKindGoal)
     local waypointMapID, waypointX, waypointY = ReadWaypointCoords(waypoint)
-    local legKind = IsSameLocation(waypointMapID, waypointX, waypointY, legKindGoalMapID, legKindGoal.x, legKindGoal.y)
+    local legKind                             = IsSameLocation(waypointMapID, waypointX, waypointY, legKindGoalMapID,
+    legKindGoal.x, legKindGoal.y)
         and "destination"
         or "carrier"
 

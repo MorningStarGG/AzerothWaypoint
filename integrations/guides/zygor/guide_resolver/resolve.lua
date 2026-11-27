@@ -1,3 +1,10 @@
+-- ============================================================
+-- Zygor goal resolution
+-- ============================================================
+--
+-- Selects the facts that describe the active Zygor goal, including completed
+-- and non-actionable goals.
+
 local NS = _G.AzerothWaypointNS
 if not NS.IsZygorLoaded() then return end
 
@@ -58,7 +65,7 @@ end
 -- Returns (mirrorTitle, subtext, reason) if currentFact is a scenario non-actionable
 -- fact at the target location that owns presentation, or nil if it does not.
 -- Scenario objectives can advance at one location while the live arrow title still
--- reflects the previously completed stage; mirrorTitle is always currentFact.text.
+-- reflects the previously completed stage, mirrorTitle is always currentFact.text.
 -- On the no-subtext path, only returns non-nil when text ~= rawArrowTitle to avoid
 -- a no-op title rewrite.
 local function ResolveScenarioNonActionable(currentFact, facts, rawArrowTitle, targetMapID, targetX, targetY, targetSig)
@@ -242,11 +249,11 @@ end
 local function ResolveReadyTurninSeedOverride(facts, seedIndex, liveCurrentness, targetMapID, targetX, targetY, targetSig)
     local seedFact = type(seedIndex) == "number" and facts[seedIndex] or nil
     if not (seedFact
-        and seedFact.action == "accept"
-        and IsActionableFact(seedFact)
-        and seedFact.orlogic == nil
-        and IsSameTargetFact(seedFact, targetMapID, targetX, targetY, targetSig)
-    ) then
+            and seedFact.action == "accept"
+            and IsActionableFact(seedFact)
+            and seedFact.orlogic == nil
+            and IsSameTargetFact(seedFact, targetMapID, targetX, targetY, targetSig)
+        ) then
         return nil
     end
 
@@ -291,6 +298,7 @@ local function BuildResolutionInput(context)
         facts = type(context.facts) == "table" and context.facts or {},
         currentGoalNum = context.currentGoalNum,
         rawArrowTitle = rawArrowTitle,
+        showCoordinateFallback = context.showCoordinateFallback,
         mapID = targetMapID,
         x = targetX,
         y = targetY,
@@ -366,7 +374,6 @@ local function ResolveNonActionable(input, debug)
     local currentGoalNum = input.currentGoalNum
 
     local hiddenOrCount = 0
-    local hiddenFirstQuestID
     local hiddenFirstIndex
     local hiddenLastIndex
     for _, fact in ipairs(facts) do
@@ -375,7 +382,6 @@ local function ResolveNonActionable(input, debug)
             and type(fact.questid) == "number" and fact.questid > 0
         then
             hiddenOrCount = hiddenOrCount + 1
-            hiddenFirstQuestID = hiddenFirstQuestID or fact.questid
             hiddenFirstIndex = hiddenFirstIndex or fact.index
             hiddenLastIndex = fact.index
         end
@@ -391,8 +397,9 @@ local function ResolveNonActionable(input, debug)
             "alternate_generic_accept",
             headerFact,
             nil,
-            BuildSemanticInfo("quest", nil, hiddenFirstQuestID)
+            BuildSemanticInfo("quest")
         )
+        snapshot.iconHintKind = "quest"
         ApplyRoutePresentationPolicy(snapshot, context, currentGoalNum, facts)
         debug.reason = "hidden_or_cluster"
         debug.blockStart = hiddenFirstIndex
@@ -420,7 +427,9 @@ local function ResolveNonActionable(input, debug)
             local semanticInfo = BuildSemanticInfo(
                 nil,
                 IsCurrentGoalInstructionFact(currentFact)
-                    and DetectExplicitTravelTypeForSemantics(currentFact.action, rawArrowTitle, instructionText, currentFact.npcid, currentFact.mapID, currentFact.x, currentFact.y),
+                and
+                DetectExplicitTravelTypeForSemantics(currentFact.action, rawArrowTitle, instructionText,
+                    currentFact.npcid, currentFact.mapID, currentFact.x, currentFact.y),
                 currentFact.questid
             )
             local snapshot = BuildSnapshot(
@@ -448,7 +457,8 @@ local function ResolveNonActionable(input, debug)
             if neighborSubtext then
                 local semanticInfo = BuildSemanticInfo(
                     nil,
-                    DetectExplicitTravelTypeForSemantics(currentFact.action, rawArrowTitle, neighborSubtext, currentFact.npcid, currentFact.mapID, currentFact.x, currentFact.y),
+                    DetectExplicitTravelTypeForSemantics(currentFact.action, rawArrowTitle, neighborSubtext,
+                        currentFact.npcid, currentFact.mapID, currentFact.x, currentFact.y),
                     currentFact.questid
                 )
                 local snapshot = BuildSnapshot(
@@ -508,7 +518,8 @@ local function ResolveNonActionable(input, debug)
             targetY,
             targetSig,
             input.liveCurrentness,
-            detachedPresentationFact.text
+            detachedPresentationFact.text,
+            input.showCoordinateFallback
         )
         ApplyRoutePresentationPolicy(snapshot, context, currentGoalNum, facts)
         debug.reason = "detached_quest_title_fallback"
@@ -525,10 +536,10 @@ local function ResolveNonActionable(input, debug)
     end
 
     local fallbackSeedIndex = (
-        IsScenarioNonActionableFact(currentFact)
-        and currentFact.text ~= rawArrowTitle
-        and IsSameTargetFact(currentFact, targetMapID, targetX, targetY, targetSig)
-    )
+            IsScenarioNonActionableFact(currentFact)
+            and currentFact.text ~= rawArrowTitle
+            and IsSameTargetFact(currentFact, targetMapID, targetX, targetY, targetSig)
+        )
         and currentFact.index
         or (
             type(targetMapID) == "number"
@@ -998,7 +1009,8 @@ local function ResolveActionable(input, debug)
                 targetY,
                 targetSig,
                 liveCurrentness,
-                detachedActionFact.text
+                detachedActionFact.text,
+                input.showCoordinateFallback
             )
             ApplyRoutePresentationPolicy(snapshot, context, currentGoalNum, facts)
             debug.reason = "detached_quest_title_fallback"
@@ -1041,7 +1053,8 @@ local function ResolveActionable(input, debug)
         targetY,
         targetSig,
         EnsureLiveCurrentnessContext(input),
-        nil
+        nil,
+        input.showCoordinateFallback
     )
     debug.headerGoalNum = metadata.headerFact and metadata.headerFact.index
     debug.titleOwnerGoal = metadata.titleOwnerFact and metadata.titleOwnerFact.index or nil

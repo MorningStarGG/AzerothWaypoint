@@ -1,3 +1,10 @@
+-- ============================================================
+-- Housing plot waypoints
+-- ============================================================
+--
+-- Resolves housing plot pins while the neighborhood provides their map
+-- position and owner data.
+
 local NS = _G.AzerothWaypointNS
 local state = NS.State
 
@@ -18,13 +25,12 @@ local GetActiveManualDestination = NS.GetActiveManualDestination
 local ClearActiveManualDestination = NS.ClearActiveManualDestination
 local GetGuideVisibilityState = NS.GetGuideVisibilityState
 local ReadWaypointCoords = NS.ReadWaypointCoords
-local Signature = NS.Signature
 
 local BLIZZARD_MAP_PIN_KIND_HOUSING_PLOT = "housing_plot"
 local HOUSING_PLOT_MAP_PIN_TYPE = Enum.SuperTrackingMapPinType and Enum.SuperTrackingMapPinType.HousingPlot or 4
 
 -- ============================================================
--- Helpers
+-- Housing plot identifiers and location
 -- ============================================================
 
 local function NormalizePlotDataID(plotDataID)
@@ -33,11 +39,7 @@ local function NormalizePlotDataID(plotDataID)
     end
 end
 
-local function GetWaypointSignature(mapID, x, y)
-    if type(Signature) ~= "function" then return nil end
-    if type(mapID) ~= "number" or type(x) ~= "number" or type(y) ~= "number" then return nil end
-    return Signature(mapID, x, y)
-end
+local GetWaypointSignature = NS.GetWaypointSignatureForCoords
 
 local function GetCurrentSuperTrackedHousingPlotDataID()
     if type(C_SuperTrack) ~= "table" or type(C_SuperTrack.GetSuperTrackedMapPin) ~= "function" then
@@ -54,7 +56,7 @@ end
 -- NOTE: All APIs only work when inside a neighborhood instance.
 -- When outside, GetCurrentNeighborhoodGUID() returns nil and fails gracefully.
 -- No retry loop, this is a location constraint, not a timing one.
--- Do NOT hardcode map IDs; always resolve via GetUIMapIDForNeighborhood.
+-- Do NOT hardcode map IDs, always resolve via GetUIMapIDForNeighborhood.
 -- ============================================================
 
 local function ResolveHousingPlotDestination(plotDataID)
@@ -103,7 +105,7 @@ local function ResolveHousingPlotDestination(plotDataID)
 end
 
 -- ============================================================
--- MapPinInfo getters
+-- Pin metadata lookup
 -- ============================================================
 
 local function ReadCanonicalHousingPlotMapPinInfo(destination)
@@ -161,7 +163,7 @@ local function GetHousingPlotIDForMapPinBackedManual(destination)
 end
 
 -- ============================================================
--- Meta builder
+-- Destination metadata
 -- ============================================================
 
 local function BuildBlizzardHousingPlotMeta(plotDataID, mapID, x, y, explicit, ownerType)
@@ -242,7 +244,7 @@ local function ClearBlizzardHousingPlotBackedManual(clearReason)
 end
 
 -- ============================================================
--- Handler
+-- Pin change handler
 -- ============================================================
 
 local function HandleHousingPlotMapPinChanged(pinID, preferredMapID, explicit)
@@ -269,7 +271,7 @@ local function HandleHousingPlotMapPinChanged(pinID, preferredMapID, explicit)
 end
 
 -- ============================================================
--- NS exports
+-- Public takeover handlers
 -- ============================================================
 
 function NS.GetHousingPlotIDForMapPinBackedManual(destination)
@@ -301,7 +303,7 @@ function NS.ClearSuperTrackedHousingPlotIfCurrent(plotDataID)
 end
 
 -- ============================================================
--- BlizzardKinds registration
+-- Pin type registration
 -- ============================================================
 
 M.BlizzardKinds["housing_plot"] = {

@@ -1,3 +1,10 @@
+-- ============================================================
+-- WorldQuestTab waypoint handoff
+-- ============================================================
+--
+-- Captures the world quest the player clicked in WorldQuestTab for the ensuing
+-- waypoint handoff.
+
 local NS = _G.AzerothWaypointNS
 if type(NS.IsWoWForever) == "function" and NS.IsWoWForever() then return end
 local state = NS.State
@@ -161,6 +168,10 @@ local function BuildFallbackRouteMeta(context)
     })
 end
 
+-- ============================================================
+-- Route title and click context
+-- ============================================================
+
 local function ResolveFallbackRouteTitle(context)
     local title = context.title
     if type(NS.ResolveQuestActionTitle) == "function" then
@@ -244,6 +255,10 @@ local function WithContext(questInfo, action, fn, ...)
     return unpack(results)
 end
 
+-- ============================================================
+-- Context lifetime
+-- ============================================================
+
 local function IsFreshContext(context)
     return type(context) == "table" and (tonumber(context.expiresAt) or 0) >= GetTimeSafe()
 end
@@ -317,6 +332,10 @@ function NS.IsWorldQuestTabExplicitUserWaypointCall()
     end
     return false
 end
+
+-- ============================================================
+-- Native click hooks
+-- ============================================================
 
 local function WrapQuestInfo(questInfo)
     if type(questInfo) ~= "table"

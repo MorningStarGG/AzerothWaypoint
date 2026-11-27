@@ -1,3 +1,10 @@
+-- ============================================================
+-- Queue window model
+-- ============================================================
+--
+-- Converts queue snapshots into labels, icons, list sections and details for
+-- the queue window.
+
 local NS = _G.AzerothWaypointNS
 NS.Internal = NS.Internal or {}
 NS.Internal.QueueUI = NS.Internal.QueueUI or {}
@@ -20,9 +27,6 @@ local function FindGuideQueueByKey(snapshot, selectedKey)
     if type(snapshot) ~= "table" or type(selectedKey) ~= "string" then
         return nil
     end
-    if selectedKey == "guide" then
-        selectedKey = snapshot.activeGuideQueueID
-    end
     if type(snapshot.guideQueues) == "table" then
         for index = 1, #snapshot.guideQueues do
             local queue = snapshot.guideQueues[index]
@@ -30,9 +34,6 @@ local function FindGuideQueueByKey(snapshot, selectedKey)
                 return queue
             end
         end
-    end
-    if selectedKey == (snapshot.guideQueue and snapshot.guideQueue.id) and M.IsGuideQueueAvailable(snapshot.guideQueue) then
-        return snapshot.guideQueue
     end
     return nil
 end
@@ -95,9 +96,6 @@ function M.ResolveSelectedQueue(snapshot)
             end
         end
     end
-    if M.IsGuideQueueAvailable(snapshot.guideQueue) then
-        return snapshot.guideQueue, "guide"
-    end
     return nil, nil
 end
 
@@ -146,6 +144,10 @@ function M.PruneBulkSelections(snapshot)
     end
 end
 
+-- ============================================================
+-- Entry text and coordinates
+-- ============================================================
+
 function M.FormatCoords(mapID, x, y)
     if type(mapID) ~= "number" or type(x) ~= "number" or type(y) ~= "number" then
         return "Unknown location"
@@ -180,7 +182,10 @@ local function SplitTextLines(text)
 end
 
 function M.BuildDetailEntryTexts(entry, prefix)
-    local lines = SplitTextLines(type(entry) == "table" and entry.title or nil) or {}
+    local meta = type(entry) == "table" and (entry.meta or entry)
+    local questID = entry and entry.entryType ~= "travel" and meta and meta.manualQuestID
+    local presentation = questID and NS.ResolveQuestPresentation and NS.ResolveQuestPresentation(questID, entry.title, meta)
+    local lines = SplitTextLines(presentation and presentation.title or type(entry) == "table" and entry.title or nil) or {}
     local title = lines[1] or "Route step"
     if prefix then
         title = prefix .. title
@@ -190,7 +195,7 @@ function M.BuildDetailEntryTexts(entry, prefix)
     for index = 2, #lines do
         details[#details + 1] = lines[index]
     end
-    local subtext = type(entry) == "table" and type(entry.subtext) == "string" and entry.subtext or nil
+    local subtext = presentation and presentation.subtext or type(entry) == "table" and type(entry.subtext) == "string" and entry.subtext or nil
     if subtext and subtext ~= "" then
         details[#details + 1] = subtext
     end
@@ -226,6 +231,10 @@ function M.GetGuideRouteIconOpts(provider)
     end
     return opts
 end
+
+-- ============================================================
+-- Active items and queue icons
+-- ============================================================
 
 local function GetQueueActiveItem(queue)
     local items = type(queue) == "table" and type(queue.items) == "table" and queue.items or nil
@@ -300,16 +309,6 @@ function M.BuildQueueRows(snapshot)
                 }
             end
         end
-    elseif M.IsGuideQueueAvailable(snapshot.guideQueue) then
-        local gq = snapshot.guideQueue
-        sections.guide[1] = {
-            rowType = "queue",
-            key = gq.id or "guide",
-            queueType = "guide",
-            queue = gq,
-            label = tostring(gq.label or "Guide"),
-            icon = M.GetQueueDisplayIcon(gq, "guide"),
-        }
     end
 
     for _, sectionKey in ipairs(M.SECTION_ORDER) do
@@ -331,11 +330,15 @@ function M.BuildQueueRows(snapshot)
     return rows
 end
 
+-- ============================================================
+-- List sections
+-- ============================================================
+
 function M.CountQueues(rows)
     local total = 0
     for index = 1, #rows do
-        if rows[index].rowType == "queue" then
-            total = total + 1
+        if rows[index].rowType == "section" then
+            total = total + (tonumber(rows[index].count) or 0)
         end
     end
     return total
@@ -427,6 +430,10 @@ function M.BuildDetailRows(queue, queueType)
 
     return rows
 end
+
+-- ============================================================
+-- Queue details and summaries
+-- ============================================================
 
 local function FormatQueueKindLabel(kind)
     if kind == "destination_queue" then
@@ -594,5 +601,22 @@ function M.BuildDetailMetaText(queue, queueType)
         lines[#lines + 1] = string.format("Final: %s", M.GetPrimaryTextLine(finalEntry.title) or "Destination")
     end
 
+    local routing = NS.State and NS.State.routing
+    local owner = routing and routing.activeQueueKey == queue.id and NS.GetActiveAuthorityRecord and NS.GetActiveAuthorityRecord()
+    local backend = owner and NS.GetRoutingBackend and NS.GetRoutingBackend(owner.backend)
+    if backend and backend.GetNavigationStatus then
+        local status, hubs = backend.GetNavigationStatus(owner)
+        if status == "partial" or status == "unmapped" then lines[#lines + 1] = "Walking: The last steps here aren't mapped" end
+        if status == "budget" then lines[#lines + 1] = "Walking: Search paused. Follow the current directions." end
+        if hubs then lines[#lines + 1] = "Hostile town: " .. hubs end
+    end
+
     return table.concat(lines, "\n")
+end
+
+function M.GetQueueTransportStatus(queueID)
+    local routing = NS.State and NS.State.routing
+    local owner = routing and routing.activeQueueKey == queueID and NS.GetActiveAuthorityRecord and NS.GetActiveAuthorityRecord()
+    local backend = owner and NS.GetRoutingBackend and NS.GetRoutingBackend(owner.backend)
+    if backend and backend.GetTransportStatus then return backend.GetTransportStatus(owner) end
 end

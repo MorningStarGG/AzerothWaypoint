@@ -1,35 +1,39 @@
+-- ============================================================
+-- Zygor tracker module
+-- ============================================================
+--
+-- Creates and attaches the Zygor tracker module and requests a new layout when
+-- its step changes.
+
 local NS = _G.AzerothWaypointNS
 if not NS.IsZygorLoaded() then return end
 
 ---@diagnostic disable: need-check-nil, undefined-field
 
-local CreateFrame = _G.CreateFrame
-local C_Timer = _G.C_Timer
+local C_Timer                  = _G.C_Timer
 
-NS.Internal = NS.Internal or {}
+NS.Internal                    = NS.Internal or {}
 NS.Internal.ZygorTrackerViewer = NS.Internal.ZygorTrackerViewer or {}
 
-local Shared = NS.Internal.ZygorTrackerViewer
-local Util     = Shared.TrackerUtil
-local Host     = Shared.TrackerHost
-local Controls = Shared.TrackerControls
-local HeaderStyle = Shared.TrackerHeaderStyle
-local Rows     = Shared.TrackerRows
-local Render   = Shared.TrackerRender
-local CombatProxy = Shared.TrackerCombatProxy
+local Shared                   = NS.Internal.ZygorTrackerViewer
+local Util                     = Shared.TrackerUtil
+local Host                     = NS.Internal.GuideTrackerViewer.Host
+local Controls                 = Shared.TrackerControls
+local HeaderStyle              = NS.Internal.GuideTrackerViewer.HeaderStyle
+local Rows                     = Shared.TrackerRows
+local Render                   = Shared.TrackerRender
+local CommonControls           = NS.Internal.GuideTrackerViewer and NS.Internal.GuideTrackerViewer.Controls
+local ModuleFactory            = NS.Internal.GuideTrackerViewer and NS.Internal.GuideTrackerViewer.ModuleFactory
 
-local TM = {}
-Shared.TrackerModule = TM
+local TM                       = {}
+Shared.TrackerModule           = TM
 
-local MODULE_NAME            = "AwpZygorTrackerModule"
-local BLOCK_ID              = "AwpZygorCurrentStep"
-local STICKY_BLOCK_ID_PREFIX = "AwpZygorStickyStep"
-local HEADER_TEXT           = "Zygor Guides"
+local MODULE_NAME              = "AwpZygorTrackerModule"
+local BLOCK_ID                 = "AwpZygorCurrentStep"
+local STICKY_BLOCK_ID_PREFIX   = "AwpZygorStickyStep"
+local HEADER_TEXT              = "Zygor Guides"
 
-local module    -- the actual Frame instance
-local attached  -- whether we're currently registered with the manager
-local attachSucceededCallback
-local attachRequested
+local module -- the actual Frame instance
 
 -- Late-bound accessor used by tracker_controls/tracker_render for the few
 -- spots that need the live module frame (context menu parent, block parent).
@@ -99,179 +103,25 @@ end
 --   - module:OnBlockHeaderClick fires for header clicks via the standard
 --     wiring, so right-click on a block opens our context menu
 
-local function FinishKTHeader(header, parentModule)
-    if not Host.IsKTLoaded() or not header then return end
-
-    -- KT 8.7.x adds this texture at runtime for its built-in modules, but its
-    -- hooked SetCollapsed assumes the field already exists during OnLoad.
-    -- AWP is not in KT's built-in module list, so provide it before applying
-    -- the final KT header mixin and manually invoking that mixin's OnLoad.
-    if not header.Icon and type(header.CreateTexture) == "function" then
-        local icon = header:CreateTexture(nil, "ARTWORK")
-        icon:SetSize(16, 16)
-        icon:SetTexture("Interface\\AddOns\\!KalielsTracker\\Media\\UI-KT-HeaderButtons")
-        icon:SetTexCoord(0.5, 1, 0.75, 1)
-        icon:SetPoint("LEFT", -6, 2)
-        header.Icon = icon
-    end
-
-    local headerMixin = rawget(_G, "KT_ObjectiveTrackerModuleHeaderMixin")
-    if type(_G.Mixin) == "function" and type(headerMixin) == "table" then
-        _G.Mixin(header, headerMixin)
-        if type(header.OnLoad) == "function" then
-            pcall(header.OnLoad, header)
-        end
-    end
-
-    if header.Text then
-        local fontObject = rawget(_G, "KT_ObjectiveTrackerHeaderFont")
-        if fontObject and type(header.Text.SetFontObject) == "function" then
-            pcall(header.Text.SetFontObject, header.Text, fontObject)
-        end
-        header.Text:ClearAllPoints()
-        header.Text:SetPoint("LEFT", 10, 1)
-    end
-
-    -- KT hides the small Blizzard minimize button and makes the header itself
-    -- the collapse target. Keep that behavior without writing AWP into KT's
-    -- private module settings table.
-    if header.MinimizeButton then
-        header.MinimizeButton:Hide()
-    end
-    header:EnableMouse(true)
-    header:SetScript("OnMouseUp", function(_, mouseButton)
-        if mouseButton == "LeftButton" and type(parentModule.ToggleCollapsed) == "function" then
-            parentModule:ToggleCollapsed()
-        end
-    end)
-end
-
-local function ApplyModuleMixin(frame, mixinSource, usingKT)
-    if type(mixinSource) ~= "table" then return false end
-
-    if usingKT then
-        if type(_G.Mixin) ~= "function" then return false end
-        _G.Mixin(frame, mixinSource)
-        return true
-    end
-
-    -- Keep hasDisplayPriority untouched on the Blizzard host. The copied
-    -- module behavior remains addon-owned; test.md records why native-template
-    -- construction alone cannot isolate its dynamic layout.
-    for key, value in pairs(mixinSource) do
-        if key ~= "hasDisplayPriority" then
-            frame[key] = value
-        end
-    end
-    return true
-end
-
 local function CreateModuleFrame()
     if module then return module end
 
-    local container = Host.GetTrackerFrame()
-    if not container then return nil end
-    local usingKT = Host.IsKTLoaded()
-
-    local frame = CreateFrame("Frame", MODULE_NAME, container)
-    frame:Hide()
-    frame:SetSize(usingKT and 260 or 240, 10)
-    frame:SetPoint("TOP")
-
-    if not ApplyModuleMixin(frame, Host.GetModuleMixin(), usingKT) then
+    if type(ModuleFactory) ~= "table" or type(ModuleFactory.Create) ~= "function" then return nil end
+    local frame = ModuleFactory.Create({
+        host = Host,
+        providerKey = "zygor",
+        name = MODULE_NAME,
+        headerText = HEADER_TEXT,
+        uiOrder = 2,
+        rightEdgeFrameSpacing = 2,
+    })
+    if not frame then
         if type(NS.Msg) == "function" then
-            NS.Msg("Objective tracker module mixin unavailable; tracker dock cannot initialise.")
+            NS.Msg("Objective tracker module mixin unavailable: Tracker dock cannot initialise.")
         end
-        frame:Hide()
         return nil
     end
-
-    -- The host returns Blizzard's structural header for both paths. KT is
-    -- finished only after CreateFrame so Header.Icon exists before its mixin.
-    local headerOk, header = pcall(CreateFrame, "Frame", nil, frame, Host.GetHeaderTemplate())
-    if not headerOk or not header then
-        header = CreateFrame("Frame", nil, frame)
-        header:SetSize(usingKT and 260 or 240, 22)
-        local txt = header:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
-        txt:SetPoint("LEFT", header, "LEFT", 2, 0)
-        header.Text = txt
-    end
-    if headerOk and header and usingKT then
-        header:SetWidth(260)
-        FinishKTHeader(header, frame)
-    end
-    header:SetPoint("TOPLEFT")
-    frame.Header = header
-
-    local contentsFrame = CreateFrame("Frame", nil, frame)
-    contentsFrame:SetPoint("TOP", header, "BOTTOM")
-    contentsFrame:SetPoint("LEFT")
-    contentsFrame:SetPoint("RIGHT")
-    contentsFrame:SetPoint("BOTTOM")
-    frame.ContentsFrame = contentsFrame
-
     module = frame
-
-    -- Settings
-    module.headerText            = HEADER_TEXT
-    module.events                = {}
-    module.lineTemplate          = Host.GetLineTemplate()
-    module.blockTemplate         = Host.GetBlockTemplate()
-    module.rightEdgeFrameSpacing = 2
-
-    -- uiOrder 2 is the configured visual position. Leave hasDisplayPriority
-    -- untouched on Blizzard so it remains secure nil. KT is fully addon-owned
-    -- and retains its explicit non-priority value.
-    module.uiOrder = 2
-    if usingKT then
-        module.hasDisplayPriority = false
-    end
-
-    -- Pure Lua construction skips the module template's setup.
-    module.usedBlocks               = module.usedBlocks               or {}
-    module.cachedBlocks             = module.cachedBlocks             or {}
-    module.cachedBlocksByTemplate   = module.cachedBlocksByTemplate   or {}
-    module.usedTimerBars            = module.usedTimerBars            or {}
-    module.usedProgressBars         = module.usedProgressBars         or {}
-    module.usedRightEdgeFrames      = module.usedRightEdgeFrames      or {}
-    module.timerBars                = module.timerBars                or {}
-    module.progressBars             = module.progressBars             or {}
-    module.fanfares                 = module.fanfares                 or {}
-    module.cachedOrderList          = module.cachedOrderList          or {}
-    module.numCachedBlocks          = module.numCachedBlocks          or 0
-
-    if type(module.OnLoad) == "function" then
-        pcall(module.OnLoad, module)
-    end
-    if type(module.OnEvent) == "function" then
-        module:SetScript("OnEvent", function(self, event, ...)
-            self:OnEvent(event, ...)
-        end)
-    end
-    if type(module.OnHide) == "function" then
-        module:SetScript("OnHide", function(self)
-            self:OnHide()
-        end)
-    end
-
-    if module.Header then
-        if module.Header.Text and type(module.Header.Text.SetText) == "function" then
-            module.Header.Text:SetText(HEADER_TEXT)
-        end
-        -- Defensive stubs in case the inherited header template doesn't supply
-        -- every method EndLayout / SetCollapsed pokes at on certain patches.
-        local function noop() end
-        for _, name in ipairs({
-            "PlayAddAnimation",
-            "PlayRemoveAnimation",
-            "SetCollapsed",
-            "UpdateMinimizeButton",
-        }) do
-            if type(module.Header[name]) ~= "function" then
-                module.Header[name] = noop
-            end
-        end
-    end
 
     Controls.CreateHeaderControls(module)
     if HeaderStyle and type(HeaderStyle.CaptureBaseline) == "function" then
@@ -281,41 +131,12 @@ local function CreateModuleFrame()
         HeaderStyle.Refresh(module)
     end
 
-    do
-        local originalUpdate = module.Update
-        function module:Update(availableHeight, dirtyUpdate)
-            -- When the parent tracker container collapses, the manager passes
-            -- availableHeight = 0 to signal "skip rendering". Forcing it back
-            -- up here breaks the container-wide collapse flow. Module-level
-            -- collapse is handled by LayoutBlock's hasContents/hasSkippedBlocks
-            -- contract, so only force a non-zero floor when the parent
-            -- container is NOT collapsed.
-            local collapsed = self.parentContainer
-                and type(self.parentContainer.IsCollapsed) == "function"
-                and self.parentContainer:IsCollapsed()
-
-            if not collapsed and (not availableHeight or availableHeight <= 0) then
-                availableHeight = 8000
-            end
-            if type(originalUpdate) == "function" then
-                return originalUpdate(self, availableHeight, dirtyUpdate)
-            end
-            return 0, false
-        end
-    end
-
-    function module:IsDisplayable()
-        return self.hasContents == true
-    end
-
-    -- Anchor frame for MenuUtil.CreateContextMenu
-    -- Fallback to UIParent so the menu always has somewhere to anchor.
-    function module:GetContextMenuParent()
-        return self.parentContainer or _G.UIParent
-    end
-
     function module:LayoutContents()
         local Z, guide, step = Shared.GetCurrentStepContext()
+
+        if type(CommonControls) == "table" and type(CommonControls.SetModuleHeader) == "function" then
+            CommonControls.SetModuleHeader(self, "zygor", HEADER_TEXT)
+        end
 
         local block = self:GetBlock(BLOCK_ID)
         if not block then
@@ -335,12 +156,12 @@ local function CreateModuleFrame()
         --    explicit so OnBlockHeaderClick never fires on the wrong module.
         block.parentModule = self
         -- 2. The standard HeaderButton mixin's OnLoad registers
-        --    "LeftButtonUp, RightButtonUp"; some Blizzard versions only
+        --    "LeftButtonUp, RightButtonUp", some Blizzard versions only
         --    register LeftButtonUp on certain templates, which silently
         --    swallows right-clicks. Re-register both to be safe.
         if block.HeaderButton and type(block.HeaderButton.RegisterForClicks) == "function" then
             pcall(block.HeaderButton.RegisterForClicks, block.HeaderButton,
-                  "LeftButtonUp", "RightButtonUp")
+                "LeftButtonUp", "RightButtonUp")
         end
 
         block._awpOpenGuidePicker = false
@@ -364,7 +185,8 @@ local function CreateModuleFrame()
 
             local line
             if Z and not zygorLoading and type(block.AddObjective) == "function" then
-                local okAdd, result = pcall(block.AddObjective, block, 1, "|cfffe6100Click here|r to load a guide.", nil, true, nil, nil)
+                local okAdd, result = pcall(block.AddObjective, block, 1, "|cfffe6100Click here|r to load a guide.", nil,
+                    true, nil, nil)
                 if okAdd then line = result end
             end
             Render.WireGuidePickerLineClick(line, block)
@@ -390,22 +212,27 @@ local function CreateModuleFrame()
                 local stickyBlock = self:GetBlock(STICKY_BLOCK_ID_PREFIX .. tostring(stickyNum))
                 if stickyBlock then
                     local stickyHeaderText = Rows.GetStickyStepHeaderText(stickyStep, stickyRows)
+                    local sectionRows = stickyRows
                     stickyRows = Rows.PromoteStickyHeaderRow(stickyRows, stickyHeaderText)
                     Render.PrepareBlockForLayout(stickyBlock, false, true)
+                    stickyBlock._awpOwnerStepIndex = stickyNum
                     Render.SetBlockHeaderText(stickyBlock, stickyHeaderText)
+                    local details = NS.Internal.GuideTrackerViewer.QuestDetails
+                    if details then details.BindSection(stickyBlock, "zygor", sectionRows) end
                     local stickyLineCount = Render.RenderRowsIntoBlock(self, stickyBlock, stickyRows)
                     Render.FinalizeBlockLayout(self, stickyBlock, stickyLineCount)
                 end
             end
         end
 
-        Render.SetBlockHeaderText(block, headerText)
+        Render.SetBlockHeaderText(block, headerText, true)
+        block._awpOwnerStepIndex = Z.CurrentStepNum
 
         local dockedRows = Rows.BuildDockedGoalRows(step)
         local lineCount = Render.RenderRowsIntoBlock(self, block, dockedRows)
 
         -- SetHeader/AddObjective maintain block.height from actual font-string
-        -- measurements. Do not replace that with lineCount math; wrapped Zygor
+        -- measurements. Do not replace that with lineCount math, wrapped Zygor
         -- notes can be much taller than a single 18px row.
         Render.FinalizeBlockLayout(self, block, lineCount)
 
@@ -435,254 +262,24 @@ end
 -- Attach / Detach / MarkDirty
 -- ============================================================
 
-local function NotifyAttachSucceeded()
-    if type(attachSucceededCallback) == "function" then
-        pcall(attachSucceededCallback)
-    end
-end
+local controller = NS.Internal.GuideTrackerViewer.CreateViewerController({
+    providerKey = "zygor",
+    host = Host,
+    createModule = CreateModuleFrame,
+    isEnabled = function() return NS.GetGuideTrackerViewerSettings("zygor").enabled and NS.IsZygorLoaded() end,
+    onAttach = function()
+        if type(NS.RefreshZygorTrackerViewerHeaderStyle) == "function" then NS.RefreshZygorTrackerViewerHeaderStyle() end
+    end,
+})
 
-local attachRetryTicker
-local ktReadyRetryTicker
+function TM.Attach() return controller:Attach() end
 
-local function CancelKTReadyRetries()
-    if not ktReadyRetryTicker then return end
-    pcall(ktReadyRetryTicker.Cancel, ktReadyRetryTicker)
-    ktReadyRetryTicker = nil
-end
+function TM.Detach() controller:Detach() end
 
-local function ResumePendingKTAttach()
-    if not attachRequested then return end
-    local attachedNow = TM.Attach()
-    if attachedNow then
-        NotifyAttachSucceeded()
-    end
-end
+function TM.MarkDirty() controller:MarkDirty() end
 
-local function ScheduleKTReadyRetries()
-    if ktReadyRetryTicker then return end
-    if type(C_Timer) ~= "table" or type(C_Timer.NewTicker) ~= "function" then return end
-
-    local retries = 0
-    local maxRetries = 60
-    ktReadyRetryTicker = C_Timer.NewTicker(0.5, function(ticker)
-        retries = retries + 1
-        if not attachRequested or not Host.IsKTLoaded() then
-            ticker:Cancel()
-            ktReadyRetryTicker = nil
-            return
-        end
-        if type(Host.IsKTReady) ~= "function" or Host.IsKTReady() then
-            ticker:Cancel()
-            ktReadyRetryTicker = nil
-            ResumePendingKTAttach()
-            return
-        end
-        if retries >= maxRetries then
-            ticker:Cancel()
-            ktReadyRetryTicker = nil
-            if type(NS.Msg) == "function" then
-                NS.Msg("Tracker dock: Kaliel's Tracker initialization timed out.")
-            end
-        end
-    end)
-end
-
-local function ScheduleAttachRetries()
-    if attachRetryTicker then return end
-    if type(C_Timer) ~= "table" or type(C_Timer.NewTicker) ~= "function" then return end
-
-    local retries = 0
-    local maxRetries = 60  -- 30 seconds at 0.5s intervals
-
-    attachRetryTicker = C_Timer.NewTicker(0.5, function(ticker)
-        retries = retries + 1
-        if not attached or not module then
-            ticker:Cancel()
-            attachRetryTicker = nil
-            return
-        end
-
-        local mgr = Host.GetManager()
-        local container = Host.GetTrackerFrame()
-        if not mgr or not container then
-            if retries >= maxRetries then
-                ticker:Cancel()
-                attachRetryTicker = nil
-            end
-            return
-        end
-
-        if Host.IsActuallyRegistered(mgr, module, container) then
-            -- We're in. Kick a final layout to surface content, then stop.
-            TM.MarkDirty()
-            NotifyAttachSucceeded()
-            ticker:Cancel()
-            attachRetryTicker = nil
-            return
-        end
-
-        if Host.TryRegisterOnce(mgr, module, container) then
-            TM.MarkDirty()
-            NotifyAttachSucceeded()
-            ticker:Cancel()
-            attachRetryTicker = nil
-            return
-        end
-
-        if retries >= maxRetries then
-            ticker:Cancel()
-            attachRetryTicker = nil
-            if type(NS.Msg) == "function" then
-                NS.Msg("Tracker dock: registration retries exhausted.")
-            end
-        end
-    end)
-end
-
-local function ApplyCombatProxy(shouldInstall)
-    if type(CombatProxy) ~= "table" then return end
-    if shouldInstall and not Host.IsKTLoaded() then
-        if type(CombatProxy.Install) == "function" then
-            pcall(CombatProxy.Install)
-        end
-    elseif type(CombatProxy.Uninstall) == "function" then
-        pcall(CombatProxy.Uninstall)
-    end
-end
-
-local function RequestNativeDockWarningPopup()
-    if Host.IsKTLoaded() then return end
-    if type(NS.MaybeShowNativeTrackerWarningPopup) == "function" then
-        NS.MaybeShowNativeTrackerWarningPopup(1)
-    end
-end
-
--- Every successful attach path funnels through here so the Blizzard-only
--- combat-click mitigation, startup warning, and initial layout stay aligned.
-local function FinishAttach()
-    ApplyCombatProxy(true)
-    RequestNativeDockWarningPopup()
-    TM.MarkDirty()
-    return true
-end
-
-function TM.Attach()
-    attachRequested = true
-
-    if Host.IsKTLoaded()
-        and type(Host.IsKTReady) == "function"
-        and not Host.IsKTReady()
-    then
-        ScheduleKTReadyRetries()
-        return false, true
-    end
-    CancelKTReadyRetries()
-
-    if attached then
-        if type(NS.RefreshZygorTrackerViewerHeaderStyle) == "function" then
-            NS.RefreshZygorTrackerViewerHeaderStyle()
-        end
-        -- If we think we're attached but the manager disagrees (e.g. addon
-        -- reload that wiped state but kept the module Frame around somehow),
-        -- re-verify and reattach if needed.
-        local mgr = Host.GetManager()
-        local container = Host.GetTrackerFrame()
-        if not module or not mgr or not container then
-            return false
-        end
-        if not Host.IsActuallyRegistered(mgr, module, container) then
-            if Host.TryRegisterOnce(mgr, module, container) then
-                return FinishAttach()
-            end
-            ScheduleAttachRetries()
-            return false, attachRetryTicker ~= nil
-        end
-        return FinishAttach()
-    end
-
-    local frame = CreateModuleFrame()
-    if not frame then return false end
-    if type(NS.RefreshZygorTrackerViewerHeaderStyle) == "function" then
-        NS.RefreshZygorTrackerViewerHeaderStyle()
-    end
-
-    local mgr = Host.GetManager()
-    if not mgr or type(mgr.SetModuleContainer) ~= "function" then return false end
-
-    local container = Host.GetTrackerFrame()
-    if not container then return false end
-
-    -- Mark intent immediately so retries can proceed even if the first
-    -- registration attempt silently fails.
-    attached = true
-
-    if Host.TryRegisterOnce(mgr, frame, container) then
-        return FinishAttach()
-    else
-        ScheduleAttachRetries()
-        return false, attachRetryTicker ~= nil
-    end
-end
-
-function TM.Detach()
-    attachRequested = false
-    CancelKTReadyRetries()
-    -- Remove the Blizzard-only click overlays on every detach path, including
-    -- the early return below. No native tracker or map function is replaced.
-    ApplyCombatProxy(false)
-
-    if attachRetryTicker then
-        pcall(attachRetryTicker.Cancel, attachRetryTicker)
-        attachRetryTicker = nil
-    end
-
-    if not attached or not module then
-        attached = false
-        return
-    end
-
-    if type(module.Hide) == "function" then
-        pcall(module.Hide, module)
-    end
-    if type(module.MarkBlocksUnused) == "function" then
-        pcall(module.MarkBlocksUnused, module)
-    end
-    if type(module.FreeUnusedBlocks) == "function" then
-        pcall(module.FreeUnusedBlocks, module)
-    end
-
-    local mgr = Host.GetManager()
-    if mgr and type(mgr.GetContainerForModule) == "function" then
-        local c = mgr:GetContainerForModule(module)
-        if c and type(c.RemoveModule) == "function" then
-            pcall(c.RemoveModule, c, module)
-        end
-        if type(mgr.moduleToContainerMap) == "table" then
-            mgr.moduleToContainerMap[module] = nil
-        end
-    end
-
-    attached = false
-end
-
-function TM.MarkDirty()
-    if not module then return end
-    -- The module mixin flags this module and lets its active tracker host
-    -- schedule the corresponding container layout.
-    if type(module.MarkDirty) == "function" then
-        pcall(module.MarkDirty, module)
-    end
-end
-
-function TM.IsAttached()
-    if attached ~= true or not module then return false end
-    return Host.IsActuallyRegistered(Host.GetManager(), module, Host.GetTrackerFrame())
-end
+function TM.IsAttached() return controller:IsAttached() end
 
 function TM.SetAttachSucceededCallback(callback)
-    attachSucceededCallback = type(callback) == "function" and callback or nil
-end
-
-if type(Host.RegisterKTReadyCallback) == "function" then
-    Host.RegisterKTReadyCallback(ResumePendingKTAttach)
+    controller.onAttached = type(callback) == "function" and callback or nil
 end

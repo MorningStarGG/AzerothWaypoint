@@ -1,0 +1,16 @@
+{
+    "runtime.version": "Lua 5.1",
+    "runtime.builtin": {
+        "basic": "default", "debug": "default", "io": "default", "math": "default",
+        "os": "default", "package": "default", "string": "default", "table": "default", "utf8": "default"
+    },
+    "workspace.library": [],
+    "workspace.ignoreDir": ["*.lua"],
+    "diagnostics.ignoredFiles": "Opened",
+    "diagnostics.globals": [
+        "APRData", "AzerothWaypointNS", "AzerothWaypointCharDB", "AWPManualQueuePrompt", "AWPProfileTransfer",
+        "C_GossipInfo", "C_Item", "C_QuestLog", "C_Timer", "CreateFrame", "CurrentTitle", "DaylightUI",
+        "DugisGuideUser", "Enum", "InCombatLockdown",
+        "MapzerothAddon", "Polestar_NavEngine", "StaticPopupDialogs", "UIParent"
+    ]
+}

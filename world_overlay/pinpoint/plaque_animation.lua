@@ -1,8 +1,8 @@
-local NS              = _G.AzerothWaypointNS
-local M               = NS.Internal.WorldOverlay
-local Plaques         = M.Plaques -- available: pinpoint_plaques.lua loads first
-local ROOT_PATH       = "Interface\\AddOns\\AzerothWaypoint\\media\\world-overlay\\"
-local PLAQUE_PATH     = ROOT_PATH .. "plaques\\"
+local NS                               = _G.AzerothWaypointNS
+local M                                = NS.Internal.WorldOverlay
+local Plaques                          = M.Plaques -- available: pinpoint_plaques.lua loads first
+local ROOT_PATH                        = "Interface\\AddOns\\AzerothWaypoint\\media\\world-overlay\\"
+local PLAQUE_PATH                      = ROOT_PATH .. "plaques\\"
 
 -- ============================================================
 -- Animation spec registry
@@ -18,14 +18,14 @@ local PLAQUE_PATH     = ROOT_PATH .. "plaques\\"
 -- No other files need to change.
 -- ============================================================
 
-local ANIMATION_SPECS = {
+local ANIMATION_SPECS                  = {
 
     GlowingGems = {
         {
             -- Type "corner_gems": four corner textures placed at each panel corner,
             -- with optional glow overlays that pulse via render.lua.
             -- Gem textures use their own BLP (may differ from the panel BLP in path
-            -- and dimensions); UVs are normalized against animSpec.texW/texH.
+            -- and dimensions), UVs are normalized against animSpec.texW/texH.
             type    = "corner_gems",
             texture = PLAQUE_PATH .. "GlowingGemsPlaque_Gems",
             texW    = 512,
@@ -93,48 +93,15 @@ local ANIMATION_SPECS = {
 }
 
 -- ============================================================
--- Internal helpers (module-local, not exported)
--- Note: these small utilities are duplicated from pinpoint_plaques.lua
--- intentionally — each file is self-contained, avoiding a shared dependency
--- on a third utility module for three ~5-line functions.
+-- Animated and static layers share the plaque renderer's texture settings.
 -- ============================================================
 
-local function ConfigurePinpointTextureSampling(texture)
-    if not texture then
-        return
-    end
+local ConfigurePinpointTextureSampling = Plaques.ConfigurePinpointTextureSampling
 
-    texture:SetTexelSnappingBias(0)
-    texture:SetSnapToPixelGrid(false)
-end
-
-local function SetCompositeVertexColor(self, r, g, b, a)
-    local textures = self and self.__awpTextures or nil
-    if type(textures) ~= "table" then
-        return
-    end
-
-    for _, texture in ipairs(textures) do
-        texture:SetVertexColor(r or 1, g or 1, b or 1, a or 1)
-    end
-end
+local SetCompositeVertexColor          = Plaques.SetCompositeVertexColor
 
 -- Creates a single texture from an atlas, normalizing UVs against texW/texH.
-local function CreateAtlasTexture(parent, texW, texH, atlasTexture, drawLayer, blendMode, srcL, srcR, srcT, srcB)
-    local texture = parent:CreateTexture(nil, drawLayer)
-    texture:SetTexture(atlasTexture)
-    texture:SetTexCoord(
-        srcL / texW,
-        srcR / texW,
-        srcT / texH,
-        srcB / texH
-    )
-    ConfigurePinpointTextureSampling(texture)
-    if blendMode then
-        texture:SetBlendMode(blendMode)
-    end
-    return texture
-end
+local CreateAtlasTexture               = Plaques.CreateAtlasTexture
 
 -- ============================================================
 -- Animation type builders
@@ -437,7 +404,7 @@ M.PlaqueAnimations = {
         updateGem(gemsFrame.TopRight, texW - srcR, texW - srcL, srcT, srcB, "TOPRIGHT", -offsetX, -offsetY)
         updateGem(gemsFrame.BottomLeft, srcL, srcR, texH - srcB, texH - srcT, "BOTTOMLEFT", offsetX, offsetY)
         updateGem(gemsFrame.BottomRight, texW - srcR, texW - srcL, texH - srcB, texH - srcT, "BOTTOMRIGHT", -offsetX,
-        offsetY)
+            offsetY)
 
         result.Gems = gemsFrame
 
@@ -481,3 +448,49 @@ M.PlaqueAnimations = {
         return ANIMATION_SPECS[plaqueType]
     end,
 }
+
+local function CreateSampleEffects(panel, plaqueType, specs)
+    local host = CreateFrame("Frame", nil, panel)
+    host:SetAllPoints(panel)
+    local effects = M.PlaqueAnimations.CreateAnimations(host, host, plaqueType)
+
+    -- Hold the effects at their resting brightness so previews need no update script.
+    for _, spec in ipairs(specs) do
+        if effects.Overlay and spec.pulse then
+            effects.Overlay:SetAlpha(spec.pulse.base)
+        end
+        if effects.GlowTL and spec.glow then
+            host.glows = { effects.GlowTL, effects.GlowTR, effects.GlowBL, effects.GlowBR }
+            for _, glow in ipairs(host.glows) do
+                glow:SetAlpha(spec.glow.base)
+            end
+        end
+    end
+    return host
+end
+
+function M.PlaqueAnimations.ShowSampleEffects(panel, plaqueType, useDefaults)
+    local specs = ANIMATION_SPECS[plaqueType]
+    local host
+    if specs then
+        panel._sampleEffectsByType = panel._sampleEffectsByType or {}
+        host = panel._sampleEffectsByType[plaqueType]
+        if not host then
+            host = CreateSampleEffects(panel, plaqueType, specs)
+            panel._sampleEffectsByType[plaqueType] = host
+        end
+    end
+
+    local previous = panel._visibleSampleEffects
+    if previous ~= host then
+        if previous then previous:Hide() end
+        if host then host:Show() end
+        panel._visibleSampleEffects = host
+    end
+    if host and host.glows then
+        local show = useDefaults or NS.GetWorldOverlaySetting("worldOverlayPinpointAnimatePlaqueEffects") ~= false
+        for _, glow in ipairs(host.glows) do
+            glow:SetShown(show)
+        end
+    end
+end

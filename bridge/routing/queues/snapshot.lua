@@ -1,3 +1,10 @@
+-- ============================================================
+-- Queue snapshots and selection
+-- ============================================================
+--
+-- Provides queue snapshots and selection for the queue panel and resolves
+-- queue names for commands.
+
 local NS = _G.AzerothWaypointNS
 local state = NS.State
 local Queue = NS.RouteQueueInternal
@@ -18,7 +25,7 @@ function NS.GetQueuePanelSnapshot()
     end
     local stack = Queue.GetTransientQueueStack()
     local guideQueues = {}
-    local activeGuideQueue = type(Queue.GetActiveGuideQueue) == "function" and Queue.GetActiveGuideQueue() or Queue.GetGuideQueueState()
+    local activeGuideQueue = Queue.GetActiveGuideQueue()
     if type(Queue.GetGuideQueueList) == "function" then
         local list = Queue.GetGuideQueueList()
         for index = 1, #list do
@@ -30,7 +37,6 @@ function NS.GetQueuePanelSnapshot()
         activeManualQueueID = activeManualQueueID,
         activeGuideQueueID = type(activeGuideQueue) == "table" and activeGuideQueue.id or nil,
         selectedKey = state.routing.queueUIState and state.routing.queueUIState.selectedKey or nil,
-        guideQueue = Queue.DeepCopy(activeGuideQueue or Queue.GetGuideQueueState()),
         guideQueues = guideQueues,
         manualQueues = {},
         transientQueue = nil,
@@ -122,4 +128,3 @@ function NS.ResolveQueueToken(token)
 
     return nil
 end
-
