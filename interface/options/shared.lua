@@ -17,6 +17,7 @@ local TWITCH_COPY_POPUP = "AWP_COPY_TWITCH_URL"
 local RELOAD_RECOMMENDED_POPUP = "AWP_RELOAD_RECOMMENDED"
 local WAYPOINT_UI_RECOMMEND_POPUP = "AWP_RECOMMEND_NATIVE_OVERLAY"
 local WAYPOINT_UI_ADDON_NAME = "WaypointUI"
+local ELLESMERE_MARKER_POPUP = "AWP_RECOMMEND_ELLESMERE_MARKER"
 local NATIVE_TRACKER_WARNING_POPUP = "AWP_NATIVE_TRACKER_WARNING"
 local ZYGOR_CONFLICT_POPUP = "AWP_ZYGOR_CONFLICT"
 local ZYGOR_WAYPOINT_ADDON_NAME = "ZygorWaypoint"
@@ -242,8 +243,56 @@ function NS.MaybeAnnounceWaypointUIRecommendation()
     end
 
     NS.Msg(
-    "WaypointUI is still enabled. AWP's 3D overlay is already active so you can compare both live. Disable WaypointUI when you're ready for the better native setup.")
+        "WaypointUI is still enabled. AWP's 3D overlay is already active so you can compare both live. Disable WaypointUI when you're ready for the better native setup.")
 end
+
+local function ReadEllesmereMarker()
+    local ui = rawget(_G, "EllesmereUI")
+    local marker = type(ui) == "table" and ui._InGameNavigation
+    if type(marker) ~= "table" or type(marker.Get) ~= "function" or type(marker.Set) ~= "function" then return end
+    local ok, enabled = pcall(marker.Get, "enabled")
+    if ok and type(enabled) == "boolean" then return marker, enabled end
+end
+
+local function DisableEllesmereMarker()
+    if not NS.IsWoWForever() or not NS.IsWorldOverlayEnabled() then return end
+    local marker, enabled = ReadEllesmereMarker()
+    if enabled == false then return end
+    if marker and not InCombatLockdown() and pcall(marker.Set, false) then
+        local _, remaining = ReadEllesmereMarker()
+        if remaining == false then
+            NS.Msg("Ellesmere's world marker is off.")
+            return
+        end
+    end
+    NS.Msg(
+        "To turn off Ellesmere's marker, open Forever Essentials > General > World Map and turn off Show Waypoints in the World.")
+end
+
+local ellesmereMarkerOffered
+NS.MaybeShowEllesmereMarkerRecommendationPopup = Notices.RegisterArrow(ELLESMERE_MARKER_POPUP, {
+    check = function()
+        if ellesmereMarkerOffered or not NS.IsWoWForever() or not NS.IsWorldOverlayEnabled()
+            or NS.HasDismissedEllesmereMarkerPrompt() then
+            return false
+        end
+        return select(2, ReadEllesmereMarker()) == true
+    end,
+    deferCombat = true,
+    dialog = {
+        text =
+        "AzerothWaypoint and Ellesmere can both show a marker for the same waypoint. Turn off Ellesmere's Show Waypoints in the World setting for this account?",
+        button1 = "Turn Off Ellesmere Marker",
+        button2 = "Remind Me Later",
+        button3 = "Don't Remind Me Again",
+        timeout = 0,
+        whileDead = 1,
+        hideOnEscape = 1,
+        OnAccept = function() NS.After(0, DisableEllesmereMarker) end,
+        OnAlt = function() NS.DismissEllesmereMarkerPrompt() end,
+    },
+    onShown = function() ellesmereMarkerOffered = true end,
+})
 
 local function GetZygorProfile()
     local Z = type(NS.ZGV) == "function" and NS.ZGV() or rawget(_G, "ZygorGuidesViewer") or rawget(_G, "ZGV")
@@ -303,7 +352,8 @@ function NS.MaybeAnnounceZygorArrowRecommendation(attempt)
         return
     end
 
-    NS.Msg("Zygor's Waypoint Arrow is enabled. To avoid duplicate arrows, open /zygor options > Waypoint Arrow and turn off Enable Waypoint Arrow.")
+    NS.Msg(
+        "Zygor's Waypoint Arrow is enabled. To avoid duplicate arrows, open /zygor options > Waypoint Arrow and turn off Enable Waypoint Arrow.")
 end
 
 NS.MaybeShowZygorArrowRecommendationPopup = Notices.RegisterArrow(ZYGOR_ARROW_RECOMMEND_POPUP, {
@@ -398,8 +448,11 @@ NS.MaybeShowDugiArrowRecommendationPopup = Notices.RegisterArrow(DUGI_ARROW_RECO
         preferredIndex = GetStaticPopupPreferredIndex(),
         OnAccept = function()
             local ok, reason = DisableDugiArrow()
-            if ok then NS.Msg("Dugi Waypoint Arrow disabled.")
-            else NS.Msg("Unable to disable Dugi Waypoint Arrow:", tostring(reason or "unknown error")) end
+            if ok then
+                NS.Msg("Dugi Waypoint Arrow disabled.")
+            else
+                NS.Msg("Unable to disable Dugi Waypoint Arrow:", tostring(reason or "unknown error"))
+            end
         end,
     },
     onShown = function() if type(NS.MarkDugiArrowPromptShown) == "function" then NS.MarkDugiArrowPromptShown() end end,
@@ -438,7 +491,8 @@ local function EnsureZygorConflictPopup()
             if ok then
                 ReloadUI()
             else
-                NS.Msg("|cffff4040Unable to disable ZygorWaypoint automatically.|r Delete the ZygorWaypoint folder from Interface/AddOns to resolve the conflict.")
+                NS.Msg(
+                    "|cffff4040Unable to disable ZygorWaypoint automatically.|r Delete the ZygorWaypoint folder from Interface/AddOns to resolve the conflict.")
             end
         end,
     }
@@ -465,7 +519,8 @@ function NS.StartZygorWaypointConflictReminders()
         if not IsZygorWaypointConflictActive() then
             return
         end
-        NS.Msg("|cffff4040WARNING:|r 'ZygorWaypoint' is still installed and conflicting with AzerothWaypoint. Disable and delete the ZygorWaypoint folder from Interface/AddOns.")
+        NS.Msg(
+            "|cffff4040WARNING:|r 'ZygorWaypoint' is still installed and conflicting with AzerothWaypoint. Disable and delete the ZygorWaypoint folder from Interface/AddOns.")
     end)
 end
 
@@ -583,7 +638,8 @@ local function EnsureNativeTrackerWarningPopup()
                 NS.SetGuideTrackerViewerSetting("nativeDockWarningPopup", false)
             end
             if type(NS.Msg) == "function" then
-                NS.Msg("Blizzard native Tracker Viewer popup disabled. It can be restored in Zygor > Tracker Viewer settings.")
+                NS.Msg(
+                    "Blizzard native Tracker Viewer popup disabled. It can be restored in Zygor > Tracker Viewer settings.")
             end
         end,
     }
@@ -728,19 +784,22 @@ local function CreateRoutingBackendOptions()
             return "not_installed", "not installed", missingNames
         end
         if installed < total then
-            return "partly_installed", FormatDependencyStatus(missingNames, "missing", "missing dependencies"), missingNames
+            return "partly_installed", FormatDependencyStatus(missingNames, "missing", "missing dependencies"),
+                missingNames
         end
         if enabled == 0 then
             return "disabled", "disabled", disabledNames
         end
         if enabled < total then
-            return "partly_disabled", FormatDependencyStatus(disabledNames, "disabled", "dependencies disabled"), disabledNames
+            return "partly_disabled", FormatDependencyStatus(disabledNames, "disabled", "dependencies disabled"),
+                disabledNames
         end
         if loaded == 0 then
             return "not_loaded", "not loaded", unloadedNames
         end
         if loaded < total then
-            return "partly_loaded", FormatDependencyStatus(unloadedNames, "not loaded", "dependencies not loaded"), unloadedNames
+            return "partly_loaded", FormatDependencyStatus(unloadedNames, "not loaded", "dependencies not loaded"),
+                unloadedNames
         end
         return "unavailable", "unavailable", {}
     end
@@ -846,7 +905,7 @@ local function CreateWorldOverlayColorModeOptions()
     local container = CreateControlTextContainer()
     container:Add(C.WORLD_OVERLAY_COLOR_AUTO, "Auto")
     container:Add(C.WORLD_OVERLAY_COLOR_CUSTOM, "Custom")
-    container:Add(C.WORLD_OVERLAY_COLOR_BLUE, "Blue")    
+    container:Add(C.WORLD_OVERLAY_COLOR_BLUE, "Blue")
     container:Add(C.WORLD_OVERLAY_COLOR_CYAN, "Cyan")
     container:Add(C.WORLD_OVERLAY_COLOR_GOLD, "Gold")
     container:Add(C.WORLD_OVERLAY_COLOR_GRAY, "Gray")
@@ -961,9 +1020,10 @@ M.CreateWorldOverlayInfoOptions = CreateWorldOverlayInfoOptions
 M.CreateWorldOverlayColorModeOptions = CreateWorldOverlayColorModeOptions
 function M.CreateGuideTrackerViewerColorModeOptions()
     local options = CreateWorldOverlayColorModeOptions()
-    table.insert(options, 2, {value="theme", text="UI colors"})
+    table.insert(options, 2, { value = "theme", text = "UI colors" })
     return options
 end
+
 M.CreateWorldOverlayContextDisplayOptions = CreateWorldOverlayContextDisplayOptions
 M.CreateWorldOverlayBeaconStyleOptions = CreateWorldOverlayBeaconStyleOptions
 M.CreateWorldOverlayPlaqueTypeOptions = CreateWorldOverlayPlaqueTypeOptions

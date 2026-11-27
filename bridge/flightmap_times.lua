@@ -153,16 +153,34 @@ local function GetEllesmereFlightData()
     local addon = rawget(_G, "EllesmereUI")
     if type(addon) ~= "table" then return nil end
     local timer, routes = addon._FlightTimer, addon._FlightTimerRoutes
-    if type(timer) == "table" and type(timer.Get) == "function" and type(routes) == "table" then
-        return routes, timer.Get
+    if type(timer) == "table" and type(timer.Get) == "function" then
+        return timer.Get, type(routes) == "table" and routes or nil
     end
 end
 
 local function GetFrequentFlierMultiplier()
-    if not C_Traits or not C_Traits.GetConfigIDByTreeID or not C_Traits.GetNodeInfo then return 1 end
-    local configID = PositiveNumber(C_Traits.GetConfigIDByTreeID(ADVENTURE_LEGACY_TREE_ID))
-    local node = configID and C_Traits.GetNodeInfo(configID, FREQUENT_FLIER_NODE_ID)
-    return node and PositiveNumber(node.activeRank) and 1.2 or 1
+    if not times.ellesmereMultiplier then
+        local multiplier = 1
+        if C_Traits and C_Traits.GetConfigIDByTreeID and C_Traits.GetNodeInfo then
+            local configID = PositiveNumber(C_Traits.GetConfigIDByTreeID(ADVENTURE_LEGACY_TREE_ID))
+            local node = configID and C_Traits.GetNodeInfo(configID, FREQUENT_FLIER_NODE_ID)
+            if node and PositiveNumber(node.activeRank) then multiplier = 1.2 end
+        end
+        times.ellesmereMultiplier = multiplier
+    end
+    return times.ellesmereMultiplier
+end
+
+local function GetEllesmereRecordedTime(getSetting, path)
+    local records = times.ellesmereRecords
+    if records == nil then
+        local ok, value = pcall(getSetting, "times")
+        records = ok and type(value) == "table" and value or false
+        times.ellesmereRecords = records
+    end
+    -- Ellesmere records the entire directed route at the speed without the perk.
+    local seconds = records and PositiveNumber(records[table.concat(path, ":")])
+    return seconds and PositiveNumber(seconds / GetFrequentFlierMultiplier()) or nil
 end
 
 local function ReadEllesmereSpeed(getSetting)
@@ -212,10 +230,14 @@ local function ResolveTaxiTime(window, slotIndex, sourceNodeID, destinationNodeI
     local daylightGuess = GetDaylightGuess(daylight)
     local farstrider = NS.RoutingBackend_Farstrider
     local hasFarstriderTimes = farstrider and farstrider.HasTaxiTimes and farstrider.HasTaxiTimes()
-    local routes, getSetting = GetEllesmereFlightData()
-    if not (daylightGuess or hasFarstriderTimes or routes) then return nil end
+    local getSetting, routes = GetEllesmereFlightData()
+    if not (daylightGuess or hasFarstriderTimes or getSetting) then return nil end
     if not inFlight then path = TaxiWindow.GetRouteNodePath(window, slotIndex, destinationNodeID) end
     if not path then return nil end
+    if getSetting then
+        seconds = GetEllesmereRecordedTime(getSetting, path)
+        if seconds then return seconds, "EllesmereUI", false end
+    end
 
     if daylightGuess then
         seconds = EstimateDaylightTime(daylightGuess, path)
@@ -225,16 +247,21 @@ local function ResolveTaxiTime(window, slotIndex, sourceNodeID, destinationNodeI
         seconds = farstrider.GetTaxiTime(path)
         if seconds then return seconds, "FarstriderLib", true end
     end
-    if routes and getSetting then
+    if routes then
         seconds = EstimateEllesmereTime(routes, getSetting, path)
         if seconds then return seconds, "EllesmereUI", true end
     end
 end
 
+local function ResetWindow(window)
+    times.window, times.cache = window, window and {} or nil
+    times.ellesmereRecords, times.ellesmereMultiplier, times.ellesmereSpeed = nil, nil, nil
+end
+
 function NS.GetFlightMapTaxiTime(slotIndex, destinationNodeID)
     local window = TaxiWindow.GetSnapshot()
     if not window then return nil end
-    if times.window ~= window then times.window, times.cache, times.ellesmereSpeed = window, {}, nil end
+    if times.window ~= window then ResetWindow(window) end
 
     slotIndex = tonumber(slotIndex)
     local slotNodeID = slotIndex and GetNodeIDForSlot(window, slotIndex)
@@ -297,6 +324,6 @@ function NS.InitializeFlightMapTimes()
     if times.initialized then return end
     times.initialized = true
     TaxiWindow.Subscribe(function(frame)
-        if not frame then times.window, times.cache, times.ellesmereSpeed = nil, nil, nil end
+        if not frame then ResetWindow(nil) end
     end)
 end

@@ -161,13 +161,26 @@ scroll:GetScript("OnMouseWheel")(scroll, -2)
 expect(scroll:GetVerticalScroll() == 80, "Wheel clamped to Ellesmere's smaller quest-only range")
 expect(renders == oldRenders and a.updates + b.updates == oldUpdates, "Scrolling rebuilt guide/quest content")
 expect(interactionRefreshes >= 2, "Native item-button/click-overlay refresh was bypassed")
+local combinedContent, heightWrites = scroll:GetScrollChild(), 0
+local originalCombinedHeight = combinedContent.SetHeight
+function combinedContent:SetHeight(height)
+    heightWrites = heightWrites + 1
+    originalCombinedHeight(self, height)
+end
+local beforeInteractions = interactionRefreshes
 for index = 1, 100 do nativeRefresh(80) end
-expect(#pending == 1, "Native refresh burst was not coalesced")
-flush()
+expect(heightWrites == 0 and #pending == 0, "Same-height quest renders touched combined geometry")
+expect(interactionRefreshes == beforeInteractions + 100, "Quest renders skipped native interaction updates")
 expect(a.updates + b.updates == oldUpdates, "Unchanged native refresh rebuilt guide rows")
 expect(scroll:GetVerticalScroll() == 80, "Native refresh reset combined scroll position")
-nativeRefresh(0); flush()
+nativeRefresh(0)
+expect(heightWrites == 1 and #pending == 0, "A quest-only height change queued a guide layout")
 expect(scroll:GetScrollChild():GetHeight() == 132 and scroll:GetVerticalScroll() == 4, "Empty quest list broke guide content or clamping")
+quest:SetWidth(230)
+expect(#pending == 1, "A real native width change did not request layout")
+flush()
+expect(a:GetWidth() == 230 and b:GetWidth() == 230, "The guides did not receive the new native width")
+quest:SetWidth(238); flush()
 a.fullHeight, a.isDirty = 300, true
 target:MarkDirty(); flush()
 expect(scroll:GetScrollChild():GetHeight() == 362 and root:GetHeight() == 160, "Guide-only overflow incorrect")
@@ -308,7 +321,7 @@ if file then
     local body = assert(source:match("local function Render%(%)%s*(.-)\nend%s*\n%s*function Queue%(%)"), "Installed Render body changed")
     local function noop() end
     local text = { SetText = noop }
-    local sourceHeight = 80
+    local sourceHeight, itemViewportHeight, itemScrollOffset = 80, nil, nil
     local environment = setmetatable({
         frame = root, child = quest, Cfg = EllesmereUIQuestTracker.Cfg,
         HideOverlay = noop, HoverWanted = function() return false end,
@@ -325,7 +338,11 @@ if file then
         AddRecipes = function(y) return y + sourceHeight end,
         header = { count = text, toggle = text },
         UpdateThumb = function() nativeWheel(scroll, 0) end,
-        UpdateVisibility = noop, SyncFilterToggle = noop, SyncItems = noop, ArmTick = noop, cdRegistered = false,
+        UpdateVisibility = noop, SyncFilterToggle = noop, ArmTick = noop, cdRegistered = false,
+        SyncItems = function()
+            itemViewportHeight = scroll:GetScrollChild():GetHeight()
+            itemScrollOffset = scroll:GetVerticalScroll()
+        end,
     }, { __index = _G })
     local chunk = assert(loadstring("return function()\n" .. body .. "\nend", "installed Ellesmere Render"))
     setfenv(chunk, environment)
@@ -339,6 +356,8 @@ if file then
     expect(scroll:GetVerticalScroll() == offset, "Actual renderer reset shared scrolling")
     sourceHeight = 0; render(); flush()
     expect(scroll:GetScrollChild():GetHeight() == 306, "Actual empty renderer discarded guide content")
+    expect(itemViewportHeight == 306 and itemScrollOffset == scroll:GetVerticalScroll(),
+        "Native item positioning saw stale shared geometry")
     host.RemoveModule(a); flush()
 end
 print("Ellesmere combined layout, scroll interactions, provider lifecycle and restoration fixtures passed")

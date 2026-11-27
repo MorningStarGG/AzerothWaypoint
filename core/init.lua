@@ -147,6 +147,8 @@ f:SetScript("OnEvent", function(_, ev, arg1, arg2)
             SafeCall(NS.RefreshMinimapButton)
             NS.Msg("AzerothWaypoint loaded. Use /awp for commands.")
             if started then state.init.addonLoadedMS = (GetTimePreciseSec() - started) * 1000 end
+        elseif arg1 == "EllesmereUIForeverEssentials" and state.init.playerLoggedIn then
+            SafeCall(NS.MaybeShowEllesmereMarkerRecommendationPopup, 1)
         end
     elseif ev == "PLAYER_LOGIN" then
         local started = GetTimePreciseSec and GetTimePreciseSec()
@@ -174,6 +176,7 @@ f:SetScript("OnEvent", function(_, ev, arg1, arg2)
             end)
             NS.After(startupHelpPage and 4.0 or 0.35, function()
                 SafeCall(NS.MaybeShowWaypointUIRecommendationPopup, 1)
+                SafeCall(NS.MaybeShowEllesmereMarkerRecommendationPopup, 1)
             end)
             NS.After(0.5, function()
                 SafeCall(NS.MaybeShowZygorWaypointConflictPopup)

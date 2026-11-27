@@ -77,6 +77,7 @@ for _, client in ipairs({"retail","forever"}) do
     db.minimapButtonPosition = {point="CENTER",relPoint="CENTER",x=1,y=2}
     db.awpPanelPos = {point="CENTER",relPoint="CENTER",x=9,y=10}
     db._meta = {lastAddonVersion="4.2.0",overviewShown=true,retired=true}
+    NS.DismissEllesmereMarkerPrompt()
     db.genericAddonBlizzardTakeoverAllowlist = {"ExampleAddon"}
     for _, key in ipairs({"daylightAppearance","ellesmereAppearance","elvuiAppearance"}) do
         db[key] = {enabled=false,retired=true,surfaces={
@@ -110,6 +111,7 @@ for _, client in ipairs({"retail","forever"}) do
     expect(db.guideTrackerViewerDugiActions.types.friendly == false)
     expect(NS.GetGuideActionSettings("dugi").groupPosition == "above", "Cleanup dropped grouped actions position")
     expect(db._meta.lastAddonVersion == "4.2.0" and db._meta.retired == nil)
+    expect(NS.HasDismissedEllesmereMarkerPrompt(), "Saved cleanup discarded the account-wide marker choice")
     expect(char.rxpArrowPromptShown and char.pendingOverviewReplay and char.guideTrackerViewerActiveSlots.dugi == 3)
     expect(#char.guideTrackerViewerOpenGuides.dugi == 3 and char.guideTrackerViewerOpenGuides.dugi[2] == "")
     expect(not char.retired and not char.guideTrackerViewerActiveSlots.unknown and not char.guideTrackerViewerOpenGuides.unknown)

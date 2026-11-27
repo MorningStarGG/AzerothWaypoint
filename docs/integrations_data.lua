@@ -420,9 +420,10 @@ local INTEGRATIONS = {
         addons = { "EllesmereUIForeverEssentials" },
         url = "https://www.curseforge.com/wow/addons/ellesmereui",
         foreverOnly = true,
-        summary = "Provides estimated flight times for the AWP Taxi List on WoW Forever.",
+        summary = "Provides recorded and estimated flight times for the AWP Taxi List on WoW Forever.",
         bullets = {
-            "Estimates travel duration using flight path distances and accounts for your character's Frequent Flier perk.",
+            "Uses Ellesmere's recorded time for the current route when available. Distance-based estimates show a ~.",
+            "Accounts for your character's Frequent Flier perk.",
         },
     },
     {

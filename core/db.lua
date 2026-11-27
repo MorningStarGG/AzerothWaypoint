@@ -453,8 +453,11 @@ for _, provider in ipairs(C.GUIDE_PROVIDERS) do
             { kind = "number", min = size.min, max = size.max, integer = true })
     end
 end
-savedSchemas.account._meta = Record({ lastAddonVersion = Primitive("string"), overviewShown = Primitive("boolean") },
-    true)
+savedSchemas.account._meta = Record({
+    lastAddonVersion = Primitive("string"),
+    overviewShown = Primitive("boolean"),
+    ellesmereMarkerPromptDismissed = Primitive("boolean"),
+}, true)
 savedSchemas.account.activeGuideProvider = { kind = "string", validate = ProviderKey }
 savedSchemas.account.activeRouteSource = { kind = "string", values = { manual = true, guide = true } }
 savedSchemas.account.manualAuthority = Primitive("table")
@@ -886,6 +889,14 @@ end
 
 function NS.MarkWaypointUIPromptShown()
     GetCharDB().waypointUIPromptVersion = NS.VERSION
+end
+
+function NS.HasDismissedEllesmereMarkerPrompt()
+    return GetDBMeta().ellesmereMarkerPromptDismissed == true
+end
+
+function NS.DismissEllesmereMarkerPrompt()
+    GetDBMeta().ellesmereMarkerPromptDismissed = true
 end
 
 function NS.HasSeenZygorArrowPrompt()

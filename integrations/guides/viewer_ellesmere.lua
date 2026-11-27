@@ -288,9 +288,12 @@ local function Start()
         hooksecurefunc(quest, "SetHeight", function(self, height)
             local active = state
             if not active or active.quest ~= self then return end
-            active.questHeight = height > 1 and height or 0
+            local questHeight = height > 1 and height or 0
+            if active.questHeight == questHeight then return end
+            active.questHeight = questHeight
+            -- Ellesmere lays out its item buttons after this call. Update their
+            -- viewport now. Quest height alone leaves the guide layout valid.
             PositionContent(active)
-            ScheduleLayout()
         end)
         hooksecurefunc(quest, "SetWidth", function(self, width)
             if state and state.quest == self and state.width ~= width then ScheduleLayout() end
